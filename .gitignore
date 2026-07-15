@@ -6,6 +6,7 @@ node_modules/
 dist/
 out/
 release/
+.build/
 
 # Electron builder (for packaged apps)
 *.dmg

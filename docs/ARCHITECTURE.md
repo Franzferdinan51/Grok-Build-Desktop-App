@@ -2,25 +2,25 @@
 
 ## Rule zero
 
-**Grok Build is the coding-agent backend.** Electron and Solid are the desktop client around it; they do not replace the agent, create a parallel orchestration backend, or pretend Grok Build exposes an API it does not document.
+**Grok Build is the coding-agent backend.** The canonical desktop client is now the vendored MIT OpenClaw macOS application. It supplies the desktop information architecture; it does not replace Grok Build with a parallel coding agent.
 
 ```text
-Solid renderer
-  │ secure contextBridge IPC
-Electron main process
-  ├─ GrokBuildBackend ── spawn documented headless Grok Build command
-  │       grok -p <prompt> --cwd <folder> --output-format streaming-json
-  ├─ TelegramBridge ── Telegram Bot API (encrypted local credential)
-  └─ local settings ── electron-store
+OpenClaw macOS (SwiftUI/AppKit) — canonical UI base
+  ├─ dashboard, channels, skills, schedules, approvals, settings, gateway health
+  └─ GrokBuildCodingView
+       └─ GrokBuildBackend ── spawn documented headless Grok Build command
+            grok -p <prompt> --cwd <folder> --output-format streaming-json
+
+Electron/Solid remains in `packages/` as a migration reference; it is not the
+canonical product path.
 ```
 
 ## Execution flow
 
-1. User selects a workspace and enters a coding task.
-2. Renderer invokes `backend:run`; it has no direct Node, filesystem, token, or child-process access.
-3. `GrokBuildBackend` starts `grok` with the upstream-documented flags.
-4. Each newline from `streaming-json` is parsed and forwarded as a constrained `backend:event` to the renderer.
-5. The UI shows text, thoughts, completion, and errors without exposing Grok credentials.
+1. User selects a workspace and enters a coding task in the native Grok Build Coding window.
+2. `GrokBuildBackend` starts `grok` with the upstream-documented flags.
+3. Each newline from `streaming-json` is presented in the native task output.
+4. The UI shows output, completion, and errors without exposing Grok credentials.
 
 This is deliberately a task-process model. Grok Build’s upstream repository also contains ACP support, but this app does not claim an undocumented ACP wire contract. ACP can become a later adapter only after compatibility testing against a released Grok Build version.
 
@@ -36,12 +36,14 @@ The default run does not add `--yolo`. The visible “Auto-approve tools” swit
 
 ## Telegram
 
-Telegram is an optional bot integration, not an implicit data sink:
+Telegram is an optional channel integration, not an implicit data sink. OpenClaw's
+native channel architecture is the foundation. The direct Bot API bridge in the
+Electron transition prototype remains transitional until its allowlist and
+credential flow are mapped into the native channel settings:
 
-- `getMe` validates a token before it is persisted.
-- token material is encrypted using Electron `safeStorage`; the renderer never reads it back.
-- outbound sends are explicit IPC calls.
-- inbound task routing needs a future allowlist and is intentionally disabled in this foundation.
+- token validation and credential storage must remain explicit and local.
+- outbound sends must be user-initiated or covered by an explicit allowlist.
+- inbound task routing stays disabled until an allowlist is finished.
 
 ## Source audit
 
