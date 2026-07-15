@@ -3,14 +3,14 @@
  */
 
 // Re-export ElectronAPI from preload for use in other packages
-export type { ElectronAPI, GrokStatus } from "../../desktop/src/preload/index"
+export type { ElectronAPI, BackendStatus, TelegramStatus } from "../../desktop/src/preload/index"
 
 export type Provider = "grok" | "lmstudio" | "openai" | "codex"
 
 export type AppSettings = {
   activeProvider: Provider
   thinkingEnabled: boolean
-  fullAuthEnabled: boolean
+  autoApproveTools: boolean
   theme: "dark" | "light"
 }
 

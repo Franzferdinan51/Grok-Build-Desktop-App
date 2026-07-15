@@ -5,9 +5,9 @@
  * Downloads from https://x.ai/cli/install.sh if not found.
  */
 
-const { execSync } = require("child_process")
-const path = require("path")
-const fs = require("fs")
+import { execSync } from "node:child_process"
+import path from "node:path"
+import fs from "node:fs"
 
 const GROK_CLI_NAME = process.platform === "win32" ? "grok.exe" : "grok"
 const SEARCH_PATHS = [

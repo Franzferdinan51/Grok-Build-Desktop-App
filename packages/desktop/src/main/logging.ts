@@ -32,4 +32,7 @@ export function initLogging() {
   return log
 }
 
-export { log, log as write }
+export { log }
+export function write(level: "info" | "error" | "debug", message: string): void {
+  log[level](message)
+}

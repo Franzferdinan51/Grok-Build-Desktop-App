@@ -24,7 +24,7 @@ const config: Configuration = {
     target: ["dmg", "zip"],
     artifactName: "${productName}-${version}-mac.${ext}",
   },
-  windows: {
+  win: {
     target: ["nsis"],
     artifactName: "${productName}-${version}-win.${ext}",
   },

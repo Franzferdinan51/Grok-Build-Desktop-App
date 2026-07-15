@@ -4,12 +4,16 @@
  * Runs type checking before building.
  */
 
-const { execSync } = require("child_process")
+import { execSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
+import { dirname, join } from "node:path"
+
+const scriptDir = dirname(fileURLToPath(import.meta.url))
 
 console.log("Running TypeScript check...")
 try {
   execSync("tsc --noEmit", {
-    cwd: __dirname + "/..",
+    cwd: join(scriptDir, ".."),
     stdio: "inherit",
   })
   console.log("✅ TypeScript check passed")

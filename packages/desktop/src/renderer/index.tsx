@@ -16,7 +16,7 @@ if (!root) {
 
 // Global provider state shared across the whole app
 const [activeProvider, setActiveProvider] = createSignal<string>("grok")
-const [grokStatus, setGrokStatus] = createSignal<{ running: boolean; error?: string }>({ running: false })
+const [backendStatus, setBackendStatus] = createSignal<{ available: boolean; command: string; version?: string; error?: string }>({ available: false, command: "grok" })
 
 // Menu event listeners
 function setupMenuListeners() {
@@ -34,14 +34,15 @@ function setupMenuListeners() {
   }
 }
 
-// Poll Grok status every 5s
+// Probe the Grok Build backend every 5s. This only runs `grok --version`; it
+// never loads a model or starts an agent session.
 function setupStatusPolling() {
   const poll = async () => {
     try {
-      const status = await window.api.grok.status()
-      setGrokStatus(status)
+      const status = await window.api.backend.status()
+      setBackendStatus(status)
     } catch {
-      setGrokStatus({ running: false, error: "cannot reach main process" })
+      setBackendStatus({ available: false, command: "grok", error: "cannot reach main process" })
     }
   }
 
@@ -65,7 +66,7 @@ render(
     <App
       activeProvider={activeProvider}
       setActiveProvider={setActiveProvider}
-      grokStatus={grokStatus}
+      backendStatus={backendStatus}
     />
   ),
   root

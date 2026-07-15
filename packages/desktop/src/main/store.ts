@@ -25,29 +25,13 @@ type StoreSchema = {
   }
   grok: {
     cliPath?: string
-    authToken?: string
   }
   lmstudio: {
     baseUrl: string
   }
-}
-
-const schema: Store.Schema<StoreSchema> = {
-  providers: { type: "object", default: {} },
-  activeProvider: { type: "string", default: "grok" },
-  recentSessions: { type: "array", default: [] },
-  ui: {
-    type: "object",
-    default: { sidebarPinned: true, theme: "dark" },
-  },
-  grok: {
-    type: "object",
-    default: { baseUrl: "https://api.x.ai" },
-  },
-  lmstudio: {
-    type: "object",
-    default: { baseUrl: "http://100.116.54.125:1234" },
-  },
+  telegram: {
+    token?: string
+  }
 }
 
 let _store: Store<StoreSchema> | null = null
@@ -56,7 +40,7 @@ export function getStore(): Store<StoreSchema> {
   if (!_store) {
     _store = new Store<StoreSchema>({
       name: "grok-build-desktop",
-      schema,
+      defaults: { activeProvider: "grok", recentSessions: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, telegram: {}, providers: {} },
       clearInvalidConfig: true,
     })
   }

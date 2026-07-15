@@ -1,292 +1,111 @@
-/**
- * App.tsx — Main SolidJS application component
- *
- * Layout mirrors the MiniMax Code / OpenChamber "empty state" screenshot:
- *  - Left sidebar: New task, Search, Skills, Scheduled, Mobile section,
- *    Pinned / Scheduled / Projects sections, Plus Plan footer
- *  - Center: empty state with model picker (Thinking toggle, Full Authorization toggle),
- *    file-type attachers (Slides, PDF, Docs, Excel)
- *
- * Dark theme throughout. Styled with plain CSS (no Tailwind dependency)
- * to keep the bundle small.
- */
-
-import { createSignal, For, Show, type Accessor } from "solid-js"
+import { createSignal, For, Show, onMount } from "solid-js"
+import type { Accessor } from "solid-js"
+import type { BackendEvent, BackendStatus, TelegramStatus } from "../preload"
 import "./styles.css"
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+type Provider = "grok" | "lmstudio"
+type TaskLog = { kind: "text" | "thought" | "error"; content: string }
 
-type Provider = "grok" | "lmstudio" | "openai" | "codex"
-type GrokStatus = { running: boolean; error?: string; pid?: number }
-
-// ── Sidebar item definitions ──────────────────────────────────────────────────
-
-type SidebarItem = {
-  id: string
-  label: string
-  icon: string  // emoji or text
-  badge?: string | number
-}
-
-type SidebarSection = {
-  id: string
-  title?: string
-  items: SidebarItem[]
-}
-
-const SIDEBAR_SECTIONS: SidebarSection[] = [
-  {
-    id: "actions",
-    items: [
-      { id: "new-task", label: "New task", icon: "✏️" },
-      { id: "search", label: "Search", icon: "🔍" },
-      { id: "skills", label: "Skills", icon: "🛠️" },
-      { id: "scheduled", label: "Scheduled", icon: "📅" },
-    ],
-  },
-  {
-    id: "mobile",
-    title: "Mobile",
-    items: [
-      { id: "mobile-session", label: "Mobile session", icon: "📱" },
-    ],
-  },
-  {
-    id: "pinned",
-    title: "Pinned",
-    items: [
-      { id: "pinned-1", label: "grok-build integration", icon: "📌" },
-      { id: "pinned-2", label: "lm-studio setup", icon: "📌" },
-    ],
-  },
-  {
-    id: "scheduled",
-    title: "Scheduled",
-    items: [
-      { id: "scheduled-1", label: "Daily standup prep", icon: "⏰" },
-    ],
-  },
-  {
-    id: "projects",
-    title: "Projects",
-    items: [
-      { id: "proj-1", label: "Grok-Build-Desktop-App", icon: "📁" },
-      { id: "proj-2", label: "my-other-project", icon: "📁" },
-    ],
-  },
+const NAV = [
+  { id: "new-task", label: "New task", icon: "✦" },
+  { id: "search", label: "Search", icon: "⌕" },
+  { id: "skills", label: "Skills", icon: "⌘" },
+  { id: "scheduled", label: "Scheduled", icon: "◷" },
+  { id: "telegram", label: "Telegram", icon: "✈" },
 ]
 
-// ── Model definitions ─────────────────────────────────────────────────────────
+export function App(props: { activeProvider: Accessor<string>; setActiveProvider: (provider: string) => void; backendStatus: Accessor<BackendStatus> }) {
+  const [prompt, setPrompt] = createSignal("")
+  const [workspace, setWorkspace] = createSignal("")
+  const [thinking, setThinking] = createSignal(true)
+  const [autoApprove, setAutoApprove] = createSignal(false)
+  const [running, setRunning] = createSignal(false)
+  const [active, setActive] = createSignal("new-task")
+  const [events, setEvents] = createSignal<TaskLog[]>([])
+  const [telegram, setTelegram] = createSignal<TelegramStatus>({ connected: false })
+  const [token, setToken] = createSignal("")
+  const [telegramNotice, setTelegramNotice] = createSignal("")
 
-const PROVIDERS: { id: Provider; label: string; icon: string; description: string }[] = [
-  {
-    id: "grok",
-    label: "Grok (xAI)",
-    icon: "🤖",
-    description: "xAI Grok via grok CLI — cloud-first with sandbox support",
-  },
-  {
-    id: "lmstudio",
-    label: "LM Studio",
-    icon: "💻",
-    description: "Local LLMs via OpenAI-compatible API — http://100.116.54.125:1234",
-  },
-  {
-    id: "codex",
-    label: "Codex (OpenAI)",
-    icon: "⚡",
-    description: "OpenAI Codex via OAuth — full coding agent capabilities",
-  },
-  {
-    id: "openai",
-    label: "OpenAI GPT",
-    icon: "🌐",
-    description: "GPT-4o via OpenAI API — general-purpose reasoning",
-  },
-]
+  onMount(async () => {
+    const savedWorkspace = await window.api.store.get<string>("workspace.last")
+    if (savedWorkspace) setWorkspace(savedWorkspace)
+    setTelegram(await window.api.telegram.status())
+    window.api.backend.onEvent((event: BackendEvent) => {
+      if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
+      if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
+      if (event.type === "error" && event.message) setEvents((old) => [...old, { kind: "error", content: event.message! }])
+    })
+  })
 
-// ── File attacher icons ───────────────────────────────────────────────────────
+  const chooseWorkspace = async () => {
+    const result = await window.api.dialog.openDirectory()
+    if (!result.canceled && result.filePaths[0]) {
+      setWorkspace(result.filePaths[0])
+      await window.api.store.set("workspace.last", result.filePaths[0])
+    }
+  }
 
-const ATTACHERS = [
-  { id: "slides", label: "Slides", icon: "📊" },
-  { id: "pdf", label: "PDF", icon: "📄" },
-  { id: "docs", label: "Docs", icon: "📝" },
-  { id: "excel", label: "Excel", icon: "📋" },
-]
+  const run = async () => {
+    if (!prompt().trim() || !workspace() || running()) return
+    setEvents([]); setRunning(true)
+    try {
+      await window.api.backend.run({ prompt: prompt(), cwd: workspace(), thinking: thinking(), autoApprove: autoApprove() })
+    } catch (error) {
+      setEvents((old) => [...old, { kind: "error", content: (error as Error).message }])
+    } finally { setRunning(false) }
+  }
 
-// ── App component ─────────────────────────────────────────────────────────────
+  const connectTelegram = async () => {
+    setTelegramNotice("")
+    const status = await window.api.telegram.connect(token())
+    setTelegram(status)
+    setToken("")
+    setTelegramNotice(status.connected ? `Connected as @${status.username ?? "bot"}` : status.error ?? "Could not connect")
+  }
 
-type AppProps = {
-  activeProvider: Accessor<string>
-  setActiveProvider: (p: string) => void
-  grokStatus: Accessor<GrokStatus>
-}
+  return <div class="app-root">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand__mark">✦</span><span>Grok Build</span></div>
+      <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => setActive(item.id)}><span>{item.icon}</span>{item.label}</button>}</For></nav>
+      <div class="sidebar__section"><span class="sidebar__section-title">Projects</span><button class="sidebar__project" onClick={chooseWorkspace}>{workspace() || "Select a workspace"}</button></div>
+      <div class="sidebar__footer">
+        <span class={`status-dot ${props.backendStatus().available ? "status-dot--ready" : ""}`} />
+        <span>{props.backendStatus().available ? "Grok Build ready" : "Grok Build unavailable"}</span>
+      </div>
+    </aside>
 
-export function App(props: AppProps) {
-  const [thinking, setThinking] = createSignal(false)
-  const [fullAuth, setFullAuth] = createSignal(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false)
-  const [activeSection, setActiveSection] = createSignal("new-task")
-
-  return (
-    <div class="app-root">
-      {/* ── Left Sidebar ──────────────────────────────────────────────── */}
-      <aside class={`sidebar ${sidebarCollapsed() ? "sidebar--collapsed" : ""}`}>
-        {/* Sidebar header */}
-        <div class="sidebar__header">
-          <Show when={!sidebarCollapsed()}>
-            <span class="sidebar__app-name">Grok Build</span>
+    <main class="main-content">
+      <Show when={active() === "telegram"} fallback={<>
+        <section class="hero">
+          <span class="eyebrow">LOCAL-FIRST CODING WORKBENCH</span>
+          <h1>Build with Grok. Keep your models close.</h1>
+          <p>Grok Build executes the task. LM Studio stays available as your local model endpoint.</p>
+        </section>
+        <section class="workspace-bar"><span>Workspace</span><button onClick={chooseWorkspace}>{workspace() || "Choose folder"}</button></section>
+        <section class="provider-row">
+          <button class={`provider ${props.activeProvider() === "grok" ? "provider--active" : ""}`} onClick={() => props.setActiveProvider("grok")}><strong>Grok Build</strong><span>agent backend</span></button>
+          <button class={`provider ${props.activeProvider() === "lmstudio" ? "provider--active" : ""}`} onClick={() => props.setActiveProvider("lmstudio")}><strong>LM Studio</strong><span>local endpoint</span></button>
+        </section>
+        <section class="composer">
+          <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} placeholder="Describe the coding task…" rows={5} />
+          <div class="composer__controls">
+            <label><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} /> Reasoning effort</label>
+            <label title="Passes Grok Build's documented --yolo flag"><input type="checkbox" checked={autoApprove()} onChange={(event) => setAutoApprove(event.currentTarget.checked)} /> Auto-approve tools</label>
+            <button class="primary" disabled={!workspace() || !prompt().trim() || running()} onClick={run}>{running() ? "Running…" : "Run with Grok Build"}</button>
+          </div>
+        </section>
+        <Show when={events().length > 0}><section class="task-output"><For each={events()}>{(entry) => <pre class={`task-output__entry task-output__entry--${entry.kind}`}>{entry.content}</pre>}</For></section></Show>
+      </>}>
+        <section class="telegram-panel">
+          <span class="eyebrow">TELEGRAM BOT CONNECTION</span><h1>Connect your coding workspace to Telegram.</h1>
+          <p>Enter a BotFather token. It is verified with <code>getMe</code> and stored only through macOS credential encryption.</p>
+          <Show when={!telegram().connected} fallback={<><div class="connected">Connected as @{telegram().username ?? "bot"}</div><button onClick={async () => { await window.api.telegram.disconnect(); setTelegram({ connected: false }) }}>Disconnect</button></>}>
+            <div class="token-row"><input type="password" value={token()} onInput={(event) => setToken(event.currentTarget.value)} placeholder="123456:ABC…" /><button class="primary" disabled={!token().trim()} onClick={connectTelegram}>Connect bot</button></div>
+            <Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show>
           </Show>
-          <button
-            class="sidebar__collapse-btn"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed())}
-            title={sidebarCollapsed() ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {sidebarCollapsed() ? "→" : "←"}
-          </button>
-        </div>
-
-        {/* Navigation sections */}
-        <nav class="sidebar__nav">
-          <For each={SIDEBAR_SECTIONS}>
-            {(section) => (
-              <div class="sidebar__section">
-                <Show when={section.title && !sidebarCollapsed()}>
-                  <span class="sidebar__section-title">{section.title}</span>
-                </Show>
-                <For each={section.items}>
-                  {(item) => (
-                    <button
-                      class={`sidebar__item ${activeSection() === item.id ? "sidebar__item--active" : ""}`}
-                      onClick={() => setActiveSection(item.id)}
-                      title={sidebarCollapsed() ? item.label : ""}
-                    >
-                      <span class="sidebar__item-icon">{item.icon}</span>
-                      <Show when={!sidebarCollapsed()}>
-                        <span class="sidebar__item-label">{item.label}</span>
-                      </Show>
-                    </button>
-                  )}
-                </For>
-              </div>
-            )}
-          </For>
-        </nav>
-
-        {/* Sidebar footer — Plus Plan */}
-        <div class="sidebar__footer">
-          <Show when={!sidebarCollapsed()}>
-            <div class="sidebar__plus-plan">
-              <span class="plus-plan__badge">⭐</span>
-              <div class="plus-plan__text">
-                <span class="plus-plan__label">Plus Plan</span>
-                <span class="plus-plan__sub">Unlimited Grok sessions</span>
-              </div>
-              <button class="plus-plan__cta">Upgrade</button>
-            </div>
-          </Show>
-          <Show when={sidebarCollapsed()}>
-            <button class="sidebar__item" title="Plus Plan">
-              <span class="sidebar__item-icon">⭐</span>
-            </button>
-          </Show>
-
-          {/* Grok status indicator */}
-          <div
-            class={`grok-status grok-status--${props.grokStatus().running ? "online" : "offline"}`}
-            title={props.grokStatus().running ? `Grok running (pid ${props.grokStatus().pid})` : props.grokStatus().error ?? "Grok offline"}
-          >
-            <span class="grok-status__dot" />
-            <Show when={!sidebarCollapsed()}>
-              <span class="grok-status__label">
-                {props.grokStatus().running ? "Grok Online" : "Grok Offline"}
-              </span>
-            </Show>
-          </div>
-        </div>
-      </aside>
-
-      {/* ── Main Content ───────────────────────────────────────────────── */}
-      <main class="main-content">
-        {/* Empty state — matches MiniMax Code screenshot vibe */}
-        <div class="empty-state">
-          <div class="empty-state__logo">🤖</div>
-          <h1 class="empty-state__title">What would you like to build?</h1>
-          <p class="empty-state__subtitle">
-            Ask Grok to code, debug, or explore your codebase
-          </p>
-
-          {/* Model picker */}
-          <div class="model-picker">
-            <span class="model-picker__label">Provider</span>
-            <div class="model-picker__options">
-              <For each={PROVIDERS}>
-                {(p) => (
-                  <button
-                    class={`model-picker__option ${props.activeProvider() === p.id ? "model-picker__option--active" : ""}`}
-                    onClick={() => props.setActiveProvider(p.id)}
-                    title={p.description}
-                  >
-                    <span class="model-picker__option-icon">{p.icon}</span>
-                    <span class="model-picker__option-label">{p.label}</span>
-                  </button>
-                )}
-              </For>
-            </div>
-          </div>
-
-          {/* Toggles */}
-          <div class="toggles">
-            <label class="toggle" title="Enable extended thinking (uses more tokens)">
-              <input
-                type="checkbox"
-                checked={thinking()}
-                onChange={(e) => setThinking(e.currentTarget.checked)}
-              />
-              <span class="toggle__track">
-                <span class="toggle__thumb" />
-              </span>
-              <span class="toggle__label">Thinking</span>
-            </label>
-
-            <label class="toggle" title="Grant full file system and tool access">
-              <input
-                type="checkbox"
-                checked={fullAuth()}
-                onChange={(e) => setFullAuth(e.currentTarget.checked)}
-              />
-              <span class="toggle__track">
-                <span class="toggle__thumb" />
-              </span>
-              <span class="toggle__label">Full Authorization</span>
-            </label>
-          </div>
-
-          {/* File attachers */}
-          <div class="file-attachers">
-            <For each={ATTACHERS}>
-              {(attacher) => (
-                <button class="file-attacher" title={`Attach ${attacher.label}`}>
-                  <span class="file-attacher__icon">{attacher.icon}</span>
-                  <span class="file-attacher__label">{attacher.label}</span>
-                </button>
-              )}
-            </For>
-          </div>
-
-          {/* Input area */}
-          <div class="input-area">
-            <textarea
-              class="input-area__textarea"
-              placeholder="Describe a task, paste code, or ask a question..."
-              rows={4}
-            />
-            <button class="input-area__submit" disabled>
-              Send
-            </button>
-          </div>
-        </div>
-      </main>
-    </div>
-  )
+          <p class="telegram-note">This release validates and stores the bot connection and can send a message through the main process. Inbound task routing is deliberately not auto-enabled until a chat allowlist is configured.</p>
+        </section>
+      </Show>
+    </main>
+  </div>
 }

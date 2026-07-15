@@ -8,14 +8,15 @@
  *  - App lifecycle (ready, quit)
  *  - Window creation & management
  *  - IPC handler registration
- *  - Grok CLI sidecar lifecycle (download on first run, spawn, kill)
+ *  - Grok Build execution backend lifecycle
  */
 
-import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } from "electron"
+import { app, BrowserWindow, Menu, Tray } from "electron"
 import { join } from "path"
+import windowStateKeeper from "electron-window-state"
 import { registerIpcHandlers } from "./ipc"
-import { GrokSidecarManager } from "./sidecar"
-import { getStore } from "./store"
+import { GrokBuildBackend } from "./grok-build-backend"
+import { TelegramBridge } from "./telegram"
 import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
 
@@ -24,14 +25,13 @@ const APP_ID = "ai.grokbuild.desktop"
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
-let sidecar: GrokSidecarManager | null = null
+const backend = new GrokBuildBackend()
+const telegram = new TelegramBridge()
 let logger: ReturnType<typeof initLogging>
 
 // ── Window factory ────────────────────────────────────────────────────────────
 
 function createMainWindow(): BrowserWindow {
-  const { windowStateKeeper } = require("electron-window-state") as typeof import("electron-window-state")
-
   const state = windowStateKeeper({
     defaultWidth: 1280,
     defaultHeight: 800,
@@ -69,20 +69,6 @@ function createMainWindow(): BrowserWindow {
   return win
 }
 
-// ── Grok Sidecar ─────────────────────────────────────────────────────────────
-
-async function startSidecar(): Promise<void> {
-  sidecar = new GrokSidecarManager({
-    // Download grok binary on first run if not found
-    downloadIfMissing: true,
-    // Prefer fork at https://github.com/Franzferdinan51/grok-build
-    forkUrl: "https://github.com/Franzferdinan51/grok-build",
-  })
-
-  await sidecar.start()
-  writeLog("info", "Grok sidecar started")
-}
-
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
@@ -91,7 +77,8 @@ app.whenReady().then(async () => {
 
   // Register all IPC handlers before window creation
   registerIpcHandlers({
-    sidecar: () => sidecar,
+    backend: () => backend,
+    telegram: () => telegram,
     getMainWindow: () => mainWindow,
   })
 
@@ -110,11 +97,6 @@ app.whenReady().then(async () => {
   const menu = createMenu(mainWindow)
   Menu.setApplicationMenu(menu)
 
-  // Start Grok sidecar in background
-  startSidecar().catch((err) => {
-    writeLog("error", `Sidecar start failed: ${err.message}`)
-  })
-
   app.on("activate", () => {
     // macOS: re-create window when dock icon is clicked and no windows exist
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -131,7 +113,6 @@ app.on("window-all-closed", () => {
 })
 
 app.on("before-quit", async () => {
-  writeLog("info", "App quitting — stopping sidecar")
-  await sidecar?.stop()
-  sidecar = null
+  writeLog("info", "App quitting — stopping Grok Build task")
+  backend.cancel()
 })
