@@ -1,0 +1,44 @@
+/**
+ * electron-builder.config.ts — Electron app packaging configuration
+ */
+
+import type { Configuration } from "electron-builder"
+
+const config: Configuration = {
+  appId: "ai.grokbuild.desktop",
+  productName: "Grok Build Desktop",
+  copyright: "Copyright 2025 Grok Build Desktop",
+  directories: {
+    output: "dist",
+    buildResources: "resources",
+  },
+  files: [
+    "out/**/*",
+    "!out/**/*.map",
+  ],
+  extraMetadata: {
+    main: "out/main/index.js",
+  },
+  mac: {
+    category: "public.app-category.developer-tools",
+    target: ["dmg", "zip"],
+    artifactName: "${productName}-${version}-mac.${ext}",
+  },
+  windows: {
+    target: ["nsis"],
+    artifactName: "${productName}-${version}-win.${ext}",
+  },
+  linux: {
+    target: ["AppImage"],
+    category: "Development",
+    artifactName: "${productName}-${version}-linux.${ext}",
+  },
+  nsis: {
+    oneClick: false,
+    allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+  },
+}
+
+export default config

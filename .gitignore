@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+out/
+release/
+
+# Electron builder (for packaged apps)
+*.dmg
+*.zip
+*.AppImage
+*.exe
+*.msi
+
+# Rust build artifacts (for grok CLI development)
+target/
+Cargo.lock
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+*.log.*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Temporary
+*.tmp
+*.temp
+.tmp/
+tmp/
+
+# grok CLI binary (downloaded at runtime)
+.grok-cli/
+bin/
+
+#electron-store
+*.ldb
+*.log
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# pnpm
+pnpm-debug.log

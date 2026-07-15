@@ -1,0 +1,19 @@
+{
+  "name": "grok-build-desktop-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first AI coding desktop app powered by xAI Grok Build CLI",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm --filter @grok-build/desktop dev",
+    "build": "pnpm --filter @grok-build/desktop build",
+    "package": "pnpm --filter @grok-build/desktop package",
+    "typecheck": "pnpm --filter @grok-build/desktop typecheck"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

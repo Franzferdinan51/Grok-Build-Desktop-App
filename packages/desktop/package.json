@@ -1,0 +1,63 @@
+{
+  "name": "@grok-build/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Grok Build Desktop App — local-first AI coding with Grok CLI",
+  "homepage": "https://github.com/Franzferdinan51/Grok-Build-Desktop-App",
+  "author": {
+    "name": "Grok Build Desktop",
+    "email": "hello@grokbuild.desktop"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "predev": "node scripts/predev.js",
+    "dev": "electron-vite dev",
+    "prebuild": "node scripts/prebuild.js",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-builder --config electron-builder.config.ts",
+    "package:mac": "electron-builder --mac --config electron-builder.config.ts",
+    "package:win": "electron-builder --win --config electron-builder.config.ts",
+    "package:linux": "electron-builder --linux --config electron-builder.config.ts"
+  },
+  "main": "./out/main/index.js",
+  "dependencies": {
+    "@solid-primitives/i18n": "^2.2.1",
+    "@solid-primitives/storage": "^4.2.1",
+    "@solidjs/router": "^0.15.4",
+    "electron-context-menu": "^4.1.2",
+    "electron-log": "^5.3.0",
+    "electron-store": "^10.0.0",
+    "electron-updater": "^6.3.9",
+    "electron-window-state": "^5.0.3",
+    "solid-js": "^1.9.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^3.0.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.6"
+  },
+  "build": {
+    "appId": "ai.grokbuild.desktop",
+    "productName": "Grok Build Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "linux": {
+      "target": ["AppImage"]
+    }
+  }
+}
