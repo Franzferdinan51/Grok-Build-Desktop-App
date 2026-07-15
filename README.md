@@ -8,6 +8,7 @@ Local-first desktop workbench for **Grok Build**. Grok Build is the coding-agent
 - **Grok-first coding flow** — workspace picker, prompt composer, stream output, reasoning-effort option, and an explicit auto-approve toggle that maps to Grok Build’s documented `--yolo` flag.
 - **LM Studio first-class** — visible local-endpoint mode and provider configuration. It does not launch or shotgun-load models; model loading remains under the local LM Studio server’s control.
 - **Telegram bot connection** — validates a BotFather token with `getMe`, stores it only with Electron `safeStorage`, and supports sending through Telegram’s Bot API. Inbound routing stays off until a chat allowlist is added.
+- **Coding cockpit projects** — persistent project rail, Git branch/change state, and a read-only review pane; this replaces the disposable folder-picker design.
 - **No subscription UI** — there is no “Plus Plan,” upsell, or fake entitlement surface.
 
 ## Design sources actually used
@@ -53,6 +54,7 @@ When selected, it adds only documented flags: `--model`, `--reasoning-effort hig
 - [Providers and local model policy](docs/PROVIDERS.md)
 - [Feature-source matrix](docs/FEATURES-INSPO.md)
 - [Telegram integration](docs/TELEGRAM.md)
+- [OpenClaw/Hermes/ZCode rebase](docs/UPSTREAM-REBASE.md)
 - [Install and build](docs/INSTALL.md)
 
 ## Status
