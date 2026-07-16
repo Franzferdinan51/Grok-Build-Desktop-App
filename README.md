@@ -13,6 +13,7 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 - Skills browser, searchable run history, persistent schedules, Local Studio monitoring, and Telegram connection.
 - Path containment, symlink rejection, terminal limits, explicit approvals, and no automatic model loading.
 - Hermes-style persistent project chats with streamed messages, collapsed reasoning, prompt queues, history recall, copy/retry actions, and a bottom-docked composer.
+- Optional Dyad-style live preview beside the chat, with automatic dev-server URL detection, responsive device widths, reload, and browser handoff.
 
 ## Chat workflow
 
@@ -54,6 +55,7 @@ pnpm sync:grok-upstream
 - [MiniMax-AI/OpenRoom](https://github.com/MiniMax-AI/OpenRoom) — MIT local-first organization reference.
 - [Z.ai ZCode](https://zcode.z.ai/en) — closed-source product reference only; no code or assets copied.
 - [sybil-solutions/local-studio](https://github.com/sybil-solutions/local-studio) — Apache-2.0 runtime-monitoring patterns.
+- [dyad-sh/dyad](https://github.com/dyad-sh/dyad) — Apache-2.0 live-preview workflow and responsive viewport patterns.
 
 ## Docs
 
@@ -64,6 +66,7 @@ pnpm sync:grok-upstream
 - [Install](docs/INSTALL.md)
 - [Telegram](docs/TELEGRAM.md)
 - [Testing and release checks](docs/TESTING.md)
+- [Live preview](docs/PREVIEW.md)
 
 ## Verification
 

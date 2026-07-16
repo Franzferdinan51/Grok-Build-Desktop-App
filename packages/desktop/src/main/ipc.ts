@@ -86,7 +86,11 @@ export function registerIpcHandlers(deps: Deps): void {
     if (win?.isMaximized()) win.unmaximize(); else win?.maximize()
   })
   ipcMain.handle("window:close", () => deps.getMainWindow()?.close())
-  ipcMain.handle("app:open-external", (_event, url: string) => shell.openExternal(url))
+  ipcMain.handle("app:open-external", (_event, url: string) => {
+    const target = new URL(url)
+    if (target.protocol !== "http:" && target.protocol !== "https:") throw new Error("Only HTTP(S) links can be opened")
+    return shell.openExternal(target.toString())
+  })
   ipcMain.handle("app:get-version", () => app.getVersion())
   ipcMain.handle("app:backend-repository", () => "https://github.com/Franzferdinan51/grok-build")
   ipcMain.handle("dialog:open-file", async (_event, options?: { filters?: { name: string; extensions: string[] }[] }) =>

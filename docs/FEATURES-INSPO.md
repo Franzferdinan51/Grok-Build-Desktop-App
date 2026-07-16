@@ -10,6 +10,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 | [MiniMax-AI/OpenRoom](https://github.com/MiniMax-AI/OpenRoom) | MIT browser desktop with an agent action system; local browser data model | Dense, application-like navigation and explicit actions | MiniMax Code proprietary UI/assets or a claim that MiniMax Agent is open source |
 | [openclaw/openclaw](https://github.com/openclaw/openclaw) | Personal assistant gateway with Telegram among supported channels | Telegram is modeled as a protected integration with explicit routing boundaries | Shipping OpenClaw inside this app or bypassing its channel controls |
 | [Oct1AtJoe/zcode-desktop](https://github.com/Oct1AtJoe/zcode-desktop) | MIT community floating monitor for ZCode local token/task state | Future local task/usage monitor concept | Official ZCode desktop source or product identity |
+| [dyad-sh/dyad](https://github.com/dyad-sh/dyad) | Apache-2.0 app builder with a sandboxed iframe preview, reload controls, and responsive viewport modes | Optional collapsible preview rail alongside Grok chat, URL detection, device widths, and external-browser handoff | Dyad branding, proprietary `src/pro` code, app-generation backend, or preview instrumentation |
 
 ## Product choices made from the research
 
