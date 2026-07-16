@@ -16,7 +16,7 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 
 ## Chat workflow
 
-Each workspace has its own locally persisted conversation. Grok Build output streams into the thread, `thought` events and `<think>…</think>` blocks stay collapsed by default, and a second instruction entered during a run is queued and drained automatically. Use `Cmd/Ctrl+Enter` to send, arrow up/down at the input boundary to browse prompt history, and **New chat** to clear only the active workspace conversation.
+Each workspace has its own locally persisted conversation. Grok Build output streams into the thread, `thought` events and `<think>…</think>` blocks stay collapsed by default, and a second instruction entered during a run is queued and drained automatically. Press **Enter** to send, **Shift+Enter** for a new line, use arrow up/down at the input boundary to browse prompt history, and choose **New chat** to clear only the active workspace conversation.
 
 ## Install
 

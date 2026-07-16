@@ -305,7 +305,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
             <span class="composer-hint">Grok Build can read and edit this workspace</span>
           </div>
-          <textarea value={prompt()} onInput={(event) => { setPrompt(event.currentTarget.value); setHistoryIndex(-1) }} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void run() } else if (event.key === "ArrowUp" && (event.currentTarget.selectionStart === 0 || !prompt())) { event.preventDefault(); browsePromptHistory(-1) } else if (event.key === "ArrowDown" && event.currentTarget.selectionStart === prompt().length) { event.preventDefault(); browsePromptHistory(1) } }} placeholder={running() ? "Send another instruction — it will be queued…" : "Ask Grok Build to code, debug, or explain…"} rows={3} />
+          <textarea value={prompt()} onInput={(event) => { setPrompt(event.currentTarget.value); setHistoryIndex(-1) }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void run() } else if (event.key === "ArrowUp" && (event.currentTarget.selectionStart === 0 || !prompt())) { event.preventDefault(); browsePromptHistory(-1) } else if (event.key === "ArrowDown" && event.currentTarget.selectionStart === prompt().length) { event.preventDefault(); browsePromptHistory(1) } }} placeholder={running() ? "Send another instruction — it will be queued…" : "Ask Grok Build to code, debug, or explain…"} rows={3} />
           <div class="chat-composer__footer">
             <button class="composer-icon" onClick={chooseWorkspace} title="Attach or open a workspace">＋</button>
             <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} />◇ Think</label>
@@ -314,7 +314,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
               <option value="">{catalog().defaultModel || "Default model"}</option>
               <For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For>
             </select>
-            <button class="composer-send" disabled={!workspace() || !prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (⌘↵)" : "Send (⌘↵)"}>{running() ? "+" : "↑"}</button>
+            <button class="composer-send" disabled={!workspace() || !prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (Enter)" : "Send (Enter)"}>{running() ? "+" : "↑"}</button>
             <Show when={running()}><button class="composer-stop" onClick={() => window.api.backend.cancel()} title="Stop current task"><span /></button></Show>
           </div>
         </section>
