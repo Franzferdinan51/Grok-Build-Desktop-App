@@ -17,13 +17,14 @@ export type ElectronAPI = {
   backend: {
     status: () => Promise<BackendStatus>
     models: () => Promise<GrokBuildModelCatalog>
-    run: (input: { prompt: string; cwd: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string; bestOfN?: number; selfVerify?: boolean; maxTurns?: number; disableWebSearch?: boolean; subagents?: boolean; moa?: { referenceModels: string[]; aggregatorModel?: string } }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
+    run: (input: { prompt: string; cwd: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string; bestOfN?: number; selfVerify?: boolean; maxTurns?: number; disableWebSearch?: boolean; subagents?: boolean; agent?: string; agents?: string; permissionMode?: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow?: string[]; deny?: string[]; tools?: string; disallowedTools?: string; memory?: "default" | "experimental" | "disabled"; sandbox?: string; rules?: string; systemPrompt?: string; verbatim?: boolean; forkSession?: boolean; restoreCode?: boolean; worktree?: boolean; worktreeName?: string; worktreeRef?: string; jsonSchema?: string; promptFile?: string; promptJson?: string; sessionId?: string; noPlan?: boolean; moa?: { referenceModels: string[]; aggregatorModel?: string } }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
     autoLearn: (input: { prompt: string; cwd: string; model?: string }) => Promise<{ ok: boolean }>
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
     oauthLogin: (provider: "xai" | "openai" | "minimax") => Promise<{ ok: boolean; message: string }>
     checkUpdate: () => Promise<GrokBuildUpdateStatus>
     installUpdate: (channel: "stable" | "alpha") => Promise<GrokBuildUpdateStatus>
+    tool: (command: string, cwd?: string) => Promise<{ stdout: string; stderr: string }>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
   }
   telegram: {
@@ -61,7 +62,7 @@ const api: ElectronAPI = {
     cancel: () => ipcRenderer.invoke("backend:cancel"),
     setPath: (path) => ipcRenderer.invoke("backend:set-path", path),
     oauthLogin: (provider) => ipcRenderer.invoke("backend:oauth-login", provider),
-    checkUpdate: () => ipcRenderer.invoke("backend:update-check"), installUpdate: (channel) => ipcRenderer.invoke("backend:update-install", channel),
+    checkUpdate: () => ipcRenderer.invoke("backend:update-check"), installUpdate: (channel) => ipcRenderer.invoke("backend:update-install", channel), tool: (command, cwd) => ipcRenderer.invoke("backend:tool", command, cwd),
     onEvent: (handler) => {
       const listener = (_event: IpcRendererEvent, update: BackendEvent) => handler(update)
       ipcRenderer.on("backend:event", listener)

@@ -31,6 +31,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:oauth-login", (_event, provider: "xai" | "openai" | "minimax") => deps.backend().startOAuth(provider))
   ipcMain.handle("backend:update-check", () => deps.backend().checkUpdate())
   ipcMain.handle("backend:update-install", (_event, channel: "stable" | "alpha") => deps.backend().installUpdate(channel))
+  ipcMain.handle("backend:tool", (_event, command: string, cwd?: string) => deps.backend().runTool(command, cwd))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun(input)
     let grokSessionId: string | undefined

@@ -47,6 +47,28 @@ export type RunTaskInput = {
   maxTurns?: number
   disableWebSearch?: boolean
   subagents?: boolean
+  agent?: string
+  agents?: string
+  permissionMode?: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"
+  allow?: string[]
+  deny?: string[]
+  tools?: string
+  disallowedTools?: string
+  memory?: "default" | "experimental" | "disabled"
+  sandbox?: string
+  rules?: string
+  systemPrompt?: string
+  verbatim?: boolean
+  forkSession?: boolean
+  restoreCode?: boolean
+  worktree?: boolean
+  worktreeName?: string
+  worktreeRef?: string
+  jsonSchema?: string
+  promptFile?: string
+  promptJson?: string
+  sessionId?: string
+  noPlan?: boolean
   moa?: { referenceModels: string[]; aggregatorModel?: string }
 }
 
@@ -141,6 +163,28 @@ export class GrokBuildBackend {
     return this.checkUpdate()
   }
 
+  async runTool(commandLine: string, cwd?: string): Promise<{ stdout: string; stderr: string }> {
+    if (this.isRunning()) throw new Error("Finish or cancel the active coding task first")
+    const args = commandLine.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((part) => part.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2")) || []
+    const command = args.shift()?.toLowerCase()
+    const allowed = new Set(["mcp", "plugin", "memory", "sessions", "worktree", "export", "inspect", "setup", "trace", "completions", "login", "logout", "dashboard"])
+    if (!command || !allowed.has(command)) throw new Error(`Unsupported Grok tool command: ${command || "empty"}`)
+    const status = await this.status()
+    if (!status.available) throw new Error(status.error)
+    if (command === "dashboard") {
+      if (process.platform === "darwin") {
+        const script = [status.command, "dashboard", ...args].map((part) => JSON.stringify(part)).join(" ")
+        await execFileAsync("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(script)}`], { timeout: 10_000 })
+      } else if (process.platform === "win32") {
+        const child = spawn("cmd.exe", ["/c", "start", "", status.command, "dashboard", ...args], { detached: true, stdio: "ignore", cwd }); child.unref()
+      } else {
+        const child = spawn(status.command, ["dashboard", ...args], { detached: true, stdio: "ignore", cwd }); child.unref()
+      }
+      return { stdout: "Grok Agent Dashboard opened in a terminal.", stderr: "" }
+    }
+    return execFileAsync(status.command, [command, ...args], { cwd, timeout: 10 * 60_000, maxBuffer: 10 * 1024 * 1024, env: this.environment() })
+  }
+
   async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void): Promise<void> {
     if (!input.prompt.trim()) throw new Error("A task prompt is required")
     if (this.isRunning()) throw new Error("A Grok Build task is already running")
@@ -178,7 +222,9 @@ export class GrokBuildBackend {
       }
     }
 
-    const baseArgs = ["-p", effectivePrompt, "--cwd", input.cwd, "--output-format", "streaming-json"]
+    const structuredOutput = Boolean(input.jsonSchema?.trim())
+    const promptArgs = input.promptJson?.trim() ? (JSON.parse(input.promptJson), ["--prompt-json", input.promptJson]) : input.promptFile?.trim() ? ["--prompt-file", input.promptFile.trim()] : ["-p", effectivePrompt]
+    const baseArgs = [...promptArgs, "--cwd", input.cwd, "--output-format", structuredOutput ? "json" : "streaming-json"]
     const args = [...baseArgs]
     if (effectiveModel) args.push("--model", effectiveModel)
     if (input.thinking) args.push("--reasoning-effort", "high")
@@ -189,6 +235,26 @@ export class GrokBuildBackend {
     if (input.maxTurns && input.maxTurns > 0) args.push("--max-turns", String(Math.min(100, Math.floor(input.maxTurns))))
     if (input.disableWebSearch) args.push("--disable-web-search")
     if (input.subagents === false) args.push("--no-subagents")
+    if (input.agent?.trim()) args.push("--agent", input.agent.trim())
+    if (input.agents?.trim()) { JSON.parse(input.agents); args.push("--agents", input.agents) }
+    if (input.permissionMode) args.push("--permission-mode", input.permissionMode)
+    for (const rule of input.allow || []) if (rule.trim()) args.push("--allow", rule.trim())
+    for (const rule of input.deny || []) if (rule.trim()) args.push("--deny", rule.trim())
+    if (input.tools?.trim()) args.push("--tools", input.tools.trim())
+    if (input.disallowedTools?.trim()) args.push("--disallowed-tools", input.disallowedTools.trim())
+    if (input.memory === "experimental") args.push("--experimental-memory")
+    if (input.memory === "disabled") args.push("--no-memory")
+    if (input.sandbox?.trim()) args.push("--sandbox", input.sandbox.trim())
+    if (input.rules?.trim()) args.push("--rules", input.rules.trim())
+    if (input.systemPrompt?.trim()) args.push("--system-prompt-override", input.systemPrompt.trim())
+    if (input.verbatim) args.push("--verbatim")
+    if (input.resume && input.forkSession) args.push("--fork-session")
+    if (input.resume && input.restoreCode) args.push("--restore-code")
+    if (input.sessionId?.trim() && (!input.resume || input.forkSession)) args.push("--session-id", input.sessionId.trim())
+    if (input.noPlan) args.push("--no-plan")
+    if (!input.resume && input.worktree) args.push(input.worktreeName?.trim() ? `--worktree=${input.worktreeName.trim()}` : "--worktree")
+    if (!input.resume && input.worktree && input.worktreeRef?.trim()) args.push("--worktree-ref", input.worktreeRef.trim())
+    if (structuredOutput) { JSON.parse(input.jsonSchema!); args.push("--json-schema", input.jsonSchema!) }
 
     const runChild = (childArgs: string[]) => new Promise<string>((resolve, reject) => {
       writeLog("info", `Starting Grok Build task in ${input.cwd}`)
@@ -211,6 +277,7 @@ export class GrokBuildBackend {
         for (const line of lines) {
           if (!line.trim()) continue
           try {
+            if (structuredOutput) { onEvent({ type: "text", data: `${JSON.stringify(JSON.parse(line), null, 2)}\n` }); continue }
             const parsed = JSON.parse(line) as GrokBuildEvent & { sessionId?: string; session_id?: string }
             if (!parsed.sessionId && typeof parsed.session_id === "string") parsed.sessionId = parsed.session_id
             onEvent(parsed)

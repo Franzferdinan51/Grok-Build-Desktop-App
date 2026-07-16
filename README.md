@@ -62,6 +62,16 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - Persistent one-time or repeating scheduled Grok Build tasks.
 - Optional automatic Grok Build CLI updates through the official native updater, with stable/alpha channels and safe deferral while tasks are active.
 
+### Full Grok Build backend controls
+
+- Native custom agent selection and inline subagent-definition JSON.
+- Permission modes, repeatable allow/deny rules, built-in tool allow/disable lists, sandbox profiles, and automatic approvals.
+- Default, experimental cross-session, or disabled memory modes.
+- Appended rules, system-prompt overrides, verbatim prompts, prompt files, and JSON content-block prompts.
+- New Git worktrees with optional names/base refs, explicit session UUIDs, resumed-session forks, and original-code restoration.
+- JSON Schema-constrained structured output rendered directly in chat.
+- A shell-free backend toolbox for MCP servers, plugins and marketplaces, memory, session search/export, worktrees, traces, setup/inspection, completions, authentication, and the Agent Dashboard.
+
 ## Install
 
 ### Prerequisites
