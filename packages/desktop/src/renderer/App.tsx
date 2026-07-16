@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
 import { splitThinking, type TaskLog } from "./chat-utils"
+import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import "./styles.css"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
@@ -78,6 +79,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [previewReload, setPreviewReload] = createSignal(0)
   const [previewDevice, setPreviewDevice] = createSignal<"desktop" | "tablet" | "mobile">("desktop")
   const [previewStatus, setPreviewStatus] = createSignal("Ready to connect")
+  const [slashSelection, setSlashSelection] = createSignal(0)
+  const [slashNotice, setSlashNotice] = createSignal("")
   let messagesElement: HTMLDivElement | undefined
 
   createEffect(() => {
@@ -93,6 +96,39 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const saveConversation = async (next: ChatMessage[]) => {
     setMessages(next)
     if (workspace()) await window.api.store.set(conversationKey(), next)
+  }
+
+  const slashMatches = () => matchingSlashCommands(prompt(), [
+    ...DESKTOP_SLASH_COMMANDS,
+    ...skills().map((skill) => ({ name: skill.name, description: skill.description || "Run Grok Build skill", usage: `/${skill.name} [instructions]` })),
+  ])
+  const setToggle = (argument: string, current: boolean) => argument === "on" ? true : argument === "off" ? false : !current
+  const executeSlashCommand = async (input: string): Promise<boolean> => {
+    const parsed = parseSlashCommand(input)
+    if (!parsed) return false
+    const command = DESKTOP_SLASH_COMMANDS.find((entry) => entry.name === parsed.name || entry.aliases?.includes(parsed.name))
+    if (!command) return false
+    setSlashNotice("")
+    if (command.name === "help") setSlashNotice(DESKTOP_SLASH_COMMANDS.map((entry) => `/${entry.name} — ${entry.description}`).join("\n"))
+    else if (command.name === "new") { await saveConversation([]); setEvents([]); setQueuedPrompts([]); setSlashNotice("Started a new chat") }
+    else if (command.name === "model") {
+      const found = catalog().models.find((entry) => entry === parsed.args)
+      if (!parsed.args) setSlashNotice(`Current model: ${model() || "Grok Build default"}`)
+      else if (found) { setModel(found); setSlashNotice(`Model set to ${found}`) }
+      else setSlashNotice(`Unknown model: ${parsed.args}`)
+    } else if (command.name === "think") { const next = setToggle(parsed.args, thinking()); setThinking(next); setSlashNotice(`Reasoning ${next ? "enabled" : "disabled"}`) }
+    else if (command.name === "approve") { const next = setToggle(parsed.args, autoApprove()); setAutoApprove(next); setSlashNotice(`Automatic approval ${next ? "enabled" : "disabled"}`) }
+    else if (command.name === "preview") {
+      const next = setToggle(parsed.args, previewOpen()); setPreviewEnabled(true); setPreviewOpen(next)
+      await window.api.store.set("preview.enabled", true); setSlashNotice(`Preview ${next ? "opened" : "closed"}`)
+    } else if (command.name === "stop") { await window.api.backend.cancel(); setSlashNotice("Stop requested") }
+    else {
+      const destinations: Record<string, string> = { workspace: "workspace", terminal: "terminal", review: "review", skills: "skills", runs: "runs", scheduled: "scheduled", settings: "settings" }
+      const destination = destinations[command.name]
+      if (destination) await navigate(destination)
+    }
+    setPrompt(""); setSlashSelection(0)
+    return true
   }
 
   onMount(async () => {
@@ -157,6 +193,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const run = async (requested?: string) => {
     const submitted = (requested ?? prompt()).trim()
     if (!submitted || !workspace()) return
+    if (await executeSlashCommand(submitted)) return
     if (running()) {
       setQueuedPrompts((old) => [...old, { id: crypto.randomUUID(), text: submitted }])
       setPrompt(""); setHistoryIndex(-1)
@@ -322,7 +359,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
             <span class="composer-hint">Grok Build can read and edit this workspace</span>
           </div>
-          <textarea value={prompt()} onInput={(event) => { setPrompt(event.currentTarget.value); setHistoryIndex(-1) }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void run() } else if (event.key === "ArrowUp" && (event.currentTarget.selectionStart === 0 || !prompt())) { event.preventDefault(); browsePromptHistory(-1) } else if (event.key === "ArrowDown" && event.currentTarget.selectionStart === prompt().length) { event.preventDefault(); browsePromptHistory(1) } }} placeholder={running() ? "Send another instruction — it will be queued…" : "Ask Grok Build to code, debug, or explain…"} rows={3} />
+          <Show when={slashMatches().length}><div class="slash-palette"><For each={slashMatches()}>{(command, index) => <button class={index() === slashSelection() ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); setPrompt(`/${command.name}${command.usage?.includes("<") ? " " : ""}`); setSlashSelection(0) }}><code>/{command.name}</code><span>{command.description}</span><Show when={command.usage}><small>{command.usage}</small></Show></button>}</For></div></Show>
+          <Show when={slashNotice()}><pre class="slash-notice">{slashNotice()}</pre></Show>
+          <textarea value={prompt()} onInput={(event) => { setPrompt(event.currentTarget.value); setHistoryIndex(-1); setSlashSelection(0); if (event.currentTarget.value) setSlashNotice("") }} onKeyDown={(event) => { const matches = slashMatches(); if (matches.length && event.key === "ArrowDown") { event.preventDefault(); setSlashSelection((value) => (value + 1) % matches.length) } else if (matches.length && event.key === "ArrowUp") { event.preventDefault(); setSlashSelection((value) => (value - 1 + matches.length) % matches.length) } else if (matches.length && (event.key === "Tab" || event.key === "Enter") && !event.shiftKey) { event.preventDefault(); const command = matches[slashSelection()]; if (command) { const requiresArgs = command.usage?.includes("<"); setPrompt(`/${command.name}${requiresArgs ? " " : ""}`); setSlashSelection(0); if (!requiresArgs && event.key === "Enter") void run(`/${command.name}`) } } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void run() } else if (event.key === "ArrowUp" && (event.currentTarget.selectionStart === 0 || !prompt())) { event.preventDefault(); browsePromptHistory(-1) } else if (event.key === "ArrowDown" && event.currentTarget.selectionStart === prompt().length) { event.preventDefault(); browsePromptHistory(1) } }} placeholder={running() ? "Send another instruction — it will be queued…" : "Ask Grok Build to code, debug, or type / for commands…"} rows={3} />
           <div class="chat-composer__footer">
             <button class="composer-icon" onClick={chooseWorkspace} title="Attach or open a workspace">＋</button>
             <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} />◇ Think</label>

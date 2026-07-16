@@ -14,10 +14,13 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 - Path containment, symlink rejection, terminal limits, explicit approvals, and no automatic model loading.
 - Hermes-style persistent project chats with streamed messages, collapsed reasoning, prompt queues, history recall, copy/retry actions, and a bottom-docked composer.
 - Optional Dyad-style live preview beside the chat, with automatic dev-server URL detection, responsive device widths, reload, and browser handoff.
+- Slash-command palette with keyboard autocomplete, desktop controls, model/reasoning switches, navigation commands, and dynamically discovered Grok Build skills.
 
 ## Chat workflow
 
 Each workspace has its own locally persisted conversation. Grok Build output streams into the thread, `thought` events and `<think>…</think>` blocks stay collapsed by default, and a second instruction entered during a run is queued and drained automatically. Press **Enter** to send, **Shift+Enter** for a new line, use arrow up/down at the input boundary to browse prompt history, and choose **New chat** to clear only the active workspace conversation.
+
+Type `/` to open the command palette. Arrow keys select a command and Enter or Tab completes it. Desktop commands such as `/new`, `/model`, `/think`, `/preview`, `/terminal`, and `/settings` execute locally; discovered skill commands are sent through Grok Build.
 
 ## Install
 
