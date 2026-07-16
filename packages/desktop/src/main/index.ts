@@ -162,7 +162,7 @@ app.whenReady().then(async () => {
     const cwd = storedWorkspace || join(app.getPath("userData"), "Scratch")
     mkdirSync(cwd, { recursive: true })
     let response = ""
-    const input = { prompt: taskText.slice(0, 20_000), cwd, model: getStore().get("defaults.model") as string | undefined }
+    const input = { prompt: taskText.slice(0, 20_000), cwd, model: getStore().get("defaults.model") as string | undefined, permissionMode: "auto" as const, noPlan: true }
     telegramTaskCancelled = false
     const run = startGrokRun(input)
     const startedAt = Date.now()

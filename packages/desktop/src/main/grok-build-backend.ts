@@ -69,6 +69,7 @@ export type RunTaskInput = {
   promptJson?: string
   sessionId?: string
   noPlan?: boolean
+  resumeFallbackPrompt?: string
   moa?: { referenceModels: string[]; aggregatorModel?: string }
 }
 
@@ -201,7 +202,7 @@ export class GrokBuildBackend {
       onEvent({ type: "thought", data: `Mixture of Agents: consulting ${references.length} reference models in parallel…` })
       try {
         const candidates = await Promise.allSettled(references.map(async (referenceModel, index) => {
-          const candidatePrompt = `Act as independent solution candidate ${index + 1} of ${references.length}. Analyze the coding task deeply and propose a concrete implementation. Do not edit files; return an implementation plan, risks, and verification steps.\n\nTask:\n${input.prompt}`
+          const candidatePrompt = `Act as independent solution candidate ${index + 1} of ${references.length}. Analyze the coding task deeply and propose a concrete implementation, risks, and verification steps for the acting agent. Do not edit files: parallel reference agents are advisory so they cannot collide in the workspace.\n\nTask:\n${input.prompt}`
           const candidateArgs = ["-p", candidatePrompt, "--cwd", input.cwd, "--output-format", "plain", "--permission-mode", "plan", "--no-subagents", "--model", referenceModel]
           const { stdout } = await execFileAsync(command, candidateArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: this.environment() })
           onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed.\n${stdout.trim()}` })
@@ -215,7 +216,7 @@ export class GrokBuildBackend {
           return []
         })
         if (!answers.length) throw new Error("All MoA reference models failed. Choose different reference models or disable MoA.")
-        effectivePrompt = `You are the acting Mixture-of-Agents aggregator. Synthesize the strongest parts of the independent reference analyses below, resolve conflicts, then execute the original coding task in the workspace. Verify the final implementation.\n\n## Original task\n${input.prompt}\n\n${answers.join("\n\n")}`
+        effectivePrompt = `You are the sole acting Mixture-of-Agents implementer. The references below are advisory only. Synthesize their strongest ideas, resolve conflicts, then ACT: inspect the workspace, edit/create the required files, run the relevant commands and tests, and verify the result. Do not stop after explaining or planning. The task is complete only when the requested implementation exists in the workspace and has been verified.\n\n## Original task\n${input.prompt}\n\n## Reference analyses\n${answers.join("\n\n")}`
         effectiveModel = input.moa.aggregatorModel || input.model
       } finally {
         this.moaAbort = null
@@ -237,7 +238,13 @@ export class GrokBuildBackend {
     if (input.subagents === false) args.push("--no-subagents")
     if (input.agent?.trim()) args.push("--agent", input.agent.trim())
     if (input.agents?.trim()) { JSON.parse(input.agents); args.push("--agents", input.agents) }
-    if (input.permissionMode) args.push("--permission-mode", input.permissionMode)
+    // Headless `default` cancels any tool call that would normally prompt.
+    // `auto` is Grok Build's balanced autonomous classifier; MoA needs it so
+    // the sole acting aggregator can implement while references stay read-only.
+    const permissionMode = input.moa && (!input.permissionMode || input.permissionMode === "default" || input.permissionMode === "acceptEdits")
+      ? "auto"
+      : input.permissionMode
+    if (permissionMode) args.push("--permission-mode", permissionMode)
     for (const rule of input.allow || []) if (rule.trim()) args.push("--allow", rule.trim())
     for (const rule of input.deny || []) if (rule.trim()) args.push("--deny", rule.trim())
     if (input.tools?.trim()) args.push("--tools", input.tools.trim())
@@ -251,7 +258,7 @@ export class GrokBuildBackend {
     if (input.resume && input.forkSession) args.push("--fork-session")
     if (input.resume && input.restoreCode) args.push("--restore-code")
     if (input.sessionId?.trim() && (!input.resume || input.forkSession)) args.push("--session-id", input.sessionId.trim())
-    if (input.noPlan) args.push("--no-plan")
+    if (input.noPlan || (input.moa && permissionMode !== "plan")) args.push("--no-plan")
     if (!input.resume && input.worktree) args.push(input.worktreeName?.trim() ? `--worktree=${input.worktreeName.trim()}` : "--worktree")
     if (!input.resume && input.worktree && input.worktreeRef?.trim()) args.push("--worktree-ref", input.worktreeRef.trim())
     if (structuredOutput) { JSON.parse(input.jsonSchema!); args.push("--json-schema", input.jsonSchema!) }
@@ -300,6 +307,24 @@ export class GrokBuildBackend {
       await runChild(args)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      const resumeFailed = Boolean(input.resume && input.resumeFallbackPrompt?.trim() && /session.{0,40}(?:not found|missing|invalid|failed|does not exist)|failed.{0,40}resume/i.test(message))
+      if (resumeFailed) {
+        onEvent({ type: "thought", data: "The saved Grok session could not be resumed. Recovered the conversation from the desktop transcript and continued in a new session.\n" })
+        const withoutResume: string[] = []
+        for (let index = promptArgs.length; index < args.length; index++) {
+          if (args[index] === "--resume") { index++; continue }
+          if (args[index] === "--fork-session" || args[index] === "--restore-code") continue
+          withoutResume.push(args[index])
+        }
+        try {
+          await runChild(["-p", input.resumeFallbackPrompt!, ...withoutResume])
+          return
+        } catch (fallbackError) {
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+          onEvent({ type: "error", message: fallbackMessage })
+          throw fallbackError
+        }
+      }
       onEvent({ type: "error", message })
       throw error
     }

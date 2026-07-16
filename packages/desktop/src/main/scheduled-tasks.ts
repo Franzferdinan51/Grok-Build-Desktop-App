@@ -27,7 +27,7 @@ export class GrokTaskScheduler {
       if (this.backend.isRunning()) return
       const run = startGrokRun({ prompt: task.prompt, cwd: task.cwd, model: task.model })
       try {
-        await this.backend.run({ prompt: task.prompt, cwd: task.cwd, model: task.model }, () => {})
+        await this.backend.run({ prompt: task.prompt, cwd: task.cwd, model: task.model, permissionMode: "auto", noPlan: true }, () => {})
         finishGrokRun(run.id, { status: "completed" }); this.finish(task, "completed")
       } catch (error) {
         finishGrokRun(run.id, { status: "failed", error: String(error) }); this.finish(task, "failed")

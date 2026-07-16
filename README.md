@@ -12,7 +12,7 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - Start immediately in an isolated Scratch workspace or open an existing project.
 - Workspace file browser/editor, contained terminal, Git status, and per-file diffs.
 - Fixed header and composer with an independently scrolling chat transcript; every non-chat page, including the full Settings catalog, has its own reliable viewport scroll.
-- Grok session IDs persist per workspace and resume across turns, stops, relaunches, and project switches. Recent transcript context is safely reinjected when no resumable backend session is available.
+- Grok session IDs persist per workspace and resume across turns, stops, relaunches, and project switches. If a saved native session becomes unavailable, the app automatically recovers from the recent local transcript instead of dropping continuity.
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
 - Searchable Grok run history, scheduled tasks, project skills, and durable workspace goals.
 - Slash-command palette with keyboard completion and dynamically discovered Grok Build skills.
@@ -32,6 +32,7 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 
 - Hermes-inspired MoA presets for 2–10 parallel reference models plus a separate acting aggregator.
 - Reference models run concurrently in plan-only mode and cannot edit files.
+- One acting aggregator receives those analyses, runs in autonomous execution mode, edits the workspace, executes commands, and verifies the finished implementation; it is explicitly prevented from stopping at another plan.
 - Provider-specific null numeric metadata and metadata-only Responses API control frames are normalized by the maintained Grok backend without changing the selected model.
 - MoA never silently substitutes the Grok default for a chosen reference model; an isolated failed reference is reported and skipped while successful selected references continue.
 - Optional balanced or proactive Grok Build subagent delegation for independent research, inspection, testing, and preview review.

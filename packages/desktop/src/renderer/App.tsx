@@ -15,7 +15,7 @@ type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; cr
 type QueuedPrompt = { id: string; text: string }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type AdvancedSettings = { agent: string; agents: string; permissionMode: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow: string; deny: string; tools: string; disallowedTools: string; memory: "default" | "experimental" | "disabled"; sandbox: string; rules: string; systemPrompt: string; verbatim: boolean; forkSession: boolean; restoreCode: boolean; worktree: boolean; worktreeName: string; worktreeRef: string; jsonSchema: string; promptFile: string; promptJson: string; sessionId: string; noPlan: boolean }
-const ADVANCED_DEFAULTS: AdvancedSettings = { agent: "", agents: "", permissionMode: "default", allow: "", deny: "", tools: "", disallowedTools: "", memory: "default", sandbox: "", rules: "", systemPrompt: "", verbatim: false, forkSession: false, restoreCode: false, worktree: false, worktreeName: "", worktreeRef: "", jsonSchema: "", promptFile: "", promptJson: "", sessionId: "", noPlan: false }
+const ADVANCED_DEFAULTS: AdvancedSettings = { agent: "", agents: "", permissionMode: "auto", allow: "", deny: "", tools: "", disallowedTools: "", memory: "default", sandbox: "", rules: "", systemPrompt: "", verbatim: false, forkSession: false, restoreCode: false, worktree: false, worktreeName: "", worktreeRef: "", jsonSchema: "", promptFile: "", promptJson: "", sessionId: "", noPlan: true }
 
 function RichText(props: { content: string }) {
   const html = () => DOMPurify.sanitize(marked.parse(props.content, { async: false }) as string)
@@ -361,7 +361,16 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setAgentAppControls((await window.api.store.get<boolean>("agent.appControls")) ?? false)
     setSubagentsEnabled((await window.api.store.get<boolean>("agent.subagents")) ?? true)
     setDelegationMode((await window.api.store.get<"balanced" | "aggressive">("agent.delegationMode")) ?? "balanced")
-    setAdvanced({ ...ADVANCED_DEFAULTS, ...((await window.api.store.get<Partial<AdvancedSettings>>("defaults.advanced")) || {}) })
+    const savedAdvanced = (await window.api.store.get<Partial<AdvancedSettings>>("defaults.advanced")) || {}
+    const executionDefaultsMigrated = (await window.api.store.get<boolean>("defaults.executionV2")) ?? false
+    const nextAdvanced = { ...ADVANCED_DEFAULTS, ...savedAdvanced }
+    if (!executionDefaultsMigrated) {
+      if (!savedAdvanced.permissionMode || savedAdvanced.permissionMode === "default" || savedAdvanced.permissionMode === "acceptEdits") nextAdvanced.permissionMode = "auto"
+      if (savedAdvanced.noPlan === undefined || savedAdvanced.noPlan === false) nextAdvanced.noPlan = true
+      await window.api.store.set("defaults.advanced", nextAdvanced)
+      await window.api.store.set("defaults.executionV2", true)
+    }
+    setAdvanced(nextAdvanced)
     const savedModel = await window.api.store.get<string>("defaults.model")
     if (savedModel && selectableModels().includes(savedModel)) setModel(savedModel)
     unsubscribeBackend = window.api.backend.onEvent((event: BackendEvent) => {
@@ -462,10 +471,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const activeGoal = goal()?.status === "active" ? goal() : null
       let executionPrompt = activeGoal ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.` : submitted
       const resumeSession = sessionId()
-      if (!resumeSession && priorMessages.length) {
-        const recentContext = priorMessages.slice(-12).map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.logs.map((log) => log.content).join("\n")}`).join("\n\n").slice(-40_000)
-        executionPrompt = `## Recent conversation context\nContinue this workspace conversation without repeating completed work.\n\n${recentContext}\n\n## Current instruction\n${executionPrompt}`
-      }
+      const recentContext = priorMessages.slice(-12).map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.logs.map((log) => log.content).join("\n")}`).join("\n\n").slice(-40_000)
+      const withRecentContext = (instruction: string) => `## Recent conversation context\nContinue this workspace conversation without repeating completed work. Preserve decisions, unfinished tasks, and the user's intent.\n\n${recentContext}\n\n## Current instruction\n${instruction}`
+      if (!resumeSession && recentContext) executionPrompt = withRecentContext(executionPrompt)
       if (agentAppControls()) {
         executionPrompt += `\n\n## Desktop host controls\nYou may control safe app features by ending your response with one or more exact action tags. Use only when useful:\n<app_action>{"type":"preview.open"}</app_action>\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nThese actions are schema-validated by the host. Never place shell commands or secrets in an action.`
         if (previewOpen()) {
@@ -484,7 +492,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       }
       const references = moaReferenceModels().slice(0, moaCandidates()).filter(Boolean)
       const advancedRun = advanced()
-      const result = await window.api.backend.run({ prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled(), agent: advancedRun.agent || undefined, agents: advancedRun.agents || undefined, permissionMode: advancedRun.permissionMode, allow: advancedRun.allow.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), deny: advancedRun.deny.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), tools: advancedRun.tools || undefined, disallowedTools: advancedRun.disallowedTools || undefined, memory: advancedRun.memory, sandbox: advancedRun.sandbox || undefined, rules: advancedRun.rules || undefined, systemPrompt: advancedRun.systemPrompt || undefined, verbatim: advancedRun.verbatim, forkSession: advancedRun.forkSession, restoreCode: advancedRun.restoreCode, worktree: advancedRun.worktree, worktreeName: advancedRun.worktreeName || undefined, worktreeRef: advancedRun.worktreeRef || undefined, jsonSchema: advancedRun.jsonSchema || undefined, promptFile: advancedRun.promptFile || undefined, promptJson: advancedRun.promptJson || undefined, sessionId: advancedRun.sessionId || undefined, noPlan: advancedRun.noPlan })
+      const result = await window.api.backend.run({ prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, resumeFallbackPrompt: resumeSession && recentContext ? withRecentContext(executionPrompt) : undefined, bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled(), agent: advancedRun.agent || undefined, agents: advancedRun.agents || undefined, permissionMode: advancedRun.permissionMode, allow: advancedRun.allow.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), deny: advancedRun.deny.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), tools: advancedRun.tools || undefined, disallowedTools: advancedRun.disallowedTools || undefined, memory: advancedRun.memory, sandbox: advancedRun.sandbox || undefined, rules: advancedRun.rules || undefined, systemPrompt: advancedRun.systemPrompt || undefined, verbatim: advancedRun.verbatim, forkSession: advancedRun.forkSession, restoreCode: advancedRun.restoreCode, worktree: advancedRun.worktree, worktreeName: advancedRun.worktreeName || undefined, worktreeRef: advancedRun.worktreeRef || undefined, jsonSchema: advancedRun.jsonSchema || undefined, promptFile: advancedRun.promptFile || undefined, promptJson: advancedRun.promptJson || undefined, sessionId: advancedRun.sessionId || undefined, noPlan: advancedRun.noPlan })
       if (result.grokSessionId) { setSessionId(result.grokSessionId); await window.api.store.set(sessionKey(runWorkspace), result.grokSessionId) }
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
