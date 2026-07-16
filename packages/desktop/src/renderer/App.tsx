@@ -91,6 +91,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [previewReload, setPreviewReload] = createSignal(0)
   const [previewDevice, setPreviewDevice] = createSignal<"desktop" | "tablet" | "mobile">("desktop")
   const [previewStatus, setPreviewStatus] = createSignal("Ready to connect")
+  const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false)
+  const [previewCollapsed, setPreviewCollapsed] = createSignal(false)
   const [agentAppControls, setAgentAppControls] = createSignal(false)
   const [subagentsEnabled, setSubagentsEnabled] = createSignal(true)
   const [delegationMode, setDelegationMode] = createSignal<"balanced" | "aggressive">("balanced")
@@ -313,6 +315,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     // Remember that Preview is available, but never force the rail open on
     // launch. The user or agent opens it deliberately for the current task.
     setPreviewEnabled(savedPreviewEnabled); setPreviewOpen(false); setPreviewURL(savedPreviewURL); setPreviewDraft(savedPreviewURL)
+    setSidebarCollapsed((await window.api.store.get<boolean>("layout.sidebarCollapsed")) ?? false)
+    setPreviewCollapsed((await window.api.store.get<boolean>("layout.previewCollapsed")) ?? false)
     setMoaEnabled((await window.api.store.get<boolean>("moa.enabled")) ?? false)
     setMoaCandidates(Math.min(10, Math.max(2, (await window.api.store.get<number>("moa.candidates")) || 3)))
     const savedReferences = (await window.api.store.get<string[]>("moa.referenceModels")) ?? []
@@ -576,9 +580,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
   }
 
-  return <div class="app-root">
-    <aside class="sidebar">
-      <div class="brand"><img class="brand__logo" src={grokBuildLogo} alt="" /><span>Grok Build</span></div>
+  return <div class={`app-root ${sidebarCollapsed() ? "app-root--sidebar-collapsed" : ""}`}>
+    <aside class={`sidebar ${sidebarCollapsed() ? "sidebar--collapsed" : ""}`}>
+      <div class="brand"><img class="brand__logo" src={grokBuildLogo} alt="" /><span>Grok Build</span><button class="sidebar-collapse" onClick={async () => { const next = !sidebarCollapsed(); setSidebarCollapsed(next); await window.api.store.set("layout.sidebarCollapsed", next) }} title={sidebarCollapsed() ? "Expand sidebar" : "Collapse sidebar"}>{sidebarCollapsed() ? "›" : "‹"}</button></div>
       <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => void navigate(item.id)}><span>{item.icon}</span>{item.label}</button>}</For></nav>
       <div class="sidebar__section">
         <div class="section-heading"><span class="sidebar__section-title">Projects</span><button class="project-add" onClick={chooseWorkspace} title="Add project">+</button></div>
@@ -592,7 +596,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       </div>
     </aside>
 
-    <main class={`main-content ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
+    <main class={`main-content ${active() === "new-task" ? "main-content--chat" : ""} ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
       <Show when={active() === "review"} fallback={
       <Show when={active() === "workspace"} fallback={
       <Show when={active() === "terminal"} fallback={
@@ -602,7 +606,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       <Show when={active() === "telegram"} fallback={
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
-        <div class={`chat-workbench ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""}`}><div class="chat-column"><section class="chat-thread">
+        <div class={`chat-workbench ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""}`}><div class="chat-column"><section class="chat-thread">
           <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus((error as Error).message) } } setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button onClick={async () => { await saveConversation([]); setEvents([]) }}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
           <div class="chat-messages" ref={messagesElement}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
@@ -637,7 +641,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <Show when={running()}><button class="composer-stop" onClick={() => window.api.backend.cancel()} title="Stop current task"><span /></button></Show>
           </div>
         </section>
-        </div><Show when={previewEnabled() && previewOpen()}><aside class="preview-rail"><header><div><strong>Preview</strong><span>{previewStatus()}</span></div><div class="preview-actions"><button class={previewDevice() === "desktop" ? "active" : ""} onClick={() => setPreviewDevice("desktop")} title="Desktop">▰</button><button class={previewDevice() === "tablet" ? "active" : ""} onClick={() => setPreviewDevice("tablet")} title="Tablet">▯</button><button class={previewDevice() === "mobile" ? "active" : ""} onClick={() => setPreviewDevice("mobile")} title="Mobile">▯</button><button onClick={() => setPreviewReload((value) => value + 1)} title="Reload">↻</button><button onClick={() => window.api.app.openExternal(previewURL())} title="Open in browser">↗</button><button onClick={() => setPreviewOpen(false)} title="Close preview">×</button></div></header><div class="preview-location"><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} onKeyDown={async (event) => { if (event.key === "Enter") { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set("preview.url", value) } } }} /><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set("preview.url", value) } }}>Go</button></div><div class={`preview-viewport preview-viewport--${previewDevice()}`}><iframe src={`${previewURL()}${previewURL().includes("?") ? "&" : "?"}grok-preview-reload=${previewReload()}`} title="Coding preview" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-presentation allow-downloads" onLoad={() => setPreviewStatus("Connected")} /></div></aside></Show></div>
+        </div><Show when={previewEnabled() && previewOpen()}><aside class={`preview-rail ${previewCollapsed() ? "preview-rail--collapsed" : ""}`}><header><div><strong>Preview</strong><span>{previewStatus()}</span></div><div class="preview-actions"><button onClick={async () => { const next = !previewCollapsed(); setPreviewCollapsed(next); await window.api.store.set("layout.previewCollapsed", next) }} title={previewCollapsed() ? "Expand preview" : "Collapse preview"}>{previewCollapsed() ? "‹" : "›"}</button><Show when={!previewCollapsed()}><button class={previewDevice() === "desktop" ? "active" : ""} onClick={() => setPreviewDevice("desktop")} title="Desktop">▰</button><button class={previewDevice() === "tablet" ? "active" : ""} onClick={() => setPreviewDevice("tablet")} title="Tablet">▯</button><button class={previewDevice() === "mobile" ? "active" : ""} onClick={() => setPreviewDevice("mobile")} title="Mobile">▯</button><button onClick={() => setPreviewReload((value) => value + 1)} title="Reload">↻</button><button onClick={() => window.api.app.openExternal(previewURL())} title="Open in browser">↗</button></Show><button onClick={() => setPreviewOpen(false)} title="Close preview">×</button></div></header><Show when={!previewCollapsed()}><div class="preview-location"><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} onKeyDown={async (event) => { if (event.key === "Enter") { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set("preview.url", value) } } }} /><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set("preview.url", value) } }}>Go</button></div><div class={`preview-viewport preview-viewport--${previewDevice()}`}><iframe src={`${previewURL()}${previewURL().includes("?") ? "&" : "?"}grok-preview-reload=${previewReload()}`} title="Coding preview" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-presentation allow-downloads" onLoad={() => setPreviewStatus("Connected")} /></div></Show></aside></Show></div>
         </>}>
         <section class="runs-panel">
           <span class="eyebrow">GROK BUILD RUN HISTORY</span>

@@ -155,13 +155,30 @@ export class GrokBuildBackend {
       const references = input.moa.referenceModels.slice(0, 10)
       onEvent({ type: "thought", data: `Mixture of Agents: consulting ${references.length} reference models in parallel…` })
       try {
-        const answers = await Promise.all(references.map(async (referenceModel, index) => {
+        const candidates = await Promise.allSettled(references.map(async (referenceModel, index) => {
           const candidatePrompt = `Act as independent solution candidate ${index + 1} of ${references.length}. Analyze the coding task deeply and propose a concrete implementation. Do not edit files; return an implementation plan, risks, and verification steps.\n\nTask:\n${input.prompt}`
           const candidateArgs = ["-p", candidatePrompt, "--cwd", input.cwd, "--output-format", "plain", "--permission-mode", "plan", "--no-subagents", "--model", referenceModel]
-          const { stdout } = await execFileAsync(command, candidateArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: this.environment() })
-          onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed.\n${stdout.trim()}` })
-          return `## Reference ${index + 1} — ${referenceModel}\n${stdout.trim()}`
+          try {
+            const { stdout } = await execFileAsync(command, candidateArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: this.environment() })
+            onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed.\n${stdout.trim()}` })
+            return `## Reference ${index + 1} — ${referenceModel}\n${stdout.trim()}`
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            if (!/serialization error: (?:missing field [`']?created|invalid type: null, expected u32)/i.test(message)) throw error
+            onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) returned incompatible usage metadata. Retrying that candidate with the Grok Build default model…` })
+            const fallbackArgs = candidateArgs.slice(0, -2)
+            const { stdout } = await execFileAsync(command, fallbackArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: this.environment() })
+            onEvent({ type: "thought", data: `Reference ${index + 1} (default fallback) completed.\n${stdout.trim()}` })
+            return `## Reference ${index + 1} — default fallback for ${referenceModel}\n${stdout.trim()}`
+          }
         }))
+        const answers = candidates.flatMap((candidate, index) => {
+          if (candidate.status === "fulfilled") return [candidate.value]
+          const reason = candidate.reason instanceof Error ? candidate.reason.message : String(candidate.reason)
+          onEvent({ type: "thought", data: `Reference ${index + 1} failed and was skipped: ${reason.slice(0, 500)}` })
+          return []
+        })
+        if (!answers.length) throw new Error("All MoA reference models failed. Choose different reference models or disable MoA.")
         effectivePrompt = `You are the acting Mixture-of-Agents aggregator. Synthesize the strongest parts of the independent reference analyses below, resolve conflicts, then execute the original coding task in the workspace. Verify the final implementation.\n\n## Original task\n${input.prompt}\n\n${answers.join("\n\n")}`
         effectiveModel = input.moa.aggregatorModel || input.model
       } finally {
@@ -215,7 +232,7 @@ export class GrokBuildBackend {
       await runChild(args)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      const incompatibleProvider = Boolean(effectiveModel) && /serialization error: missing field [`']?created/i.test(message)
+      const incompatibleProvider = Boolean(effectiveModel) && /serialization error: (?:missing field [`']?created|invalid type: null, expected u32)/i.test(message)
       if (!incompatibleProvider) {
         onEvent({ type: "error", message })
         throw error
