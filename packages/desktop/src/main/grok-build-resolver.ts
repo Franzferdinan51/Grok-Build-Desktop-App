@@ -8,6 +8,8 @@
 
 import { execFile } from "child_process"
 import { existsSync } from "fs"
+import { homedir } from "os"
+import { join } from "path"
 import { promisify } from "util"
 
 const execute = promisify(execFile)
@@ -15,7 +17,7 @@ const PROBE_TIMEOUT_MS = 5_000
 
 export type GrokBuildCandidate = {
   command: string
-  source: "GROK_BUILD_PATH" | "PATH"
+  source: "GROK_BUILD_PATH" | "PATH" | "COMMON_LOCATION"
 }
 
 export type ResolvedGrokBuild =
@@ -25,7 +27,11 @@ export type ResolvedGrokBuild =
 export function grokBuildCandidates(environment: NodeJS.ProcessEnv = process.env): GrokBuildCandidate[] {
   const explicit = environment.GROK_BUILD_PATH?.trim()
   if (explicit) return [{ command: explicit, source: "GROK_BUILD_PATH" }]
-  return [{ command: "grok", source: "PATH" }]
+  const candidates: GrokBuildCandidate[] = [{ command: "grok", source: "PATH" }]
+  for (const command of [join(homedir(), ".local", "bin", "grok"), "/opt/homebrew/bin/grok", "/usr/local/bin/grok"]) {
+    if (existsSync(command)) candidates.push({ command, source: "COMMON_LOCATION" })
+  }
+  return candidates
 }
 
 export async function probeGrokBuild(candidate: GrokBuildCandidate): Promise<ResolvedGrokBuild> {

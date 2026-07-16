@@ -53,12 +53,9 @@ export class GrokBuildBackend {
 
   isRunning(): boolean { return this.current !== null || this.moaAbort !== null }
 
-  private command(): string {
-    return getStore().get("grok.cliPath") || process.env.GROK_BUILD_PATH || "grok"
-  }
-
   async status(): Promise<GrokBuildStatus> {
-    return resolveGrokBuild({ ...process.env, GROK_BUILD_PATH: this.command() })
+    const configured = getStore().get("grok.cliPath") || process.env.GROK_BUILD_PATH
+    return resolveGrokBuild(configured ? { ...process.env, GROK_BUILD_PATH: configured } : process.env)
   }
 
   /**
@@ -95,7 +92,9 @@ export class GrokBuildBackend {
     if (!input.prompt.trim()) throw new Error("A task prompt is required")
     if (this.isRunning()) throw new Error("A Grok Build task is already running")
 
-    const command = this.command()
+    const status = await this.status()
+    if (!status.available) throw new Error(status.error)
+    const command = status.command
     let effectivePrompt = input.prompt
     let effectiveModel = input.model
     if (input.moa?.referenceModels.length) {
