@@ -44,12 +44,14 @@ export type RunTaskInput = {
   selfVerify?: boolean
   maxTurns?: number
   disableWebSearch?: boolean
+  moa?: { referenceModels: string[]; aggregatorModel?: string }
 }
 
 export class GrokBuildBackend {
   private current: ChildProcess | null = null
+  private moaAbort: AbortController | null = null
 
-  isRunning(): boolean { return this.current !== null }
+  isRunning(): boolean { return this.current !== null || this.moaAbort !== null }
 
   private command(): string {
     return getStore().get("grok.cliPath") || process.env.GROK_BUILD_PATH || "grok"
@@ -91,19 +93,40 @@ export class GrokBuildBackend {
 
   async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void): Promise<void> {
     if (!input.prompt.trim()) throw new Error("A task prompt is required")
-    if (this.current) throw new Error("A Grok Build task is already running")
+    if (this.isRunning()) throw new Error("A Grok Build task is already running")
 
-    const args = ["-p", input.prompt, "--cwd", input.cwd, "--output-format", "streaming-json"]
-    if (input.model) args.push("--model", input.model)
+    const command = this.command()
+    let effectivePrompt = input.prompt
+    let effectiveModel = input.model
+    if (input.moa?.referenceModels.length) {
+      this.moaAbort = new AbortController()
+      const references = input.moa.referenceModels.slice(0, 10)
+      onEvent({ type: "thought", data: `Mixture of Agents: consulting ${references.length} reference models in parallel…` })
+      try {
+        const answers = await Promise.all(references.map(async (referenceModel, index) => {
+          const candidatePrompt = `Act as independent solution candidate ${index + 1} of ${references.length}. Analyze the coding task deeply and propose a concrete implementation. Do not edit files; return an implementation plan, risks, and verification steps.\n\nTask:\n${input.prompt}`
+          const candidateArgs = ["-p", candidatePrompt, "--cwd", input.cwd, "--output-format", "plain", "--permission-mode", "plan", "--no-subagents", "--model", referenceModel]
+          const { stdout } = await execFileAsync(command, candidateArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: { ...process.env, ...providerSecretEnvironment() } })
+          onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed.\n${stdout.trim()}` })
+          return `## Reference ${index + 1} — ${referenceModel}\n${stdout.trim()}`
+        }))
+        effectivePrompt = `You are the acting Mixture-of-Agents aggregator. Synthesize the strongest parts of the independent reference analyses below, resolve conflicts, then execute the original coding task in the workspace. Verify the final implementation.\n\n## Original task\n${input.prompt}\n\n${answers.join("\n\n")}`
+        effectiveModel = input.moa.aggregatorModel || input.model
+      } finally {
+        this.moaAbort = null
+      }
+    }
+
+    const args = ["-p", effectivePrompt, "--cwd", input.cwd, "--output-format", "streaming-json"]
+    if (effectiveModel) args.push("--model", effectiveModel)
     if (input.thinking) args.push("--reasoning-effort", "high")
     if (input.autoApprove) args.push("--yolo")
     if (input.resume) args.push("--resume", input.resume)
-    if (input.bestOfN && input.bestOfN >= 2) args.push("--best-of-n", String(Math.min(10, Math.floor(input.bestOfN))))
+    if (!input.moa && input.bestOfN && input.bestOfN >= 2) args.push("--best-of-n", String(Math.min(10, Math.floor(input.bestOfN))))
     if (input.selfVerify) args.push("--check")
     if (input.maxTurns && input.maxTurns > 0) args.push("--max-turns", String(Math.min(100, Math.floor(input.maxTurns))))
     if (input.disableWebSearch) args.push("--disable-web-search")
 
-    const command = this.command()
     writeLog("info", `Starting Grok Build task in ${input.cwd}`)
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...providerSecretEnvironment() } })
     this.current = child
@@ -146,6 +169,8 @@ export class GrokBuildBackend {
   }
 
   cancel(): void {
+    this.moaAbort?.abort()
+    this.moaAbort = null
     if (!this.current) return
     this.current.kill("SIGTERM")
     this.current = null

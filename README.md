@@ -17,6 +17,7 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 - Slash-command palette with keyboard autocomplete, desktop controls, model/reasoning switches, navigation commands, and dynamically discovered Grok Build skills.
 - Optional Hermes-inspired Mixture of Agents mode using Grok Build's native `--best-of-n`: 2–10 parallel candidate solutions with a synthesized winner.
 - MoA appears as a virtual model family in the main picker (Fast ×2, Balanced ×3, Thorough ×5, Exhaustive ×8) while retaining the selected Grok model underneath.
+- Hermes-style MoA routing supports per-reference models and a separate aggregator: references run concurrently in plan-only mode, then the acting aggregator implements the synthesized solution.
 - Persistent coding-agent defaults for model, reasoning, self-verification, maximum turns, web access, and approval policy.
 - Durable workspace goals combining Grok/Hermes standing-goal semantics with Codex-style status control and progress across runs.
 
