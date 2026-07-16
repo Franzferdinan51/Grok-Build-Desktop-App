@@ -56,7 +56,7 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     try {
       await deps.backend().run(input, (update) => {
-        if (update.type === "end" && typeof update.sessionId === "string") grokSessionId = update.sessionId
+        if ("sessionId" in update && typeof update.sessionId === "string") grokSessionId = update.sessionId
         queueEvent(update)
       })
       flushEvents()

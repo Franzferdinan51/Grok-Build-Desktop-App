@@ -8,10 +8,11 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 
 ### Agentic coding workspace
 
-- Per-project conversations with streamed output, collapsed reasoning, prompt queues, copy/retry actions, and history recall.
+- Per-project conversations with sanitized rich Markdown, code blocks, tables, images, streamed output, collapsed reasoning, prompt queues, copy/retry actions, and history recall.
 - Start immediately in an isolated Scratch workspace or open an existing project.
 - Workspace file browser/editor, contained terminal, Git status, and per-file diffs.
-- Fixed header and composer with an independently scrolling chat transcript.
+- Fixed header and composer with an independently scrolling chat transcript; every non-chat page, including the full Settings catalog, has its own reliable viewport scroll.
+- Grok session IDs persist per workspace and resume across turns, stops, relaunches, and project switches. Recent transcript context is safely reinjected when no resumable backend session is available.
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
 - Searchable Grok run history, scheduled tasks, project skills, and durable workspace goals.
 - Slash-command palette with keyboard completion and dynamically discovered Grok Build skills.
@@ -31,7 +32,8 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 
 - Hermes-inspired MoA presets for 2–10 parallel reference models plus a separate acting aggregator.
 - Reference models run concurrently in plan-only mode and cannot edit files.
-- Provider-specific malformed usage metadata no longer aborts the entire MoA run: affected candidates retry safely with the Grok default, and an isolated candidate failure can be skipped.
+- Provider-specific null numeric metadata and metadata-only Responses API control frames are normalized by the maintained Grok backend without changing the selected model.
+- MoA never silently substitutes the Grok default for a chosen reference model; an isolated failed reference is reported and skipped while successful selected references continue.
 - Optional balanced or proactive Grok Build subagent delegation for independent research, inspection, testing, and preview review.
 - The primary agent remains responsible for integration and final verification.
 
@@ -100,7 +102,7 @@ Output is written to `packages/desktop/dist`.
 
 ## Chat workflow
 
-Each workspace has its own locally persisted conversation. Press **Enter** to send, **Shift+Enter** for a new line, and use Up/Down at the input boundary for prompt history. Messages submitted during a run are queued and drained automatically.
+Each workspace has its own locally persisted conversation and resumable Grok session. Press **Enter** to send, **Shift+Enter** for a new line, and use Up/Down at the input boundary for prompt history. Messages submitted during a run are queued and drained automatically. Stopping a run preserves partial output and continuity for the next instruction; **New chat** deliberately clears both the transcript and backend session.
 
 Type `/` for local commands. Important commands include:
 

@@ -1,5 +1,7 @@
 import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
+import DOMPurify from "dompurify"
+import { marked } from "marked"
 import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
 import { splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
@@ -12,6 +14,16 @@ import grokBuildLogo from "./assets/grok-build-logo.png"
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
 type QueuedPrompt = { id: string; text: string }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
+
+function RichText(props: { content: string }) {
+  const html = () => DOMPurify.sanitize(marked.parse(props.content, { async: false }) as string)
+  return <div class="rich-text" innerHTML={html()} onClick={(event) => {
+    const anchor = (event.target as HTMLElement).closest("a")
+    if (!anchor) return
+    event.preventDefault()
+    if (/^https?:\/\//i.test(anchor.href)) void window.api.app.openExternal(anchor.href)
+  }} />
+}
 
 const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },
@@ -35,6 +47,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [active, setActive] = createSignal("new-task")
   const [events, setEvents] = createSignal<TaskLog[]>([])
   const [messages, setMessages] = createSignal<ChatMessage[]>([])
+  const [sessionId, setSessionId] = createSignal("")
   const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
   const [historyIndex, setHistoryIndex] = createSignal(-1)
   const [historyDraft, setHistoryDraft] = createSignal("")
@@ -159,13 +172,21 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   })
 
   const conversationKey = (root = workspace()) => `chat.${encodeURIComponent(root)}`
+  const sessionKey = (root = workspace()) => `chat.session.${encodeURIComponent(root)}`
   const loadConversation = async (root: string) => {
     setMessages((await window.api.store.get<ChatMessage[]>(conversationKey(root))) ?? [])
+    setSessionId((await window.api.store.get<string>(sessionKey(root))) ?? "")
     setQueuedPrompts([]); setHistoryIndex(-1); setHistoryDraft("")
   }
   const saveConversation = async (next: ChatMessage[]) => {
     setMessages(next)
     if (workspace()) await window.api.store.set(conversationKey(), next)
+  }
+  const newConversation = async () => {
+    await saveConversation([])
+    setSessionId("")
+    if (workspace()) await window.api.store.delete(sessionKey())
+    setEvents([]); setQueuedPrompts([])
   }
   const goalKey = (root = workspace()) => `goal.${encodeURIComponent(root)}`
   const loadGoal = async (root: string) => setGoal((await window.api.store.get<WorkspaceGoal>(goalKey(root))) ?? null)
@@ -224,7 +245,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (!command) return false
     setSlashNotice("")
     if (command.name === "help") setSlashNotice(DESKTOP_SLASH_COMMANDS.map((entry) => `/${entry.name} — ${entry.description}`).join("\n"))
-    else if (command.name === "new") { await saveConversation([]); setEvents([]); setQueuedPrompts([]); setSlashNotice("Started a new chat") }
+    else if (command.name === "new") { await newConversation(); setSlashNotice("Started a new chat") }
     else if (command.name === "model") {
       const found = selectableModels().find((entry) => entry === parsed.args)
       const moaMatch = parsed.args.match(/^moa(?::(\d+))?$/i)
@@ -337,6 +358,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const savedModel = await window.api.store.get<string>("defaults.model")
     if (savedModel && selectableModels().includes(savedModel)) setModel(savedModel)
     unsubscribeBackend = window.api.backend.onEvent((event: BackendEvent) => {
+      if (event.sessionId && workspace()) {
+        setSessionId(event.sessionId)
+        void window.api.store.set(sessionKey(), event.sessionId)
+      }
       if (event.type === "text" && event.data) queueBackendEvent({ kind: "text", content: event.data })
       if (event.type === "thought" && event.data) queueBackendEvent({ kind: "thought", content: event.data })
       if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
@@ -344,7 +369,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     unsubscribeMenu = window.api.onMenuCommand((command) => {
       if (command === "new-task") {
         setActive("new-task")
-        void saveConversation([]).then(() => setEvents([]))
+        void newConversation()
       } else if (command === "open-project") void chooseWorkspace()
       else if (command === "grok-status") {
         setActive("new-task")
@@ -425,9 +450,15 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         await loadConversation(scratch.path)
         await loadGoal(scratch.path)
       }
-      await saveConversation([...messages(), { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
+      const priorMessages = messages()
+      await saveConversation([...priorMessages, { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
       const activeGoal = goal()?.status === "active" ? goal() : null
       let executionPrompt = activeGoal ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.` : submitted
+      const resumeSession = sessionId()
+      if (!resumeSession && priorMessages.length) {
+        const recentContext = priorMessages.slice(-12).map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.logs.map((log) => log.content).join("\n")}`).join("\n\n").slice(-40_000)
+        executionPrompt = `## Recent conversation context\nContinue this workspace conversation without repeating completed work.\n\n${recentContext}\n\n## Current instruction\n${executionPrompt}`
+      }
       if (agentAppControls()) {
         executionPrompt += `\n\n## Desktop host controls\nYou may control safe app features by ending your response with one or more exact action tags. Use only when useful:\n<app_action>{"type":"preview.open"}</app_action>\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nThese actions are schema-validated by the host. Never place shell commands or secrets in an action.`
         if (previewOpen()) {
@@ -445,7 +476,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           : `\n\n## Subagent delegation\nUse Grok Build subagents when two or more independent workstreams would materially improve speed or quality (for example code inspection plus tests, or implementation plus rendered-preview review). Keep one primary integrator, avoid overlapping edits, and verify delegated results.`
       }
       const references = moaReferenceModels().slice(0, moaCandidates()).filter(Boolean)
-      await window.api.backend.run({ prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled() })
+      const result = await window.api.backend.run({ prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled() })
+      if (result.grokSessionId) { setSessionId(result.grokSessionId); await window.api.store.set(sessionKey(runWorkspace), result.grokSessionId) }
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
       queueBackendEvent({ kind: "error", content: (error as Error).message })
@@ -607,11 +639,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
         <div class={`chat-workbench ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""}`}><div class="chat-column"><section class="chat-thread">
-          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus((error as Error).message) } } setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button onClick={async () => { await saveConversation([]); setEvents([]) }}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
+          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus((error as Error).message) } } setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
           <div class="chat-messages" ref={messagesElement}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
-              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(message.logs.map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) setPrompt(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
-              <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={splitThinking(events())}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thinking…</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For></Show></div></article></Show>
+              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(message.logs.map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) setPrompt(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
+              <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={splitThinking(events())}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thinking…</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For></Show></div></article></Show>
             </Show>
           </div>
         </section>
