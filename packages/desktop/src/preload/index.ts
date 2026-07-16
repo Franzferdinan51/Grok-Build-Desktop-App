@@ -16,7 +16,7 @@ export type ElectronAPI = {
   backend: {
     status: () => Promise<BackendStatus>
     models: () => Promise<GrokBuildModelCatalog>
-    run: (input: { prompt: string; cwd: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string; bestOfN?: number; selfVerify?: boolean; maxTurns?: number; disableWebSearch?: boolean; moa?: { referenceModels: string[]; aggregatorModel?: string } }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
+    run: (input: { prompt: string; cwd: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string; bestOfN?: number; selfVerify?: boolean; maxTurns?: number; disableWebSearch?: boolean; subagents?: boolean; moa?: { referenceModels: string[]; aggregatorModel?: string } }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
     autoLearn: (input: { prompt: string; cwd: string; model?: string }) => Promise<{ ok: boolean }>
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
