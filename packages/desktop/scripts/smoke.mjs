@@ -7,6 +7,7 @@ import { splitThinking } from "../src/renderer/chat-utils.ts"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "../src/main/workspace-tools.ts"
 import { inspectProject } from "../src/main/project-inspection.ts"
 import { PreviewServer } from "../src/main/preview-server.ts"
+import { telegramInlineKeyboard } from "../src/main/telegram-format.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -53,6 +54,12 @@ assert.deepEqual(splitThinking([
   { kind: "text", content: "Public answer" },
 ])
 
+assert.deepEqual(telegramInlineKeyboard({ text: "Models", buttons: [[{ text: "✓ grok-4.5", data: "pick_model:0" }]] }), {
+  inline_keyboard: [[{ text: "✓ grok-4.5", callback_data: "pick_model:0" }]],
+})
+assert.equal(telegramInlineKeyboard({ text: "No buttons", buttons: [] }), undefined)
+assert.throws(() => telegramInlineKeyboard({ text: "Too long", buttons: [[{ text: "model", data: "x".repeat(65) }]] }), /64 bytes/)
+
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
-console.log("Smoke test passed: CLI, chat parsing, workspace, preview, containment, terminal, and Git review")
+console.log("Smoke test passed: CLI, chat parsing, Telegram keyboards, workspace, preview, containment, terminal, and Git review")

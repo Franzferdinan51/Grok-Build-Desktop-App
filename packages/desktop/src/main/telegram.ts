@@ -1,9 +1,9 @@
 /** Local Telegram Bot API bridge. Tokens are encrypted with Electron safeStorage. */
 import { safeStorage } from "electron"
 import { getStore } from "./store"
+import { telegramInlineKeyboard, type TelegramReply } from "./telegram-format"
 
 export type TelegramStatus = { connected: boolean; username?: string; botId?: number; error?: string }
-export type TelegramReply = { text: string; buttons?: { text: string; data: string }[][] }
 
 async function telegramRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { signal: AbortSignal.timeout(10_000), ...init })
@@ -137,7 +137,7 @@ export class TelegramBridge {
   private async sendRich(chatId: string, reply: TelegramReply): Promise<void> {
     const token = this.token(); if (!token) return
     const payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: reply.text.slice(0, 4096), reply_markup: reply.buttons?.length ? { inline_keyboard: reply.buttons } : undefined }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: reply.text.slice(0, 4096), reply_markup: telegramInlineKeyboard(reply) }),
     })
     if (!payload.ok) throw new Error(payload.description || "Telegram send failed")
   }
