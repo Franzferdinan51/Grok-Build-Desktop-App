@@ -16,6 +16,7 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 - Optional Dyad-style live preview beside the chat, with automatic dev-server URL detection, responsive device widths, reload, and browser handoff.
 - Slash-command palette with keyboard autocomplete, desktop controls, model/reasoning switches, navigation commands, and dynamically discovered Grok Build skills.
 - Optional Hermes-inspired Mixture of Agents mode using Grok Build's native `--best-of-n`: 2–10 parallel candidate solutions with a synthesized winner.
+- MoA appears as a virtual model family in the main picker (Fast ×2, Balanced ×3, Thorough ×5, Exhaustive ×8) while retaining the selected Grok model underneath.
 - Persistent coding-agent defaults for model, reasoning, self-verification, maximum turns, web access, and approval policy.
 
 ## Chat workflow
