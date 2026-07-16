@@ -35,6 +35,7 @@ type StoreSchema = {
     cliPath?: string
     providerSecrets?: Record<string, { label: string; envKey: string; encrypted: string }>
     providerSettings?: Record<string, { baseUrl: string; modelId: string }>
+    customProviders?: { id: string; label: string; envKey: string; baseUrl: string }[]
   }
   lmstudio: {
     baseUrl: string

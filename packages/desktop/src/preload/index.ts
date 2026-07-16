@@ -28,8 +28,9 @@ export type ElectronAPI = {
   projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
   grokRuns: { list: () => Promise<GrokRunRecord[]> }
   skills: { list: (workspace?: string) => Promise<GrokSkill[]> }
-  schedules: { list: () => Promise<ScheduledGrokTask[]>; add: (input: { name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number }) => Promise<ScheduledGrokTask>; remove: (id: string) => Promise<void>; toggle: (id: string, enabled: boolean) => Promise<void> }
-  providerSecrets: { list: () => Promise<ProviderSecret[]>; save: (id: string, value: string) => Promise<void>; saveSettings: (id: string, baseUrl: string, modelId: string) => Promise<void>; remove: (id: string) => Promise<void> }
+  schedules: { list: () => Promise<ScheduledGrokTask[]>; add: (input: { name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number }) => Promise<ScheduledGrokTask>; remove: (id: string) => Promise<void>; toggle: (id: string, enabled: boolean) => Promise<void>; runNow: (id: string) => Promise<void> }
+  providerSecrets: { list: () => Promise<ProviderSecret[]>; save: (id: string, value: string) => Promise<void>; saveSettings: (id: string, baseUrl: string, modelId: string) => Promise<void>; remove: (id: string) => Promise<void>; test: (id: string) => Promise<{ ok: boolean; models?: number; message: string }> }
+  providers: { add: (label: string, baseUrl: string, modelId: string) => Promise<void>; remove: (id: string) => Promise<void> }
   localStudio: { status: () => Promise<LocalStudioSnapshot>; setURL: (baseUrl: string) => Promise<string> }
   store: { get: <T = unknown>(key: string) => Promise<T>; set: <T = unknown>(key: string, value: T) => Promise<void>; delete: (key: string) => Promise<void> }
   window: { minimize: () => void; maximize: () => void; close: () => void }
@@ -58,8 +59,9 @@ const api: ElectronAPI = {
   projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), remove: (id) => ipcRenderer.invoke("projects:remove", id) },
   grokRuns: { list: () => ipcRenderer.invoke("grok-runs:list") },
   skills: { list: (workspace) => ipcRenderer.invoke("grok-skills:list", workspace) },
-  schedules: { list: () => ipcRenderer.invoke("schedules:list"), add: (input) => ipcRenderer.invoke("schedules:add", input), remove: (id) => ipcRenderer.invoke("schedules:remove", id), toggle: (id, enabled) => ipcRenderer.invoke("schedules:toggle", id, enabled) },
-  providerSecrets: { list: () => ipcRenderer.invoke("provider-secrets:list"), save: (id, value) => ipcRenderer.invoke("provider-secrets:save", id, value), saveSettings: (id, baseUrl, modelId) => ipcRenderer.invoke("provider-secrets:save-settings", id, baseUrl, modelId), remove: (id) => ipcRenderer.invoke("provider-secrets:remove", id) },
+  schedules: { list: () => ipcRenderer.invoke("schedules:list"), add: (input) => ipcRenderer.invoke("schedules:add", input), remove: (id) => ipcRenderer.invoke("schedules:remove", id), toggle: (id, enabled) => ipcRenderer.invoke("schedules:toggle", id, enabled), runNow: (id) => ipcRenderer.invoke("schedules:run-now", id) },
+  providerSecrets: { list: () => ipcRenderer.invoke("provider-secrets:list"), save: (id, value) => ipcRenderer.invoke("provider-secrets:save", id, value), saveSettings: (id, baseUrl, modelId) => ipcRenderer.invoke("provider-secrets:save-settings", id, baseUrl, modelId), remove: (id) => ipcRenderer.invoke("provider-secrets:remove", id), test: (id) => ipcRenderer.invoke("provider-secrets:test", id) },
+  providers: { add: (label, baseUrl, modelId) => ipcRenderer.invoke("providers:add", label, baseUrl, modelId), remove: (id) => ipcRenderer.invoke("providers:remove", id) },
   localStudio: { status: () => ipcRenderer.invoke("local-studio:status"), setURL: (baseUrl) => ipcRenderer.invoke("local-studio:set-url", baseUrl) },
   store: { get: <T = unknown>(key: string) => ipcRenderer.invoke("store:get", key) as Promise<T>, set: <T = unknown>(key: string, value: T) => ipcRenderer.invoke("store:set", key, value), delete: (key) => ipcRenderer.invoke("store:delete", key) },
   window: { minimize: () => ipcRenderer.invoke("window:minimize"), maximize: () => ipcRenderer.invoke("window:maximize"), close: () => ipcRenderer.invoke("window:close") },

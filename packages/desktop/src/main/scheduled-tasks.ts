@@ -12,6 +12,7 @@ export function addSchedule(input: NewSchedule): ScheduledGrokTask {
 }
 export function removeSchedule(id: string) { getStore().set("schedules", listSchedules().filter((task) => task.id !== id)) }
 export function toggleSchedule(id: string, enabled: boolean) { getStore().set("schedules", listSchedules().map((task) => task.id === id ? { ...task, enabled } : task)) }
+export function runScheduleNow(id: string) { getStore().set("schedules", listSchedules().map((task) => task.id === id ? { ...task, enabled: true, nextRunAt: Date.now() } : task)) }
 
 export class GrokTaskScheduler {
   private timer?: NodeJS.Timeout; private checking = false

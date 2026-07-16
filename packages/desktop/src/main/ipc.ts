@@ -7,8 +7,8 @@ import { addProject, inspectProject, listProjects, removeProject, type ProjectRe
 import type { GrokBuildBackend, RunTaskInput } from "./grok-build-backend"
 import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
-import { addSchedule, listSchedules, removeSchedule, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
-import { listProviderSecrets, removeProviderSecret, saveProviderSecret, saveProviderSettings } from "./model-secrets"
+import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
+import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -43,10 +43,14 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("schedules:add", (_event, input: NewSchedule) => addSchedule(input))
   ipcMain.handle("schedules:remove", (_event, id: string) => removeSchedule(id))
   ipcMain.handle("schedules:toggle", (_event, id: string, enabled: boolean) => toggleSchedule(id, enabled))
+  ipcMain.handle("schedules:run-now", (_event, id: string) => runScheduleNow(id))
   ipcMain.handle("provider-secrets:list", () => listProviderSecrets())
   ipcMain.handle("provider-secrets:save", (_event, id: string, value: string) => saveProviderSecret(id, value))
   ipcMain.handle("provider-secrets:save-settings", (_event, id: string, baseUrl: string, modelId: string) => saveProviderSettings(id, baseUrl, modelId))
   ipcMain.handle("provider-secrets:remove", (_event, id: string) => removeProviderSecret(id))
+  ipcMain.handle("provider-secrets:test", (_event, id: string) => testProvider(id))
+  ipcMain.handle("providers:add", (_event, label: string, baseUrl: string, modelId: string) => addCustomProvider(label, baseUrl, modelId))
+  ipcMain.handle("providers:remove", (_event, id: string) => removeCustomProvider(id))
 
   ipcMain.handle("telegram:status", () => deps.telegram().status())
   ipcMain.handle("telegram:connect", async (_event, token: string) => deps.telegram().connect(token))

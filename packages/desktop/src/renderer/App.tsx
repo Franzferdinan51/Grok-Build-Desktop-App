@@ -44,6 +44,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [secretDrafts, setSecretDrafts] = createSignal<Record<string, string>>({})
   const [endpointDrafts, setEndpointDrafts] = createSignal<Record<string, string>>({})
   const [modelDrafts, setModelDrafts] = createSignal<Record<string, string>>({})
+  const [providerNotices, setProviderNotices] = createSignal<Record<string, string>>({})
+  const [customName, setCustomName] = createSignal("")
+  const [customURL, setCustomURL] = createSignal("")
+  const [customModel, setCustomModel] = createSignal("")
+  const [skillSearch, setSkillSearch] = createSignal("")
+  const [runSearch, setRunSearch] = createSignal("")
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
@@ -124,6 +130,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await window.api.providerSecrets.saveSettings(id, endpointDrafts()[id] || "", modelDrafts()[id] || "")
     setProviderSecrets(await window.api.providerSecrets.list()); setCatalog(await window.api.backend.models())
   }
+  const addProvider = async () => {
+    await window.api.providers.add(customName(), customURL(), customModel())
+    const providers = await window.api.providerSecrets.list(); setProviderSecrets(providers)
+    setEndpointDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.baseUrl]))); setModelDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.modelId])))
+    setCustomName(""); setCustomURL(""); setCustomModel("")
+  }
 
   return <div class="app-root">
     <aside class="sidebar">
@@ -155,7 +167,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         </section>
         <section class="workspace-bar"><span>Project</span><button onClick={chooseWorkspace}>{workspace() || "Choose folder"}</button><Show when={selectedProject()?.isGit}><span class="git-pill">{selectedProject()?.branch} · {selectedProject()?.changedFiles} changed</span></Show></section>
         <section class="composer">
-          <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} placeholder="Describe the coding task…" rows={5} />
+          <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void run() } }} placeholder="Describe the coding task… (⌘↵ to run)" rows={5} />
           <div class="composer__controls">
             <label class="model-select">Model
               <select value={model()} onChange={(event) => setModel(event.currentTarget.value)}>
@@ -166,6 +178,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <label><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} /> Reasoning effort</label>
             <label title="Passes Grok Build's documented --yolo flag"><input type="checkbox" checked={autoApprove()} onChange={(event) => setAutoApprove(event.currentTarget.checked)} /> Auto-approve tools</label>
             <button class="primary" disabled={!workspace() || !prompt().trim() || running()} onClick={run}>{running() ? "Running…" : "Run with Grok Build"}</button>
+            <Show when={running()}><button onClick={() => window.api.backend.cancel()}>Stop</button></Show>
           </div>
         </section>
         <Show when={events().length > 0}><section class="task-output"><For each={events()}>{(entry) => <pre class={`task-output__entry task-output__entry--${entry.kind}`}>{entry.content}</pre>}</For></section></Show>
@@ -174,8 +187,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <section class="runs-panel">
           <span class="eyebrow">GROK BUILD RUN HISTORY</span>
           <h1>Every coding task is a Grok Build run.</h1>
+          <div class="token-row"><input value={runSearch()} onInput={(e) => setRunSearch(e.currentTarget.value)} placeholder="Search prompts, projects, sessions"/><button onClick={async () => setRuns(await window.api.grokRuns.list())}>Refresh</button></div>
           <Show when={runs().length > 0} fallback={<p>No runs yet. Pick a project and start a Grok Build task.</p>}>
-            <For each={runs()}>{(run) => <article class="run-row"><div><strong>{run.prompt}</strong><span>{run.cwd}</span></div><div class={`run-status run-status--${run.status}`}>{run.status}</div></article>}</For>
+            <For each={runs().filter((run) => `${run.prompt} ${run.cwd} ${run.grokSessionId || ""}`.toLowerCase().includes(runSearch().toLowerCase()))}>{(run) => <article class="run-row"><div><strong>{run.prompt}</strong><span>{run.cwd}{run.model ? ` · ${run.model}` : ""}{run.grokSessionId ? ` · session ${run.grokSessionId}` : ""}{run.error ? ` · ${run.error}` : ""}</span></div><div class={`run-status run-status--${run.status}`}>{run.status}</div></article>}</For>
           </Show>
         </section>
         </Show>
@@ -204,19 +218,20 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       </Show>
       }>
         <section class="runs-panel"><span class="eyebrow">GROK BUILD SETTINGS</span><h1>Models and provider credentials.</h1><p>Every provider remains a Grok Build model target. Keys are encrypted with the operating system and injected only into the Grok CLI process.</p>
-          <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.envKey}</span></div><div class="provider-fields"><label>Base URL<input value={endpointDrafts()[provider.id] || ""} onInput={(event) => setEndpointDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} /></label><label>Model ID<input value={modelDrafts()[provider.id] || ""} onInput={(event) => setModelDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder="e.g. my-coding-model" /></label><button onClick={() => saveProvider(provider.id)}>Save endpoint</button></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save key</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove</button></Show></div></article>}</For>
+          <div class="settings-card"><strong>Add another OpenAI-compatible provider</strong><div class="provider-fields"><label>Name<input value={customName()} onInput={(e) => setCustomName(e.currentTarget.value)} placeholder="Together AI" /></label><label>Base URL<input value={customURL()} onInput={(e) => setCustomURL(e.currentTarget.value)} placeholder="https://api.example.com/v1" /></label><label>Model ID<input value={customModel()} onInput={(e) => setCustomModel(e.currentTarget.value)} placeholder="coding-model" /></label><button onClick={addProvider}>Add provider</button></div></div>
+          <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.envKey}</span></div><div class="provider-fields"><label>Base URL<input value={endpointDrafts()[provider.id] || ""} onInput={(event) => setEndpointDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} /></label><label>Model ID<input value={modelDrafts()[provider.id] || ""} onInput={(event) => setModelDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder="e.g. my-coding-model" /></label><button onClick={() => saveProvider(provider.id)}>Save endpoint</button></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save key</button><button onClick={async () => { const result = await window.api.providerSecrets.test(provider.id); setProviderNotices((old) => ({ ...old, [provider.id]: result.message })) }}>Test</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove key</button></Show><Show when={provider.id.startsWith("custom-")}><button onClick={async () => { await window.api.providers.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Delete provider</button></Show></div><Show when={providerNotices()[provider.id]}><p class="provider-notice">{providerNotices()[provider.id]}</p></Show></article>}</For>
           <p class="telegram-note">Model names and endpoints are configured in Grok Build. This page secures credentials; the model picker is populated by <code>grok models</code>.</p>
         </section>
       </Show>
       }>
         <section class="runs-panel"><span class="eyebrow">GROK BUILD SCHEDULES</span><h1>Run coding tasks on a schedule.</h1><p>Schedules execute through Grok Build while the desktop app is running.</p>
           <div class="form-grid"><input value={scheduleName()} onInput={(e) => setScheduleName(e.currentTarget.value)} placeholder="Task name"/><input type="datetime-local" value={scheduleAt()} onInput={(e) => setScheduleAt(e.currentTarget.value)}/><textarea value={schedulePrompt()} onInput={(e) => setSchedulePrompt(e.currentTarget.value)} placeholder="Coding task prompt"/><input type="number" min="0" value={repeatMinutes()} onInput={(e) => setRepeatMinutes(Number(e.currentTarget.value))} placeholder="Repeat minutes (optional)"/><button class="primary" onClick={createSchedule}>Create schedule</button></div>
-          <For each={schedules()}>{(task) => <article class="run-row"><div><strong>{task.name}</strong><span>{new Date(task.nextRunAt).toLocaleString()} · {task.cwd}</span></div><div class="row-actions"><button onClick={async () => { await window.api.schedules.toggle(task.id, !task.enabled); setSchedules(await window.api.schedules.list()) }}>{task.enabled ? "Pause" : "Enable"}</button><button onClick={async () => { await window.api.schedules.remove(task.id); setSchedules(await window.api.schedules.list()) }}>Delete</button></div></article>}</For>
+          <For each={schedules()}>{(task) => <article class="run-row"><div><strong>{task.name}</strong><span>{new Date(task.nextRunAt).toLocaleString()} · {task.cwd}{task.lastStatus ? ` · last ${task.lastStatus}` : ""}</span></div><div class="row-actions"><button onClick={async () => { await window.api.schedules.runNow(task.id); setSchedules(await window.api.schedules.list()) }}>Run now</button><button onClick={async () => { await window.api.schedules.toggle(task.id, !task.enabled); setSchedules(await window.api.schedules.list()) }}>{task.enabled ? "Pause" : "Enable"}</button><button onClick={async () => { await window.api.schedules.remove(task.id); setSchedules(await window.api.schedules.list()) }}>Delete</button></div></article>}</For>
         </section>
       </Show>
       }>
-        <section class="runs-panel"><span class="eyebrow">GROK BUILD SKILLS</span><h1>Project and user skills.</h1><p>Discovered from Grok, agent, Claude, and Cursor-compatible skill directories. Project skills win on name conflicts.</p><button onClick={async () => setSkills(await window.api.skills.list(workspace()))}>Refresh</button>
-          <For each={skills()}>{(skill) => <article class="run-row"><div><strong>{skill.name}</strong><span>{skill.description || skill.path}</span></div><div class="skill-scope">{skill.scope}</div></article>}</For>
+        <section class="runs-panel"><span class="eyebrow">GROK BUILD SKILLS</span><h1>Project and user skills.</h1><p>Discovered from Grok, agent, Claude, and Cursor-compatible skill directories. Project skills win on name conflicts.</p><div class="token-row"><input value={skillSearch()} onInput={(e) => setSkillSearch(e.currentTarget.value)} placeholder="Search skills"/><button onClick={async () => setSkills(await window.api.skills.list(workspace()))}>Refresh</button></div>
+          <For each={skills().filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(skillSearch().toLowerCase()))}>{(skill) => <article class="run-row"><div><strong>{skill.name}</strong><span>{skill.description || skill.path}</span></div><div class="skill-scope">{skill.scope}</div></article>}</For>
         </section>
       </Show>
     </main>

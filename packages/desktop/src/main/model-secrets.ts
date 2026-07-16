@@ -10,6 +10,8 @@ export const PROVIDER_PRESETS = [
   { id: "minimax", label: "MiniMax", envKey: "MINIMAX_API_KEY", baseUrl: "https://api.minimax.io/v1" },
   { id: "openai-compatible", label: "OpenAI-compatible provider", envKey: "OPENAI_COMPATIBLE_API_KEY", baseUrl: "https://api.example.com/v1" },
 ] as const
+type ProviderDefinition = { id: string; label: string; envKey: string; baseUrl: string }
+const providers = (): ProviderDefinition[] => [...PROVIDER_PRESETS, ...getStore().get("grok.customProviders", [])]
 
 type SecretRecord = { label: string; envKey: string; encrypted: string }
 const records = (): Record<string, SecretRecord> => getStore().get("grok.providerSecrets", {})
@@ -17,11 +19,29 @@ const records = (): Record<string, SecretRecord> => getStore().get("grok.provide
 export function listProviderSecrets() {
   const saved = records()
   const settings = getStore().get("grok.providerSettings", {})
-  return PROVIDER_PRESETS.map((preset) => ({ ...preset, ...settings[preset.id], modelId: settings[preset.id]?.modelId ?? "", configured: Boolean(saved[preset.id]) }))
+  return providers().map((preset) => ({ ...preset, ...settings[preset.id], modelId: settings[preset.id]?.modelId ?? "", configured: Boolean(saved[preset.id]) }))
+}
+
+export function addCustomProvider(label: string, baseUrl: string, modelId: string): void {
+  const cleanLabel = label.trim(), cleanModel = modelId.trim()
+  if (!cleanLabel || !cleanModel) throw new Error("Provider name and model ID are required")
+  if (!/^[A-Za-z0-9_-]+$/.test(cleanModel)) throw new Error("Invalid model ID")
+  const id = `custom-${cleanModel.toLowerCase()}`
+  if (providers().some((provider) => provider.id === id)) throw new Error("That provider already exists")
+  const envKey = `GROK_PROVIDER_${cleanModel.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`
+  getStore().set("grok.customProviders", [...getStore().get("grok.customProviders", []), { id, label: cleanLabel, envKey, baseUrl }])
+  saveProviderSettings(id, baseUrl, cleanModel)
+}
+
+export function removeCustomProvider(id: string): void {
+  if (!id.startsWith("custom-")) throw new Error("Built-in providers cannot be removed")
+  getStore().set("grok.customProviders", getStore().get("grok.customProviders", []).filter((entry) => entry.id !== id))
+  removeProviderSecret(id)
+  const settings = getStore().get("grok.providerSettings", {}); delete settings[id]; getStore().set("grok.providerSettings", settings); writeManagedModels(settings)
 }
 
 export function saveProviderSettings(id: string, baseUrl: string, modelId: string): void {
-  const preset = PROVIDER_PRESETS.find((entry) => entry.id === id)
+  const preset = providers().find((entry) => entry.id === id)
   if (!preset) throw new Error("Unknown provider")
   const url = new URL(baseUrl.trim())
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error("Provider URL must use HTTP or HTTPS")
@@ -38,7 +58,7 @@ function writeManagedModels(settings: Record<string, { baseUrl: string; modelId:
   const start = "# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS"
   const end = "# END GROK BUILD DESKTOP MANAGED PROVIDERS"
   const existing = existsSync(path) ? readFileSync(path, "utf8") : ""
-  const blocks = PROVIDER_PRESETS.flatMap((preset) => {
+  const blocks = providers().flatMap((preset) => {
     const setting = settings[preset.id]
     if (!setting?.modelId) return []
     return [`[model.${setting.modelId}]\nbase_url = ${JSON.stringify(setting.baseUrl)}\nmodel_name = ${JSON.stringify(setting.modelId)}\napi_backend = "chat_completions"\nenv_key = ${JSON.stringify(preset.envKey)}`]
@@ -50,7 +70,7 @@ function writeManagedModels(settings: Record<string, { baseUrl: string; modelId:
 }
 
 export function saveProviderSecret(id: string, value: string): void {
-  const preset = PROVIDER_PRESETS.find((entry) => entry.id === id)
+  const preset = providers().find((entry) => entry.id === id)
   if (!preset) throw new Error("Unknown provider")
   if (!value.trim()) throw new Error("API key is required")
   if (!safeStorage.isEncryptionAvailable()) throw new Error("OS credential encryption is unavailable")
@@ -69,4 +89,16 @@ export function providerSecretEnvironment(): NodeJS.ProcessEnv {
     try { env[record.envKey] = safeStorage.decryptString(Buffer.from(record.encrypted, "base64")) } catch { /* never expose broken secrets */ }
   }
   return env
+}
+
+export async function testProvider(id: string): Promise<{ ok: boolean; models?: number; message: string }> {
+  const provider = listProviderSecrets().find((entry) => entry.id === id)
+  if (!provider) throw new Error("Unknown provider")
+  const record = records()[id]
+  let key = ""
+  if (record) { try { key = safeStorage.decryptString(Buffer.from(record.encrypted, "base64")) } catch {} }
+  const response = await fetch(`${provider.baseUrl.replace(/\/$/, "")}/models`, { headers: key ? { Authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(8000) })
+  if (!response.ok) return { ok: false, message: `HTTP ${response.status} ${response.statusText}` }
+  const body = await response.json().catch(() => ({})) as { data?: unknown[] }
+  return { ok: true, models: body.data?.length, message: body.data ? `${body.data.length} models available` : "Endpoint reachable" }
 }

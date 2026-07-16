@@ -10,7 +10,7 @@ Grok Build Desktop ships two maintained implementations without removing either:
 | Projects / Git review | OpenClaw desktop shell + migration work | persistent projects, branch/change count, diff stat | local filesystem/Git only |
 | Skills | OpenClaw native skills interface | functional project/user skill discovery | project skills take precedence |
 | Scheduled coding tasks | OpenClaw scheduler; Grok-specific execution wiring pending | functional persisted one-shot/repeating Grok tasks while app runs | Grok Build CLI only; no hidden daemon claim |
-| Provider credentials | Keychain-backed LM Studio/ODS/MiniMax settings | OS-safeStorage-backed LM Studio/ODS/MiniMax settings | injected only into Grok CLI environment |
+| Provider credentials | Keychain-backed LM Studio/ODS/MiniMax/generic settings | OS-safeStorage settings, endpoint tests, and unlimited custom OpenAI-compatible providers | injected only into Grok CLI environment |
 | Approvals and channels | OpenClaw native information architecture | Hermes-derived explicit controls | must remain explicit and user-controlled |
 | Telegram | OpenClaw channel foundation | encrypted Bot API bridge; allowlist pending | no implicit inbound routing |
 | Grok Build model catalog (LM Studio + APIs) | reads `grok models`; selected id reaches `grok --model` | reads `grok models`; selected id reaches `grok --model` | no second provider/agent path; never auto-load models |
