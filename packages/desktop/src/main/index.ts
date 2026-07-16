@@ -205,7 +205,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", async () => {
   writeLog("info", "App quitting — stopping Grok Build task")
-  backend.cancel()
+  await backend.shutdown()
   scheduler.stop()
   if (updateTimer) clearInterval(updateTimer)
   await preview.stop()

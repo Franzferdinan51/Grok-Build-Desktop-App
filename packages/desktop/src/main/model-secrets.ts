@@ -15,6 +15,8 @@ const providers = (): ProviderDefinition[] => [...PROVIDER_PRESETS, ...getStore(
 
 type SecretRecord = { label: string; envKey: string; encrypted: string }
 const records = (): Record<string, SecretRecord> => getStore().get("grok.providerSecrets", {})
+type CodexOAuthModel = { id: string; contextWindow?: number }
+let codexOAuth: { baseUrl: string; models: CodexOAuthModel[] } | null = null
 
 export function listProviderSecrets() {
   const saved = records()
@@ -63,10 +65,20 @@ function writeManagedModels(settings: Record<string, { baseUrl: string; modelId:
     if (!setting?.modelId) return []
     return [`[model.${setting.modelId}]\nbase_url = ${JSON.stringify(setting.baseUrl)}\nmodel_name = ${JSON.stringify(setting.modelId)}\napi_backend = "chat_completions"\nenv_key = ${JSON.stringify(preset.envKey)}`]
   })
-  const managed = `${start}\n${blocks.join("\n\n")}\n${end}`
+  const codexBlocks = (codexOAuth?.models || []).map((model) => {
+    const alias = `codex-${model.id.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`
+    const context = model.contextWindow ? `\ncontext_window = ${Math.floor(model.contextWindow)}` : ""
+    return `[model.${alias}]\nmodel = ${JSON.stringify(model.id)}\nbase_url = ${JSON.stringify(codexOAuth!.baseUrl)}\nname = ${JSON.stringify(`OpenAI Codex · ${model.id}`)}\napi_backend = "responses"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"${context}`
+  })
+  const managed = `${start}\n${[...blocks, ...codexBlocks].join("\n\n")}\n${end}`
   const pattern = new RegExp(`${start}[\\s\\S]*?${end}`, "m")
   const next = pattern.test(existing) ? existing.replace(pattern, managed) : `${existing.trimEnd()}\n\n${managed}\n`
   mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, next, { mode: 0o600 })
+}
+
+export function configureCodexOAuthModels(baseUrl: string, models: CodexOAuthModel[]): void {
+  codexOAuth = { baseUrl, models }
+  writeManagedModels(getStore().get("grok.providerSettings", {}))
 }
 
 export function saveProviderSecret(id: string, value: string): void {
@@ -83,12 +95,12 @@ export function removeProviderSecret(id: string): void {
   const saved = records(); delete saved[id]; getStore().set("grok.providerSecrets", saved)
 }
 
-export function providerSecretEnvironment(): NodeJS.ProcessEnv {
+export function providerSecretEnvironment(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const record of Object.values(records())) {
     try { env[record.envKey] = safeStorage.decryptString(Buffer.from(record.encrypted, "base64")) } catch { /* never expose broken secrets */ }
   }
-  return env
+  return { ...env, ...extra }
 }
 
 export async function testProvider(id: string): Promise<{ ok: boolean; models?: number; message: string }> {

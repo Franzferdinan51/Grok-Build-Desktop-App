@@ -12,8 +12,9 @@ import { execFile, spawn, type ChildProcess } from "child_process"
 import { promisify } from "util"
 import { write as writeLog } from "./logging"
 import { resolveGrokBuild } from "./grok-build-resolver"
-import { providerSecretEnvironment } from "./model-secrets"
+import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
 import { getStore } from "./store"
+import { CodexOAuthBridge } from "./codex-oauth-bridge"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -52,6 +53,7 @@ export type RunTaskInput = {
 export class GrokBuildBackend {
   private current: ChildProcess | null = null
   private moaAbort: AbortController | null = null
+  private readonly codexBridge = new CodexOAuthBridge()
 
   isRunning(): boolean { return this.current !== null || this.moaAbort !== null }
 
@@ -70,7 +72,9 @@ export class GrokBuildBackend {
     const status = await this.status()
     if (!status.available) return { models: [] }
     try {
-      const { stdout } = await execFileAsync(status.command, ["models"], { timeout: 10_000 })
+      try { await this.syncCodexOAuthModels() }
+      catch (error) { writeLog("error", `Could not sync OpenAI Codex OAuth models: ${String(error)}`) }
+      const { stdout } = await execFileAsync(status.command, ["models"], { timeout: 10_000, env: this.environment() })
       const models: string[] = []
       let defaultModel: string | undefined
       for (const raw of stdout.split(/\r?\n/)) {
@@ -88,6 +92,16 @@ export class GrokBuildBackend {
       writeLog("error", `Could not read Grok Build model catalog: ${String(error)}`)
       return { models: [] }
     }
+  }
+
+  private environment(): NodeJS.ProcessEnv {
+    return { ...process.env, ...providerSecretEnvironment(this.codexBridge.environment()) }
+  }
+
+  private async syncCodexOAuthModels(): Promise<void> {
+    if (!(await this.codexBridge.available())) return
+    const models = await this.codexBridge.models()
+    configureCodexOAuthModels(this.codexBridge.baseUrl(), models)
   }
 
   async startOAuth(provider: "xai" | "openai" | "minimax"): Promise<{ ok: boolean; message: string }> {
@@ -132,6 +146,7 @@ export class GrokBuildBackend {
 
     const status = await this.status()
     if (!status.available) throw new Error(status.error)
+    if (input.model?.startsWith("codex-")) await this.syncCodexOAuthModels()
     const command = status.command
     let effectivePrompt = input.prompt
     let effectiveModel = input.model
@@ -143,7 +158,7 @@ export class GrokBuildBackend {
         const answers = await Promise.all(references.map(async (referenceModel, index) => {
           const candidatePrompt = `Act as independent solution candidate ${index + 1} of ${references.length}. Analyze the coding task deeply and propose a concrete implementation. Do not edit files; return an implementation plan, risks, and verification steps.\n\nTask:\n${input.prompt}`
           const candidateArgs = ["-p", candidatePrompt, "--cwd", input.cwd, "--output-format", "plain", "--permission-mode", "plan", "--no-subagents", "--model", referenceModel]
-          const { stdout } = await execFileAsync(command, candidateArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: { ...process.env, ...providerSecretEnvironment() } })
+          const { stdout } = await execFileAsync(command, candidateArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: this.environment() })
           onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed.\n${stdout.trim()}` })
           return `## Reference ${index + 1} — ${referenceModel}\n${stdout.trim()}`
         }))
@@ -168,7 +183,7 @@ export class GrokBuildBackend {
 
     const runChild = (childArgs: string[]) => new Promise<string>((resolve, reject) => {
       writeLog("info", `Starting Grok Build task in ${input.cwd}`)
-      const child = spawn(command, childArgs, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...providerSecretEnvironment() } })
+      const child = spawn(command, childArgs, { stdio: ["ignore", "pipe", "pipe"], env: this.environment() })
       this.current = child
       let buffer = ""
       let stderr = ""
@@ -223,5 +238,10 @@ export class GrokBuildBackend {
     if (!this.current) return
     this.current.kill("SIGTERM")
     this.current = null
+  }
+
+  async shutdown(): Promise<void> {
+    this.cancel()
+    await this.codexBridge.stop()
   }
 }
