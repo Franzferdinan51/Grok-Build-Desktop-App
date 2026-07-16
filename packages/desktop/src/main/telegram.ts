@@ -52,16 +52,18 @@ export class TelegramBridge {
     try {
       const payload = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string }; description?: string }>(`https://api.telegram.org/bot${clean}/getMe`)
       if (!payload.ok || !payload.result) return { connected: false, error: payload.description || "Telegram rejected the token" }
-      getStore().set("telegram", { ...getStore().get("telegram"), token: safeStorage.encryptString(clean).toString("base64") })
+      this.offset = 0
+      getStore().set("telegram", { ...getStore().get("telegram"), token: safeStorage.encryptString(clean).toString("base64"), updateOffset: 0 })
       this.start()
       return { connected: true, botId: payload.result.id, username: payload.result.username }
     } catch (error) { return { connected: false, error: error instanceof Error ? error.message : String(error) } }
   }
 
-  disconnect(): void { this.stop(); getStore().set("telegram", { allowedChatIds: this.allowedChats(), pendingChatIds: this.pendingChats() }) }
+  disconnect(): void { this.stop(); getStore().set("telegram", { allowedChatIds: this.allowedChats(), pendingChatIds: this.pendingChats(), updateOffset: this.offset }) }
 
   start(): void {
     if (this.polling || !this.token()) return
+    this.offset = Number(getStore().get("telegram").updateOffset) || 0
     this.polling = true
     const generation = ++this.pollGeneration
     void this.configureCommands()
@@ -98,6 +100,7 @@ export class TelegramBridge {
           }
           catch (error) { await this.send(chatId, `Task failed: ${error instanceof Error ? error.message : String(error)}`) }
         }
+        if (payload.result?.length) getStore().set("telegram", { ...getStore().get("telegram"), updateOffset: this.offset })
       } catch (error) {
         if (!this.polling || generation !== this.pollGeneration) return
         await new Promise((resolve) => setTimeout(resolve, 2_000))

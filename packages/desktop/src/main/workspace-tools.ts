@@ -1,7 +1,7 @@
 import { execFile } from "child_process"
 import { promisify } from "util"
 import { readdir, readFile, realpath, stat, writeFile } from "fs/promises"
-import { relative, resolve, sep } from "path"
+import { dirname, relative, resolve, sep } from "path"
 
 const execFileAsync = promisify(execFile)
 const ignored = new Set([".git", "node_modules", "dist", "out", ".next", "target", ".venv"])
@@ -10,7 +10,22 @@ async function safePath(root: string, candidate: string): Promise<string> {
   const canonicalRoot = await realpath(root)
   const target = resolve(canonicalRoot, candidate)
   if (target !== canonicalRoot && !target.startsWith(canonicalRoot + sep)) throw new Error("Path escapes the workspace")
-  return target
+  const canonicalTarget = await realpath(target)
+  if (canonicalTarget !== canonicalRoot && !canonicalTarget.startsWith(canonicalRoot + sep)) throw new Error("Path escapes the workspace through a symbolic link")
+  return canonicalTarget
+}
+
+async function safeWritePath(root: string, candidate: string): Promise<string> {
+  const canonicalRoot = await realpath(root)
+  const target = resolve(canonicalRoot, candidate)
+  if (target !== canonicalRoot && !target.startsWith(canonicalRoot + sep)) throw new Error("Path escapes the workspace")
+  try { return await safePath(canonicalRoot, candidate) }
+  catch (error) {
+    const parent = await realpath(dirname(target))
+    if (parent !== canonicalRoot && !parent.startsWith(canonicalRoot + sep)) throw new Error("Path escapes the workspace through a symbolic link")
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return target
+    throw error
+  }
 }
 
 export type WorkspaceFile = { path: string; size: number }
@@ -30,7 +45,7 @@ export async function listWorkspaceFiles(root: string, limit = 1500): Promise<Wo
   await walk(canonicalRoot); return output.sort((a, b) => a.path.localeCompare(b.path))
 }
 export async function readWorkspaceFile(root: string, path: string): Promise<string> { return readFile(await safePath(root, path), "utf8") }
-export async function writeWorkspaceFile(root: string, path: string, content: string): Promise<void> { await writeFile(await safePath(root, path), content, "utf8") }
+export async function writeWorkspaceFile(root: string, path: string, content: string): Promise<void> { await writeFile(await safeWritePath(root, path), content, "utf8") }
 export async function runWorkspaceCommand(root: string, command: string): Promise<{ stdout: string; stderr: string; code: number }> {
   if (!command.trim()) throw new Error("Command is required")
   const cwd = await realpath(root); const shell = process.env.SHELL || (process.platform === "win32" ? "cmd.exe" : "/bin/sh")

@@ -18,6 +18,8 @@ assert.deepEqual((await listWorkspaceFiles(root)).map((file) => file.path), ["he
 await writeWorkspaceFile(root, "hello.txt", "updated\n")
 assert.equal(await readWorkspaceFile(root, "hello.txt"), "updated\n")
 await assert.rejects(readWorkspaceFile(root, "../outside"), /escapes the workspace/)
+await assert.rejects(readWorkspaceFile(root, "escape"), /symbolic link/)
+await assert.rejects(writeWorkspaceFile(root, "escape", "blocked"), /symbolic link/)
 assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim(), root)
 
 execFileSync("git", ["init", "-q"], { cwd: root })

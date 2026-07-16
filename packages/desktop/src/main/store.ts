@@ -45,6 +45,7 @@ type StoreSchema = {
   }
   telegram: {
     token?: string
+    updateOffset?: number
     allowedChatIds?: string[]
     pendingChatIds?: string[]
   }
