@@ -1,4 +1,6 @@
 import { ipcMain, dialog, shell, app, BrowserWindow } from "electron"
+import { mkdirSync } from "fs"
+import { join } from "path"
 import { getStore } from "./store"
 import { write as writeLog } from "./logging"
 import { TelegramBridge } from "./telegram"
@@ -63,6 +65,11 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("projects:list", async () => Promise.all(listProjects().map(inspectProject)))
   ipcMain.handle("projects:add", async (_event, path: string) => addProject(path))
   ipcMain.handle("projects:remove", (_event, id: string) => removeProject(id))
+  ipcMain.handle("projects:scratch", async () => {
+    const path = join(app.getPath("userData"), "Scratch")
+    mkdirSync(path, { recursive: true })
+    return addProject(path)
+  })
   ipcMain.handle("workspace:files", (_event, root: string) => listWorkspaceFiles(root))
   ipcMain.handle("workspace:read", (_event, root: string, path: string) => readWorkspaceFile(root, path))
   ipcMain.handle("workspace:write", (_event, root: string, path: string, content: string) => writeWorkspaceFile(root, path, content))

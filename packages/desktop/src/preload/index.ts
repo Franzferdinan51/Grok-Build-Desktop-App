@@ -27,7 +27,7 @@ export type ElectronAPI = {
     disconnect: () => Promise<void>
     send: (chatId: string, text: string) => Promise<{ ok: boolean; error?: string }>
   }
-  projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
+  projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; scratch: () => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
   grokRuns: { list: () => Promise<GrokRunRecord[]> }
   skills: { list: (workspace?: string) => Promise<GrokSkill[]> }
   schedules: { list: () => Promise<ScheduledGrokTask[]>; add: (input: { name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number }) => Promise<ScheduledGrokTask>; remove: (id: string) => Promise<void>; toggle: (id: string, enabled: boolean) => Promise<void>; runNow: (id: string) => Promise<void> }
@@ -60,7 +60,7 @@ const api: ElectronAPI = {
     status: () => ipcRenderer.invoke("telegram:status"), connect: (token) => ipcRenderer.invoke("telegram:connect", token),
     disconnect: () => ipcRenderer.invoke("telegram:disconnect"), send: (chatId, text) => ipcRenderer.invoke("telegram:send", chatId, text),
   },
-  projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), remove: (id) => ipcRenderer.invoke("projects:remove", id) },
+  projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), scratch: () => ipcRenderer.invoke("projects:scratch"), remove: (id) => ipcRenderer.invoke("projects:remove", id) },
   grokRuns: { list: () => ipcRenderer.invoke("grok-runs:list") },
   skills: { list: (workspace) => ipcRenderer.invoke("grok-skills:list", workspace) },
   schedules: { list: () => ipcRenderer.invoke("schedules:list"), add: (input) => ipcRenderer.invoke("schedules:add", input), remove: (id) => ipcRenderer.invoke("schedules:remove", id), toggle: (id, enabled) => ipcRenderer.invoke("schedules:toggle", id, enabled), runNow: (id) => ipcRenderer.invoke("schedules:run-now", id) },

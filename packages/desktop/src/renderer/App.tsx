@@ -68,17 +68,24 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
-    if (savedWorkspace) setWorkspace(savedWorkspace)
-    const savedProjects = await window.api.projects.list()
+    let savedProjects = await window.api.projects.list()
+    if (savedProjects.length === 0) {
+      const scratch = await window.api.projects.scratch()
+      savedProjects = [scratch]
+    }
     setProjects(savedProjects)
     const current = savedProjects.find((project) => project.path === savedWorkspace) ?? savedProjects[0]
-    if (current) { setSelectedProject(current); setWorkspace(current.path) }
+    if (current) {
+      setSelectedProject(current)
+      setWorkspace(current.path)
+      await window.api.store.set("workspace.last", current.path)
+    }
     setTelegram(await window.api.telegram.status())
     setRuns(await window.api.grokRuns.list())
     const runtime = await window.api.localStudio.status()
     setLocalStudio(runtime); setLocalStudioURL(runtime.baseUrl)
     setCatalog(await window.api.backend.models())
-    setSkills(await window.api.skills.list(savedWorkspace))
+    setSkills(await window.api.skills.list(current?.path))
     setSchedules(await window.api.schedules.list())
     const providers = await window.api.providerSecrets.list()
     setProviderSecrets(providers)
@@ -100,7 +107,18 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setSelectedProject(project)
       setWorkspace(project.path)
       await window.api.store.set("workspace.last", project.path)
+      await loadProject(project)
     }
+  }
+
+  const useScratchWorkspace = async () => {
+    const scratch = await window.api.projects.scratch()
+    const allProjects = await window.api.projects.list()
+    setProjects(allProjects)
+    setSelectedProject(scratch)
+    setWorkspace(scratch.path)
+    await window.api.store.set("workspace.last", scratch.path)
+    await loadProject(scratch)
   }
 
   const run = async () => {
@@ -152,7 +170,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setEndpointDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.baseUrl]))); setModelDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.modelId])))
     setCustomName(""); setCustomURL(""); setCustomModel("")
   }
-  const refreshFiles = async () => { if (workspace()) setFiles(await window.api.workspace.files(workspace())) }
+  const refreshFiles = async (root = workspace()) => { if (root) setFiles(await window.api.workspace.files(root)) }
   const selectFile = async (path: string) => { setOpenFile(path); setFileContent(await window.api.workspace.read(workspace(), path)); setFileNotice("") }
   const saveFile = async () => { if (!openFile()) return; await window.api.workspace.write(workspace(), openFile(), fileContent()); setFileNotice("Saved") }
   const runCommand = async () => {
@@ -160,16 +178,45 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setTerminalRunning(true); const command = terminalCommand(); setTerminalOutput((old) => `${old}${old ? "\n" : ""}$ ${command}\n`)
     const result = await window.api.workspace.command(workspace(), command); setTerminalOutput((old) => old + result.stdout + result.stderr + `\n[exit ${result.code}]\n`); setTerminalRunning(false)
   }
-  const refreshDiff = async () => { if (workspace()) { setGitChanges(await window.api.workspace.gitChanges(workspace())); setSelectedDiff(""); setDiffContent("") } }
+  const refreshDiff = async (root = workspace()) => { if (root) { setGitChanges(await window.api.workspace.gitChanges(root)); setSelectedDiff(""); setDiffContent("") } }
+
+  const loadProject = async (project: ProjectSnapshot) => {
+    setOpenFile(""); setFileContent(""); setFileNotice(""); setSelectedDiff(""); setDiffContent("")
+    if (active() === "workspace") await refreshFiles(project.path)
+    if (active() === "review") await refreshDiff(project.path)
+    if (active() === "skills") setSkills(await window.api.skills.list(project.path))
+  }
+
+  const selectProject = async (project: ProjectSnapshot) => {
+    setSelectedProject(project); setWorkspace(project.path)
+    await window.api.store.set("workspace.last", project.path)
+    await loadProject(project)
+  }
+
+  const navigate = async (view: string) => {
+    setActive(view)
+    if (view === "workspace") await refreshFiles()
+    if (view === "review") await refreshDiff()
+    if (view === "skills") setSkills(await window.api.skills.list(workspace() || undefined))
+    if (view === "runs") setRuns(await window.api.grokRuns.list())
+    if (view === "scheduled") setSchedules(await window.api.schedules.list())
+    if (view === "settings") {
+      setCatalog(await window.api.backend.models())
+      const providers = await window.api.providerSecrets.list()
+      setProviderSecrets(providers)
+      setEndpointDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.baseUrl])))
+      setModelDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.modelId])))
+    }
+  }
 
   return <div class="app-root">
     <aside class="sidebar">
       <div class="brand"><span class="brand__mark">✦</span><span>Grok Build</span></div>
-      <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => setActive(item.id)}><span>{item.icon}</span>{item.label}</button>}</For></nav>
+      <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => void navigate(item.id)}><span>{item.icon}</span>{item.label}</button>}</For></nav>
       <div class="sidebar__section">
         <div class="section-heading"><span class="sidebar__section-title">Projects</span><button class="project-add" onClick={chooseWorkspace} title="Add project">+</button></div>
         <Show when={projects().length > 0} fallback={<button class="sidebar__project" onClick={chooseWorkspace}>Add a codebase</button>}>
-          <For each={projects()}>{(project) => <button class={`sidebar__project ${selectedProject()?.id === project.id ? "sidebar__project--active" : ""}`} onClick={async () => { setSelectedProject(project); setWorkspace(project.path); await window.api.store.set("workspace.last", project.path) }}><span class="project-name">{project.name}</span><Show when={project.changedFiles > 0}><span class="project-changes">{project.changedFiles}</span></Show></button>}</For>
+          <For each={projects()}>{(project) => <button class={`sidebar__project ${selectedProject()?.id === project.id ? "sidebar__project--active" : ""}`} onClick={() => void selectProject(project)}><span class="project-name">{project.name}</span><Show when={project.changedFiles > 0}><span class="project-changes">{project.changedFiles}</span></Show></button>}</For>
         </Show>
       </div>
       <div class="sidebar__footer">
@@ -193,7 +240,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <h1>Build with Grok. Use your model stack.</h1>
           <p>Grok Build executes every task using its configured catalog: LM Studio models or supported API models.</p>
         </section>
-        <section class="workspace-bar"><span>Project</span><button onClick={chooseWorkspace}>{workspace() || "Choose folder"}</button><Show when={selectedProject()?.isGit}><span class="git-pill">{selectedProject()?.branch} · {selectedProject()?.changedFiles} changed</span></Show></section>
+        <section class="workspace-bar"><span>Workspace</span><button onClick={chooseWorkspace}>{selectedProject()?.name || "Choose folder"}</button><button onClick={useScratchWorkspace}>Start without a project</button><Show when={selectedProject()?.isGit}><span class="git-pill">{selectedProject()?.branch} · {selectedProject()?.changedFiles} changed</span></Show></section>
         <section class="composer">
           <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void run() } }} placeholder="Describe the coding task… (⌘↵ to run)" rows={5} />
           <div class="composer__controls">
@@ -267,10 +314,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <section class="ide-panel"><div class="terminal-toolbar"><div><span class="eyebrow">PROJECT TERMINAL</span><strong>{workspace() || "Choose a project"}</strong></div><button onClick={() => setTerminalOutput("")}>Clear</button></div><pre class="terminal-output">{terminalOutput() || "Run project commands here. Commands execute only inside the selected workspace."}</pre><div class="terminal-input"><span>$</span><input value={terminalCommand()} onInput={(e) => setTerminalCommand(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") void runCommand() }} placeholder="pnpm test"/><button class="primary" disabled={terminalRunning() || !workspace()} onClick={runCommand}>{terminalRunning() ? "Running…" : "Run"}</button></div></section>
       </Show>
       }>
-        <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">CODE WORKSPACE</span><strong>{openFile() || "Select a file"}</strong></div><div><button onClick={refreshFiles}>Refresh files</button><button class="primary" disabled={!openFile()} onClick={saveFile}>Save</button></div></div><div class="ide-grid"><aside class="file-tree"><input value={fileSearch()} onInput={(e) => setFileSearch(e.currentTarget.value)} placeholder="Filter files"/><Show when={files().length} fallback={<button onClick={refreshFiles}>Load project files</button>}><For each={files().filter((file) => file.path.toLowerCase().includes(fileSearch().toLowerCase()))}>{(file) => <button class={openFile() === file.path ? "active" : ""} onClick={() => selectFile(file.path)}>{file.path}</button>}</For></Show></aside><div class="code-editor"><Show when={openFile()} fallback={<div class="editor-empty">Choose a project file to inspect and edit.</div>}><textarea spellcheck={false} value={fileContent()} onInput={(e) => { setFileContent(e.currentTarget.value); setFileNotice("Modified") }} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); void saveFile() } }}/><span class="editor-status">{fileNotice()} · ⌘S to save</span></Show></div></div></section>
+        <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">CODE WORKSPACE</span><strong>{openFile() || "Select a file"}</strong></div><div><button onClick={() => void refreshFiles()}>Refresh files</button><button class="primary" disabled={!openFile()} onClick={saveFile}>Save</button></div></div><div class="ide-grid"><aside class="file-tree"><input value={fileSearch()} onInput={(e) => setFileSearch(e.currentTarget.value)} placeholder="Filter files"/><Show when={files().length} fallback={<button onClick={() => void refreshFiles()}>Load project files</button>}><For each={files().filter((file) => file.path.toLowerCase().includes(fileSearch().toLowerCase()))}>{(file) => <button class={openFile() === file.path ? "active" : ""} onClick={() => selectFile(file.path)}>{file.path}</button>}</For></Show></aside><div class="code-editor"><Show when={openFile()} fallback={<div class="editor-empty">Choose a project file to inspect and edit.</div>}><textarea spellcheck={false} value={fileContent()} onInput={(e) => { setFileContent(e.currentTarget.value); setFileNotice("Modified") }} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); void saveFile() } }}/><span class="editor-status">{fileNotice()} · ⌘S to save</span></Show></div></div></section>
       </Show>
       }>
-        <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">GIT REVIEW</span><strong>{selectedProject()?.branch || "Selected project"}</strong></div><button onClick={refreshDiff}>Refresh changes</button></div><div class="ide-grid"><aside class="file-tree"><Show when={gitChanges().length} fallback={<button onClick={refreshDiff}>Load changed files</button>}><For each={gitChanges()}>{(change) => <button class={selectedDiff() === change.path ? "active" : ""} onClick={async () => { setSelectedDiff(change.path); setDiffContent(await window.api.workspace.gitDiff(workspace(), change.path)) }}><span class="change-code">{change.status}</span> {change.path}</button>}</For></Show></aside><div class="code-editor"><Show when={selectedDiff()} fallback={<div class="editor-empty">Select a changed file to review its diff.</div>}><pre class="diff-view">{diffContent()}</pre></Show></div></div></section>
+        <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">GIT REVIEW</span><strong>{selectedProject()?.branch || "Selected project"}</strong></div><button onClick={() => void refreshDiff()}>Refresh changes</button></div><div class="ide-grid"><aside class="file-tree"><Show when={gitChanges().length} fallback={<button onClick={() => void refreshDiff()}>Load changed files</button>}><For each={gitChanges()}>{(change) => <button class={selectedDiff() === change.path ? "active" : ""} onClick={async () => { setSelectedDiff(change.path); setDiffContent(await window.api.workspace.gitDiff(workspace(), change.path)) }}><span class="change-code">{change.status}</span> {change.path}</button>}</For></Show></aside><div class="code-editor"><Show when={selectedDiff()} fallback={<div class="editor-empty">Select a changed file to review its diff.</div>}><pre class="diff-view">{diffContent()}</pre></Show></div></div></section>
       </Show>
     </main>
   </div>
