@@ -37,6 +37,7 @@ const scheduler = new GrokTaskScheduler(backend)
 const preview = new PreviewServer()
 let logger: ReturnType<typeof initLogging>
 let updateTimer: ReturnType<typeof setInterval> | undefined
+let telegramTaskCancelled = false
 
 // ── Window factory ────────────────────────────────────────────────────────────
 
@@ -101,7 +102,7 @@ app.whenReady().then(async () => {
     preview: () => preview,
   })
 
-  telegram.setMessageHandler(async (_chatId, text) => {
+  telegram.setMessageHandler(async (chatId, text) => {
     const modelChoice = text.match(/^pick_model:(\d+)$/)
     if (modelChoice) {
       const catalog = await backend.models(); const selected = catalog.models[Number(modelChoice[1])]
@@ -124,7 +125,12 @@ app.whenReady().then(async () => {
     const help = "Grok Build Desktop\n\n/run <task> — run a coding task\n/status — backend status\n/models — choose a model\n/projects — choose a workspace\n/workspace — active workspace\n/cancel — stop the current task\n\nPlain messages also run as tasks."
     const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
     if (name === "start" || name === "help" || name === "menu") return menu
-    if (name === "cancel") { backend.cancel(); return "Cancelled the active Grok Build task." }
+    if (name === "cancel") {
+      const wasRunning = backend.isRunning()
+      if (wasRunning) telegramTaskCancelled = true
+      backend.cancel()
+      return wasRunning ? "Stopping the active Grok Build task…" : "No Grok Build task is currently running."
+    }
     if (name === "workspace") return `Active workspace: ${(getStore().get("workspace.last") as string | undefined) || "Scratch"}`
     if (name === "status") {
       const status = await backend.status()
@@ -157,13 +163,49 @@ app.whenReady().then(async () => {
     mkdirSync(cwd, { recursive: true })
     let response = ""
     const input = { prompt: taskText.slice(0, 20_000), cwd, model: getStore().get("defaults.model") as string | undefined }
+    telegramTaskCancelled = false
     const run = startGrokRun(input)
+    const startedAt = Date.now()
+    const workspaceName = getStore().get("projects").find((project) => project.path === cwd)?.name || "Scratch"
+    const modelName = input.model || "Grok Build default"
+    await telegram.sendActivity(chatId)
+    const progressId = await telegram.sendProgress(chatId, `🚀 Task started\nModel: ${modelName}\nWorkspace: ${workspaceName}`)
+    let stage = "🧠 Grok Build is reasoning"
+    let lastProgress = ""
+    let progressPending = false
+    const elapsed = () => {
+      const seconds = Math.max(1, Math.floor((Date.now() - startedAt) / 1000))
+      return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+    }
+    const updateProgress = (nextStage = stage) => {
+      stage = nextStage
+      const message = `${stage}…\nElapsed: ${elapsed()}\nModel: ${modelName}`
+      if (message === lastProgress || progressPending) return
+      lastProgress = message
+      progressPending = true
+      void telegram.editProgress(chatId, progressId, message).finally(() => { progressPending = false })
+    }
+    const activityTimer = setInterval(() => { void telegram.sendActivity(chatId); updateProgress() }, 7_000)
+    activityTimer.unref()
     try {
-      await backend.run(input, (event) => { if (event.type === "text" && typeof event.data === "string") response += event.data })
+      await backend.run(input, (event) => {
+        if (event.type === "text" && typeof event.data === "string") { response += event.data; updateProgress("✍️ Grok Build is preparing the response") }
+        else if (event.type === "thought") updateProgress("🧠 Grok Build is reasoning")
+        else if (event.type.toLowerCase().includes("tool")) updateProgress("🔧 Grok Build is using workspace tools")
+      })
+      if (telegramTaskCancelled) {
+        finishGrokRun(run.id, { status: "cancelled" })
+        await telegram.editProgress(chatId, progressId, `⏹ Task cancelled\nTime: ${elapsed()}\nModel: ${modelName}`)
+        return "Task cancelled."
+      }
       finishGrokRun(run.id, { status: "completed" })
+      await telegram.editProgress(chatId, progressId, `✅ Task finished\nTime: ${elapsed()}\nModel: ${modelName}`)
     } catch (error) {
       finishGrokRun(run.id, { status: "failed", error: error instanceof Error ? error.message : String(error) })
+      await telegram.editProgress(chatId, progressId, `❌ Task failed\nTime: ${elapsed()}\nModel: ${modelName}`)
       throw error
+    } finally {
+      clearInterval(activityTimer)
     }
     return response.trim().slice(0, 4096) || "Task completed without a text response."
   })

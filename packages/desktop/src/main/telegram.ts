@@ -93,18 +93,25 @@ export class TelegramBridge {
             continue
           }
           if (!this.handler) { await this.send(chatId, "Grok Build Desktop is connected but its task handler is not ready."); continue }
-          try {
-            const reply = await this.handler(chatId, text)
-            if (typeof reply === "string") await this.send(chatId, reply)
-            else await this.sendRich(chatId, reply)
-          }
-          catch (error) { await this.send(chatId, `Task failed: ${error instanceof Error ? error.message : String(error)}`) }
+          // Do not block polling while an agent task runs. This keeps callbacks,
+          // /status, and especially /cancel responsive during long runs.
+          void this.handleMessage(chatId, text)
         }
         if (payload.result?.length) getStore().set("telegram", { ...getStore().get("telegram"), updateOffset: this.offset })
       } catch (error) {
         if (!this.polling || generation !== this.pollGeneration) return
         await new Promise((resolve) => setTimeout(resolve, 2_000))
       }
+    }
+  }
+
+  private async handleMessage(chatId: string, text: string): Promise<void> {
+    try {
+      const reply = await this.handler!(chatId, text)
+      if (typeof reply === "string") await this.send(chatId, reply)
+      else await this.sendRich(chatId, reply)
+    } catch (error) {
+      await this.send(chatId, `Task failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -140,6 +147,34 @@ export class TelegramBridge {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: reply.text.slice(0, 4096), reply_markup: telegramInlineKeyboard(reply) }),
     })
     if (!payload.ok) throw new Error(payload.description || "Telegram send failed")
+  }
+
+  async sendActivity(chatId: string): Promise<void> {
+    const token = this.token(); if (!token) return
+    try {
+      await telegramRequest(`https://api.telegram.org/bot${token}/sendChatAction`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+      })
+    } catch { /* Activity is best-effort and must never fail a task. */ }
+  }
+
+  async sendProgress(chatId: string, text: string): Promise<number | undefined> {
+    const token = this.token(); if (!token) return undefined
+    try {
+      const payload = await telegramRequest<{ ok: boolean; result?: { message_id: number } }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 4096) }),
+      })
+      return payload.ok ? payload.result?.message_id : undefined
+    } catch { return undefined }
+  }
+
+  async editProgress(chatId: string, messageId: number | undefined, text: string): Promise<void> {
+    const token = this.token(); if (!token || !messageId) return
+    try {
+      await telegramRequest(`https://api.telegram.org/bot${token}/editMessageText`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId, text: text.slice(0, 4096) }),
+      })
+    } catch { /* Progress is best-effort and must never fail a task. */ }
   }
 
   async send(chatId: string, text: string): Promise<{ ok: boolean; error?: string }> {
