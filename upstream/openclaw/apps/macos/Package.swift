@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "OpenClawIPC", targets: ["OpenClawIPC"]),
         .library(name: "OpenClawDiscovery", targets: ["OpenClawDiscovery"]),
         .executable(name: "OpenClaw", targets: ["OpenClaw"]),
+        .executable(name: "GrokBuildNative", targets: ["OpenClaw"]),
         .executable(name: "openclaw-mac", targets: ["OpenClawMacCLI"]),
     ],
     dependencies: [
