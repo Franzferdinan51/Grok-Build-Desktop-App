@@ -1,96 +1,200 @@
 # Grok Build Desktop
 
-Cross-platform, local-first coding workbench powered exclusively by **Grok Build CLI**. The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzferdinan51/grok-build), with a clean sync path from `xai-org/grok-build`.
+An open-source, local-first desktop workbench for [Grok Build CLI](https://github.com/xai-org/grok-build). It combines an agentic coding chat, project tools, live preview, multi-model routing, schedules, skills, and a protected Telegram interface in one native application for macOS, Windows, and Linux.
 
-## Highlights
+The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzferdinan51/grok-build), with a clean upstream-sync path from xAI. Grok Build remains the sole coding-agent runtime: the desktop app handles presentation, secure provider configuration, and orchestration without adding a competing agent backend.
 
-- Electron desktop app for macOS, Windows, and Linux, based on MIT-licensed Hermes Desktop patterns.
-- Grok Build CLI is the sole coding-agent backend using documented streaming headless mode.
-- Start immediately in an automatic Scratch workspace or open a Git project.
-- Project explorer/editor, terminal, Git changes and per-file diffs.
-- LM Studio, ODS, MiniMax, and unlimited OpenAI-compatible endpoints as first-class Grok model targets.
-- Editable endpoints/model IDs, encrypted API keys, provider diagnostics, and selectable Grok CLI binary.
-- Skills browser, searchable run history, persistent schedules, Local Studio monitoring, and Telegram connection.
-- Path containment, symlink rejection, terminal limits, explicit approvals, and no automatic model loading.
-- Hermes-style persistent project chats with streamed messages, collapsed reasoning, prompt queues, history recall, copy/retry actions, and a bottom-docked composer.
-- Optional Dyad-style live preview beside the chat, with automatic dev-server URL detection, responsive device widths, reload, and browser handoff.
-- Slash-command palette with keyboard autocomplete, desktop controls, model/reasoning switches, navigation commands, and dynamically discovered Grok Build skills.
-- Optional Hermes-style automatic learning: a quiet, configurable post-turn Grok review updates or creates project skills only when it finds a durable correction or reusable workflow.
-- Optional Hermes-inspired Mixture of Agents mode using Grok Build's native `--best-of-n`: 2–10 parallel candidate solutions with a synthesized winner.
-- MoA appears as a virtual model family in the main picker (Fast ×2, Balanced ×3, Thorough ×5, Exhaustive ×8) while retaining the selected Grok model underneath.
-- Hermes-style MoA routing supports per-reference models and a separate aggregator: references run concurrently in plan-only mode, then the acting aggregator implements the synthesized solution.
-- Persistent coding-agent defaults for model, reasoning, self-verification, maximum turns, web access, and approval policy.
-- Durable workspace goals combining Grok/Hermes standing-goal semantics with Codex-style status control and progress across runs.
+## What is included
 
-## Chat workflow
+### Agentic coding workspace
 
-Each workspace has its own locally persisted conversation. Grok Build output streams into the thread, `thought` events and `<think>…</think>` blocks stay collapsed by default, and a second instruction entered during a run is queued and drained automatically. Press **Enter** to send, **Shift+Enter** for a new line, use arrow up/down at the input boundary to browse prompt history, and choose **New chat** to clear only the active workspace conversation.
+- Per-project conversations with streamed output, collapsed reasoning, prompt queues, copy/retry actions, and history recall.
+- Start immediately in an isolated Scratch workspace or open an existing project.
+- Workspace file browser/editor, contained terminal, Git status, and per-file diffs.
+- Fixed header and composer with an independently scrolling chat transcript.
+- Collapsible left navigation and right Preview rail with persisted layout preferences.
+- Searchable Grok run history, scheduled tasks, project skills, and durable workspace goals.
+- Slash-command palette with keyboard completion and dynamically discovered Grok Build skills.
+- Configurable reasoning, turn limits, self-verification, web search, subagents, and visible automatic-approval controls.
 
-Type `/` to open the command palette. Arrow keys select a command and Enter or Tab completes it. Desktop commands such as `/new`, `/model`, `/think`, `/moa`, `/goal`, `/learn`, `/preview`, `/terminal`, and `/settings` execute locally; discovered skill commands are sent through Grok Build. `/learn <URL, path, notes, or workflow>` uses the live Grok Build agent to inspect every named source and author a reusable project skill under `.grok/skills/`; bare `/learn` distills the recent conversation.
+### Models and authentication
 
-Automatic learning is opt-in under Settings. Its review interval and model are configurable per installation. Reviews run quietly after successful turns, can write only under the active workspace's `.grok/skills/`, prefer targeted improvements over narrow duplicate skills, and skip sessions without a strong reusable lesson. It is disabled by default because it consumes model usage and automatically writes procedural knowledge.
+- Model selection is populated from the real `grok models` catalog.
+- xAI/Grok OAuth uses Grok Build's official login flow.
+- OpenAI Codex subscription OAuth is managed by Hermes and connected to Grok Build through a localhost-only, token-isolated Responses API bridge.
+- Available Codex models are discovered after sign-in, written into Grok Build's managed configuration, and refreshed in the desktop and Telegram selectors.
+- MiniMax OAuth uses the official [`mmx`](https://github.com/MiniMax-AI/cli) device authorization flow with PKCE and automatic refresh.
+- LM Studio, ODS, MiniMax API keys, and arbitrary OpenAI-compatible endpoints can be configured as Grok Build model targets.
+- API keys are encrypted with Electron `safeStorage` and injected only into the Grok child process. OAuth tokens remain owned by their respective CLI authentication stores.
 
-Use `/goal <objective>` to create a durable workspace goal. `/goal status`, `/goal pause`, `/goal resume`, `/goal done`, and `/goal clear` manage it. While active, the goal is persisted, shown above the composer, carried into every Grok Build run, and automatically enables final self-verification.
+### Mixture of Agents and subagents
+
+- Hermes-inspired MoA presets for 2–10 parallel reference models plus a separate acting aggregator.
+- Reference models run concurrently in plan-only mode and cannot edit files.
+- Provider-specific malformed usage metadata no longer aborts the entire MoA run: affected candidates retry safely with the Grok default, and an isolated candidate failure can be skipped.
+- Optional balanced or proactive Grok Build subagent delegation for independent research, inspection, testing, and preview review.
+- The primary agent remains responsible for integration and final verification.
+
+### Live coding preview and app controls
+
+- Sandboxed, collapsible Preview rail with desktop, tablet, and mobile widths.
+- Built-in local preview server, automatic localhost URL detection, reload, and browser handoff.
+- The composer remains usable while Preview is open.
+- With **Agent App Controls** enabled, the agent can receive the rendered DOM, visible text, interactive elements, viewport details, and a fresh screenshot.
+- Typed, allowlisted agent actions can open Preview and create scheduled tasks; arbitrary UI clicks, hidden commands, credential access, and permission changes are not exposed.
+
+### Telegram
+
+- BotFather-token validation, OS-encrypted storage, polling, timeouts, limits, and clean network errors.
+- Pairing requests and explicit chat allowlisting before any task can run.
+- Native command registration with `/start`, `/help`, `/menu`, `/run`, `/status`, `/models`, `/model`, `/projects`, `/workspace`, and `/cancel`.
+- Inline menus, clickable model selection, project/workspace selection, current-model indicators, cancellation, and plain-message tasks.
+- Telegram tasks use the current workspace, appear in Grok run history, and send their result back to the originating authorized chat.
+- Use a dedicated BotFather bot. A token already consumed by OpenClaw or another long-polling client cannot simultaneously be polled by this app.
+
+### Learning and automation
+
+- `/learn <URL, path, notes, or workflow>` creates or improves reusable project skills under `.grok/skills/`.
+- Bare `/learn` distills the recent conversation.
+- Optional automatic learning reviews completed turns for durable corrections, reusable fixes, and incomplete skills while refusing weak lessons.
+- Persistent one-time or repeating scheduled Grok Build tasks.
+- Optional automatic Grok Build CLI updates through the official native updater, with stable/alpha channels and safe deferral while tasks are active.
 
 ## Install
+
+### Prerequisites
+
+- Node.js 20+
+- pnpm 9+
+- Grok Build CLI
+- Optional: Hermes Agent for OpenAI Codex subscription OAuth
+- Optional: MiniMax `mmx` CLI for MiniMax OAuth
 
 ```bash
 git clone https://github.com/Franzferdinan51/Grok-Build-Desktop-App.git
 cd Grok-Build-Desktop-App
 pnpm install
 curl -fsSL https://x.ai/cli/install.sh | bash
+grok --version
 pnpm dev
 ```
 
-Set `GROK_BUILD_PATH` when `grok` is not on `PATH`, or choose the binary in Settings.
+If `grok` is not available on the GUI application's `PATH`, set `GROK_BUILD_PATH` or choose the binary in **Settings → Grok Build CLI backend**.
+
+Production artifacts are generated with:
+
+```bash
+pnpm package
+```
+
+Output is written to `packages/desktop/dist`.
+
+## First-run setup
+
+1. Open **Settings** and confirm the Grok Build CLI status is ready.
+2. Sign in with xAI, or configure another model provider.
+3. For OpenAI Codex, install Hermes, choose **Sign in with OpenAI**, and finish the browser flow. The usable Codex models are imported automatically.
+4. For MiniMax, install `mmx`, choose **Sign in with MiniMax**, and finish device authorization.
+5. Choose **Agent scratch** for project-free work or **Open project** for an existing codebase.
+6. Enable Preview, Telegram, subagents, MoA, agent controls, or automatic learning only when needed.
+
+## Chat workflow
+
+Each workspace has its own locally persisted conversation. Press **Enter** to send, **Shift+Enter** for a new line, and use Up/Down at the input boundary for prompt history. Messages submitted during a run are queued and drained automatically.
+
+Type `/` for local commands. Important commands include:
+
+```text
+/new
+/model <model-id>
+/think [on|off]
+/approve [on|off]
+/moa [off|2-10]
+/goal <objective|status|pause|resume|done|clear>
+/learn [URL, path, notes, or workflow]
+/preview [on|off]
+/workspace
+/terminal
+/review
+/skills
+/runs
+/scheduled
+/settings
+/stop
+```
+
+Discovered skill commands are passed through to Grok Build.
 
 ## Backend contract
 
-Every coding task runs through Grok Build:
+Every coding task ultimately uses Grok Build's documented headless interface:
 
 ```bash
 grok -p "<task>" --cwd "<workspace>" --output-format streaming-json
 ```
 
-The model picker reads `grok models` and adds `--model` when selected. Reasoning and auto-approval map to documented Grok flags. Provider credentials are OS-encrypted and injected only into the Grok child process.
+The desktop app adds only verified flags such as `--model`, `--reasoning-effort`, `--max-turns`, `--check`, `--disable-web-search`, `--no-subagents`, and `--yolo` when their corresponding controls are selected.
 
-Our fork can be updated from official xAI upstream with:
+Managed provider entries are written only inside the marked **GROK BUILD DESKTOP MANAGED PROVIDERS** block in `~/.grok/config.toml`; hand-written configuration outside that block is preserved.
+
+To sync the maintained Grok Build fork with xAI upstream:
 
 ```bash
 pnpm sync:grok-upstream
 ```
 
-## Design sources
+## Security boundaries
 
-- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — MIT Electron shell and desktop patterns; retained under `upstream/hermes`.
-- [openclaw/openclaw](https://github.com/openclaw/openclaw) — MIT product/UX reference for skills, schedules, channels, approvals, and settings.
-- [anomalyco/opencode](https://github.com/anomalyco/opencode) — MIT workspace/provider UX reference.
-- [MiniMax-AI/OpenRoom](https://github.com/MiniMax-AI/OpenRoom) — MIT local-first organization reference.
-- [Z.ai ZCode](https://zcode.z.ai/en) — closed-source product reference only; no code or assets copied.
-- [sybil-solutions/local-studio](https://github.com/sybil-solutions/local-studio) — Apache-2.0 runtime-monitoring patterns.
-- [dyad-sh/dyad](https://github.com/dyad-sh/dyad) — Apache-2.0 live-preview workflow and responsive viewport patterns.
-
-## Docs
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [Providers](docs/PROVIDERS.md)
-- [Feature sources](docs/FEATURES-INSPO.md)
-- [Cross-platform contract](docs/PLATFORM-PARITY.md)
-- [Install](docs/INSTALL.md)
-- [Telegram](docs/TELEGRAM.md)
-- [Testing and release checks](docs/TESTING.md)
-- [Live preview](docs/PREVIEW.md)
+- Workspace file operations reject traversal and escaping symlinks.
+- Preview content runs in a sandboxed iframe without Electron or Node access.
+- Telegram requires explicit pairing/allowlisting and never exposes its token to the renderer.
+- Provider API keys use OS encryption; OAuth tokens are not copied into desktop settings.
+- Agent App Controls are opt-in, typed, and allowlisted.
+- Automatic approvals are visibly marked because they reduce interactive safety prompts.
+- The app does not automatically load or unload LM Studio models.
 
 ## Verification
 
 ```bash
-pnpm test:smoke   # CLI, reasoning parsing, filesystem sandbox, terminal, Git review
 pnpm typecheck
+pnpm test:smoke
 pnpm build
-pnpm package      # signed installers/artifacts for the current platform
+pnpm package
 ```
 
-The smoke suite creates an isolated temporary Git workspace and never modifies a real project. Provider and Telegram live tests require credentials and are initiated explicitly from their settings pages.
+The smoke suite uses temporary workspaces and validates the CLI/model catalog, chat parsing, filesystem containment, symlink rejection, terminal behavior, Preview serving, Git status, and diffs. Live provider and Telegram checks require user credentials and are initiated explicitly.
+
+## Project structure
+
+```text
+packages/desktop/       Electron + Solid desktop application
+docs/                   Architecture, providers, Telegram, Preview, and testing guides
+scripts/                Upstream synchronization helpers
+upstream/hermes/        Retained MIT Hermes reference sources and notices
+```
+
+## Design and implementation references
+
+- [xai-org/grok-build](https://github.com/xai-org/grok-build) — coding-agent backend and headless/model contracts.
+- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — MIT desktop, MoA, OAuth, and agent-workflow patterns.
+- [openclaw/openclaw](https://github.com/openclaw/openclaw) — channel, scheduling, skills, model-routing, and OAuth reference patterns.
+- [MiniMax-AI/cli](https://github.com/MiniMax-AI/cli) — official MiniMax OAuth and runtime integration.
+- [dyad-sh/dyad](https://github.com/dyad-sh/dyad) — Apache-2.0 live-preview patterns.
+- [anomalyco/opencode](https://github.com/anomalyco/opencode) — MIT workspace/provider UX reference.
+- [sybil-solutions/local-studio](https://github.com/sybil-solutions/local-studio) — Apache-2.0 local runtime-monitoring patterns.
+
+No third-party branding, proprietary assets, or unsupported provider behavior is presented as native functionality.
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Providers](docs/PROVIDERS.md)
+- [Feature-source matrix](docs/FEATURES-INSPO.md)
+- [Cross-platform contract](docs/PLATFORM-PARITY.md)
+- [Install and build](docs/INSTALL.md)
+- [Telegram](docs/TELEGRAM.md)
+- [Testing and release checks](docs/TESTING.md)
+- [Live Preview](docs/PREVIEW.md)
 
 ## License
 
