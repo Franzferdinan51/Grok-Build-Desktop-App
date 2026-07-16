@@ -105,7 +105,6 @@ struct OpenClawApp: App {
         Window("Grok Build Coding", id: "grok-build-coding") {
             GrokBuildCodingView()
         }
-        .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
         .defaultSize(width: 900, height: 680)
 
