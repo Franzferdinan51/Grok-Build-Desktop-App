@@ -12,12 +12,14 @@ import { listGrokSkills } from "./grok-skills"
 import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
+import { PreviewServer } from "./preview-server"
 
 type Deps = {
   backend: () => GrokBuildBackend
   telegram: () => TelegramBridge
   localStudio: () => LocalStudioController
   getMainWindow: () => BrowserWindow | null
+  preview: () => PreviewServer
 }
 
 export function registerIpcHandlers(deps: Deps): void {
@@ -106,6 +108,8 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("workspace:command", (_event, root: string, command: string) => runWorkspaceCommand(root, command))
   ipcMain.handle("workspace:git-changes", (_event, root: string) => gitChangedFiles(root))
   ipcMain.handle("workspace:git-diff", (_event, root: string, path: string) => gitFileDiff(root, path))
+  ipcMain.handle("preview:start", (_event, root: string) => deps.preview().start(root))
+  ipcMain.handle("preview:stop", () => deps.preview().stop())
 
   ipcMain.handle("store:get", (_event, key: string) => getStore().get(key))
   ipcMain.handle("store:set", (_event, key: string, value: unknown) => getStore().set(key, value))

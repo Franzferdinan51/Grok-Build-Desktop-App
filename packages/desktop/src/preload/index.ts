@@ -35,6 +35,7 @@ export type ElectronAPI = {
   providerSecrets: { list: () => Promise<ProviderSecret[]>; save: (id: string, value: string) => Promise<void>; saveSettings: (id: string, baseUrl: string, modelId: string) => Promise<void>; remove: (id: string) => Promise<void>; test: (id: string) => Promise<{ ok: boolean; models?: number; message: string }> }
   providers: { add: (label: string, baseUrl: string, modelId: string) => Promise<void>; remove: (id: string) => Promise<void> }
   workspace: { files: (root: string) => Promise<WorkspaceFile[]>; read: (root: string, path: string) => Promise<string>; write: (root: string, path: string, content: string) => Promise<void>; command: (root: string, command: string) => Promise<{ stdout: string; stderr: string; code: number }>; gitChanges: (root: string) => Promise<{ status: string; path: string }[]>; gitDiff: (root: string, path: string) => Promise<string> }
+  preview: { start: (root: string) => Promise<{ url: string }>; stop: () => Promise<void> }
   localStudio: { status: () => Promise<LocalStudioSnapshot>; setURL: (baseUrl: string) => Promise<string> }
   store: { get: <T = unknown>(key: string) => Promise<T>; set: <T = unknown>(key: string, value: T) => Promise<void>; delete: (key: string) => Promise<void> }
   window: { minimize: () => void; maximize: () => void; close: () => void }
@@ -69,6 +70,7 @@ const api: ElectronAPI = {
   providerSecrets: { list: () => ipcRenderer.invoke("provider-secrets:list"), save: (id, value) => ipcRenderer.invoke("provider-secrets:save", id, value), saveSettings: (id, baseUrl, modelId) => ipcRenderer.invoke("provider-secrets:save-settings", id, baseUrl, modelId), remove: (id) => ipcRenderer.invoke("provider-secrets:remove", id), test: (id) => ipcRenderer.invoke("provider-secrets:test", id) },
   providers: { add: (label, baseUrl, modelId) => ipcRenderer.invoke("providers:add", label, baseUrl, modelId), remove: (id) => ipcRenderer.invoke("providers:remove", id) },
   workspace: { files: (root) => ipcRenderer.invoke("workspace:files", root), read: (root, path) => ipcRenderer.invoke("workspace:read", root, path), write: (root, path, content) => ipcRenderer.invoke("workspace:write", root, path, content), command: (root, command) => ipcRenderer.invoke("workspace:command", root, command), gitChanges: (root) => ipcRenderer.invoke("workspace:git-changes", root), gitDiff: (root, path) => ipcRenderer.invoke("workspace:git-diff", root, path) },
+  preview: { start: (root) => ipcRenderer.invoke("preview:start", root), stop: () => ipcRenderer.invoke("preview:stop") },
   localStudio: { status: () => ipcRenderer.invoke("local-studio:status"), setURL: (baseUrl) => ipcRenderer.invoke("local-studio:set-url", baseUrl) },
   store: { get: <T = unknown>(key: string) => ipcRenderer.invoke("store:get", key) as Promise<T>, set: <T = unknown>(key: string, value: T) => ipcRenderer.invoke("store:set", key, value), delete: (key) => ipcRenderer.invoke("store:delete", key) },
   window: { minimize: () => ipcRenderer.invoke("window:minimize"), maximize: () => ipcRenderer.invoke("window:maximize"), close: () => ipcRenderer.invoke("window:close") },

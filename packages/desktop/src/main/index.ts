@@ -21,6 +21,7 @@ import { LocalStudioController } from "./local-studio"
 import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
 import { GrokTaskScheduler } from "./scheduled-tasks"
+import { PreviewServer } from "./preview-server"
 
 const APP_NAME = "Grok Build Desktop"
 const APP_ID = "ai.grokbuild.desktop"
@@ -30,6 +31,7 @@ const backend = new GrokBuildBackend()
 const telegram = new TelegramBridge()
 const localStudio = new LocalStudioController()
 const scheduler = new GrokTaskScheduler(backend)
+const preview = new PreviewServer()
 let logger: ReturnType<typeof initLogging>
 
 // ── Window factory ────────────────────────────────────────────────────────────
@@ -92,6 +94,7 @@ app.whenReady().then(async () => {
     telegram: () => telegram,
     localStudio: () => localStudio,
     getMainWindow: () => mainWindow,
+    preview: () => preview,
   })
 
   mainWindow = await createAndLoadMainWindow()
@@ -120,4 +123,5 @@ app.on("before-quit", async () => {
   writeLog("info", "App quitting — stopping Grok Build task")
   backend.cancel()
   scheduler.stop()
+  await preview.stop()
 })

@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { splitThinking } from "../src/renderer/chat-utils.ts"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "../src/main/workspace-tools.ts"
 import { inspectProject } from "../src/main/project-inspection.ts"
+import { PreviewServer } from "../src/main/preview-server.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -29,6 +30,13 @@ const project = await inspectProject({ id: "smoke", name: "smoke", path: root, a
 assert.equal(project.isGit, true)
 assert.equal(project.changedFiles >= 1, true)
 
+await writeFile(join(root, "index.html"), "<h1>preview works</h1>")
+const preview = new PreviewServer()
+const previewAddress = await preview.start(root)
+assert.match(await (await fetch(previewAddress.url)).text(), /preview works/)
+assert.equal((await fetch(`${previewAddress.url}/escape`)).status, 404)
+await preview.stop()
+
 assert.deepEqual(splitThinking([
   { kind: "text", content: "<thi" },
   { kind: "text", content: "nk>private reasoning</think>Public answer" },
@@ -39,4 +47,4 @@ assert.deepEqual(splitThinking([
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
-console.log("Smoke test passed: CLI, chat parsing, workspace, containment, terminal, and Git review")
+console.log("Smoke test passed: CLI, chat parsing, workspace, preview, containment, terminal, and Git review")

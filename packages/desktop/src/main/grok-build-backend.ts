@@ -116,7 +116,8 @@ export class GrokBuildBackend {
       }
     }
 
-    const args = ["-p", effectivePrompt, "--cwd", input.cwd, "--output-format", "streaming-json"]
+    const baseArgs = ["-p", effectivePrompt, "--cwd", input.cwd, "--output-format", "streaming-json"]
+    const args = [...baseArgs]
     if (effectiveModel) args.push("--model", effectiveModel)
     if (input.thinking) args.push("--reasoning-effort", "high")
     if (input.autoApprove) args.push("--yolo")
@@ -126,49 +127,55 @@ export class GrokBuildBackend {
     if (input.maxTurns && input.maxTurns > 0) args.push("--max-turns", String(Math.min(100, Math.floor(input.maxTurns))))
     if (input.disableWebSearch) args.push("--disable-web-search")
 
-    writeLog("info", `Starting Grok Build task in ${input.cwd}`)
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...providerSecretEnvironment() } })
-    this.current = child
-    let buffer = ""
-    let stderr = ""
-
-    const emitLines = (chunk: Buffer) => {
-      buffer += chunk.toString()
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const parsed = JSON.parse(line) as GrokBuildEvent & { sessionId?: string; session_id?: string }
-          // Keep upstream JSON field spelling intact while exposing a stable
-          // desktop session id for persistent run history.
-          if (!parsed.sessionId && typeof parsed.session_id === "string") parsed.sessionId = parsed.session_id
-          onEvent(parsed)
+    const runChild = (childArgs: string[]) => new Promise<string>((resolve, reject) => {
+      writeLog("info", `Starting Grok Build task in ${input.cwd}`)
+      const child = spawn(command, childArgs, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...providerSecretEnvironment() } })
+      this.current = child
+      let buffer = ""
+      let stderr = ""
+      const emitLines = (chunk: Buffer) => {
+        buffer += chunk.toString()
+        const lines = buffer.split("\n")
+        buffer = lines.pop() ?? ""
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const parsed = JSON.parse(line) as GrokBuildEvent & { sessionId?: string; session_id?: string }
+            if (!parsed.sessionId && typeof parsed.session_id === "string") parsed.sessionId = parsed.session_id
+            onEvent(parsed)
+          } catch { onEvent({ type: "text", data: line + "\n" }) }
         }
-        catch { onEvent({ type: "text", data: line + "\n" }) }
       }
-    }
-
-    child.stdout?.on("data", emitLines)
-    child.stderr?.on("data", (chunk: Buffer) => {
-      // Preserve the useful tail without allowing a noisy child process to
-      // consume unbounded memory during a long-running task.
-      stderr = (stderr + chunk.toString()).slice(-1_000_000)
-    })
-
-    await new Promise<void>((resolve, reject) => {
-      child.on("error", (error) => reject(error))
+      child.stdout?.on("data", emitLines)
+      child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-1_000_000) })
+      child.on("error", reject)
       child.on("exit", (code) => {
         this.current = null
         if (buffer.trim()) emitLines(Buffer.from("\n"))
-        if (code === 0) resolve()
-        else {
-          const message = stderr.trim() || `Grok Build exited ${code}`
-          onEvent({ type: "error", message })
-          reject(new Error(message))
-        }
+        if (code === 0) resolve(stderr)
+        else reject(new Error(stderr.trim() || `Grok Build exited ${code}`))
       })
     })
+
+    try {
+      await runChild(args)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const incompatibleProvider = Boolean(effectiveModel) && /serialization error: missing field [`']?created/i.test(message)
+      if (!incompatibleProvider) {
+        onEvent({ type: "error", message })
+        throw error
+      }
+      writeLog("error", `Provider ${effectiveModel} omitted the OpenAI created field; retrying with the Grok default model`)
+      onEvent({ type: "thought", data: `The selected provider returned an incompatible streaming response (missing “created”). Retrying this run with the Grok Build default model.\n` })
+      try {
+        await runChild(baseArgs.concat(args.slice(baseArgs.length).filter((value, index, tail) => tail[index - 1] !== "--model" && value !== "--model")))
+      } catch (fallbackError) {
+        const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+        onEvent({ type: "error", message: fallbackMessage })
+        throw fallbackError
+      }
+    }
   }
 
   cancel(): void {
