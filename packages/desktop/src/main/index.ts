@@ -36,6 +36,7 @@ const localStudio = new LocalStudioController()
 const scheduler = new GrokTaskScheduler(backend)
 const preview = new PreviewServer()
 let logger: ReturnType<typeof initLogging>
+let updateTimer: ReturnType<typeof setInterval> | undefined
 
 // ── Window factory ────────────────────────────────────────────────────────────
 
@@ -150,6 +151,18 @@ app.whenReady().then(async () => {
   const menu = createMenu(mainWindow)
   Menu.setApplicationMenu(menu)
   scheduler.start()
+  const autoUpdate = async () => {
+    if (!getStore().get("grok.autoUpdate") || backend.isRunning()) return
+    try {
+      const update = await backend.checkUpdate()
+      if (update.updateAvailable) {
+        writeLog("info", `Updating Grok Build ${update.currentVersion} → ${update.latestVersion} (${update.channel})`)
+        await backend.installUpdate((getStore().get("grok.updateChannel") as "stable" | "alpha" | undefined) || "stable")
+      }
+    } catch (error) { writeLog("error", `Automatic Grok Build update failed: ${String(error)}`) }
+  }
+  updateTimer = setInterval(() => void autoUpdate(), 6 * 60 * 60_000)
+  setTimeout(() => void autoUpdate(), 30_000)
 
   app.on("activate", () => {
     // macOS: re-create window when dock icon is clicked and no windows exist
@@ -170,5 +183,6 @@ app.on("before-quit", async () => {
   writeLog("info", "App quitting — stopping Grok Build task")
   backend.cancel()
   scheduler.stop()
+  if (updateTimer) clearInterval(updateTimer)
   await preview.stop()
 })

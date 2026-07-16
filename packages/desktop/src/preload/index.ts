@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
 
 export type BackendStatus = { available: boolean; command: string; version?: string; error?: string }
 export type GrokBuildModelCatalog = { defaultModel?: string; models: string[] }
+export type GrokBuildUpdateStatus = { currentVersion: string; latestVersion: string; updateAvailable: boolean; channel: "stable" | "alpha"; error?: string | null }
 export type BackendEvent = { type: string; data?: string; message?: string; sessionId?: string; usage?: unknown }
 export type TelegramStatus = { connected: boolean; username?: string; botId?: number; error?: string }
 export type ProjectSnapshot = { id: string; name: string; path: string; addedAt: number; isGit: boolean; branch?: string; changedFiles: number; diffStat?: string }
@@ -21,6 +22,8 @@ export type ElectronAPI = {
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
     oauthLogin: (provider: "xai" | "openai" | "minimax") => Promise<{ ok: boolean; message: string }>
+    checkUpdate: () => Promise<GrokBuildUpdateStatus>
+    installUpdate: (channel: "stable" | "alpha") => Promise<GrokBuildUpdateStatus>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
   }
   telegram: {
@@ -58,6 +61,7 @@ const api: ElectronAPI = {
     cancel: () => ipcRenderer.invoke("backend:cancel"),
     setPath: (path) => ipcRenderer.invoke("backend:set-path", path),
     oauthLogin: (provider) => ipcRenderer.invoke("backend:oauth-login", provider),
+    checkUpdate: () => ipcRenderer.invoke("backend:update-check"), installUpdate: (channel) => ipcRenderer.invoke("backend:update-install", channel),
     onEvent: (handler) => {
       const listener = (_event: IpcRendererEvent, update: BackendEvent) => handler(update)
       ipcRenderer.on("backend:event", listener)

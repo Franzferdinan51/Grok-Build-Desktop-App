@@ -23,6 +23,7 @@ export type GrokBuildModelCatalog = {
   defaultModel?: string
   models: string[]
 }
+export type GrokBuildUpdateStatus = { currentVersion: string; latestVersion: string; updateAvailable: boolean; channel: "stable" | "alpha"; error?: string | null }
 
 const execFileAsync = promisify(execFile)
 
@@ -108,6 +109,21 @@ export class GrokBuildBackend {
     }
     const label = provider === "xai" ? "xAI" : provider === "openai" ? "OpenAI Codex" : "MiniMax"
     return { ok: true, message: `${label} OAuth opened in Terminal. Finish browser sign-in, then return to the app.` }
+  }
+
+  async checkUpdate(): Promise<GrokBuildUpdateStatus> {
+    const status = await this.status()
+    if (!status.available) throw new Error(status.error)
+    const { stdout } = await execFileAsync(status.command, ["update", "--check", "--json"], { timeout: 30_000, maxBuffer: 1_000_000 })
+    return JSON.parse(stdout) as GrokBuildUpdateStatus
+  }
+
+  async installUpdate(channel: "stable" | "alpha" = "stable"): Promise<GrokBuildUpdateStatus> {
+    if (this.isRunning()) throw new Error("Finish or cancel the current Grok Build task before updating")
+    const status = await this.status()
+    if (!status.available) throw new Error(status.error)
+    await execFileAsync(status.command, ["update", channel === "alpha" ? "--alpha" : "--stable"], { timeout: 10 * 60_000, maxBuffer: 5_000_000 })
+    return this.checkUpdate()
   }
 
   async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void): Promise<void> {
