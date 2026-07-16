@@ -33,6 +33,7 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - Hermes-inspired MoA presets for 2–8 parallel reference models plus a separate acting aggregator, matching Hermes' worker cap.
 - Reference models run concurrently in plan-only mode without tools, receive recent conversation context, and cannot edit files.
 - Reference and aggregator reasoning effort can be tuned independently. Reference failures are isolated instead of aborting a healthy aggregation.
+- Reference context is bounded to avoid operating-system argument limits; if every advisor is unavailable, the acting aggregator continues instead of discarding the user's task.
 - One acting aggregator receives those analyses, runs in autonomous execution mode, edits the workspace, executes commands, and verifies the finished implementation; it is explicitly prevented from stopping at another plan.
 - Provider-specific null numeric metadata and metadata-only Responses API control frames are normalized by the maintained Grok backend without changing the selected model.
 - MoA never silently substitutes the Grok default for a chosen reference model; an isolated failed reference is reported and skipped while successful selected references continue.

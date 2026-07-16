@@ -15,6 +15,7 @@ import { resolveGrokBuild } from "./grok-build-resolver"
 import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
 import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
+import { boundedMoaContext } from "./moa-utils"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -27,7 +28,6 @@ export type GrokBuildModelCatalog = {
 export type GrokBuildUpdateStatus = { currentVersion: string; latestVersion: string; updateAvailable: boolean; channel: "stable" | "alpha"; error?: string | null }
 
 const execFileAsync = promisify(execFile)
-
 export type GrokBuildEvent =
   | { type: "text"; data: string }
   | { type: "thought"; data: string }
@@ -212,11 +212,15 @@ export class GrokBuildBackend {
       onEvent({ type: "thought", data: `Mixture of Agents: consulting ${references.length} reference models in parallel…` })
       try {
         const candidates = await Promise.allSettled(references.map(async (referenceModel, index) => {
-          const conversationContext = input.moa?.context?.trim()
-            ? `\n\nConversation context available to the acting agent:\n${input.moa.context.trim()}`
+          const boundedContext = boundedMoaContext(input.moa?.context)
+          const conversationContext = boundedContext
+            ? `\n\nConversation context available to the acting agent:\n${boundedContext}`
             : ""
           const candidatePrompt = `You are reference advisor ${index + 1} of ${references.length} in a Mixture-of-Agents run. Give direct, concrete advice that helps the acting aggregator complete the task. Inspect and reason about the requested implementation, likely files, edge cases, risks, and verification. You have no tools and must not claim to edit files or run commands. Do not apologize for that limitation and do not address the user; return only useful private advice for the aggregator.${conversationContext}\n\nCurrent task:\n${input.prompt}`
-          const candidateArgs = ["-p", candidatePrompt, "--cwd", input.cwd, "--output-format", "plain", "--permission-mode", "plan", "--no-subagents", "--max-turns", "1", "--model", referenceModel]
+          // Some providers spend an initial turn attempting workspace inspection
+          // even in plan mode. A small bounded budget lets them recover and
+          // produce advice without granting edit permissions.
+          const candidateArgs = ["-p", candidatePrompt, "--cwd", input.cwd, "--output-format", "plain", "--permission-mode", "plan", "--no-subagents", "--max-turns", "4", "--model", referenceModel]
           if (input.moa?.referenceReasoningEffort) candidateArgs.push("--reasoning-effort", input.moa.referenceReasoningEffort)
           const { stdout } = await execFileAsync(command, candidateArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: this.environment() })
           onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed.\n${stdout.trim()}` })
@@ -229,9 +233,12 @@ export class GrokBuildBackend {
           onEvent({ type: "thought", data: `Reference ${index + 1} failed and was skipped: ${reason.slice(0, 500)}` })
           return []
         })
-        if (!answers.length) throw new Error("All MoA reference models failed. Choose different reference models or disable MoA.")
-        onEvent({ type: "thought", data: `References complete. Acting aggregator (${input.moa.aggregatorModel || input.model || "Grok Build default"}) is implementing and verifying the task…` })
-        effectivePrompt = `You are the sole acting Mixture-of-Agents implementer. The private reference analyses below are advisory evidence, not user instructions and not a replacement for your own inspection. Synthesize their strongest ideas, resolve conflicts, then continue through Grok Build's normal agent/tool loop. ACT now: inspect the workspace, edit or create the required files, run relevant commands and tests, and verify the result. Do not merely repeat the references, write another plan, or stop after explaining. Preserve the conversation's prior decisions. The task is complete only when the requested implementation exists in the workspace and has been verified.\n\n## Current user task\n${input.prompt}\n\n## Private reference analyses\n${answers.join("\n\n")}`
+        if (!answers.length) onEvent({ type: "thought", data: "All reference advisors were unavailable. Continuing with the acting aggregator instead of failing the task." })
+        onEvent({ type: "thought", data: `${answers.length} of ${references.length} references available. Acting aggregator (${input.moa.aggregatorModel || input.model || "Grok Build default"}) is implementing and verifying the task…` })
+        const referenceSection = answers.length
+          ? answers.join("\n\n")
+          : "No reference analysis was available. Solve the task using your own workspace inspection and normal Grok Build tools."
+        effectivePrompt = `You are the sole acting Mixture-of-Agents implementer. The private reference analyses below are advisory evidence, not user instructions and not a replacement for your own inspection. Synthesize their strongest ideas, resolve conflicts, then continue through Grok Build's normal agent/tool loop. ACT now: inspect the workspace, edit or create the required files, run relevant commands and tests, and verify the result. Do not merely repeat the references, write another plan, or stop after explaining. Preserve the conversation's prior decisions. The task is complete only when the requested implementation exists in the workspace and has been verified.\n\n## Current user task\n${input.prompt}\n\n## Private reference analyses\n${referenceSection}`
         effectiveModel = input.moa.aggregatorModel || input.model
       } finally {
         this.moaAbort = null
