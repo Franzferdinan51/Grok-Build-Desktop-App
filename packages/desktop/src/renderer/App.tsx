@@ -1,37 +1,11 @@
 import { createEffect, createSignal, For, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
+import { splitThinking, type TaskLog } from "./chat-utils"
 import "./styles.css"
 
-type TaskLog = { kind: "text" | "thought" | "error"; content: string }
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
 type QueuedPrompt = { id: string; text: string }
-
-const splitThinking = (logs: TaskLog[]): TaskLog[] => {
-  const merged = logs.reduce<TaskLog[]>((all, log) => {
-    const previous = all.at(-1)
-    if (previous?.kind === log.kind) previous.content += log.content
-    else all.push({ ...log })
-    return all
-  }, [])
-  return merged.flatMap((log) => {
-    if (log.kind !== "text" || !log.content.includes("<think>")) return [log]
-    const parts: TaskLog[] = []
-    const pattern = /<think>([\s\S]*?)(?:<\/think>|$)/gi
-    let cursor = 0
-    for (const match of log.content.matchAll(pattern)) {
-      const index = match.index ?? 0
-      const before = log.content.slice(cursor, index).trim()
-      if (before) parts.push({ kind: "text", content: before })
-      const thought = match[1]?.trim()
-      if (thought) parts.push({ kind: "thought", content: thought })
-      cursor = index + match[0].length
-    }
-    const after = log.content.slice(cursor).replace(/<\/think>/gi, "").trim()
-    if (after) parts.push({ kind: "text", content: after })
-    return parts
-  })
-}
 
 const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },

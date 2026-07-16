@@ -11,6 +11,7 @@
     "build": "pnpm --filter @grok-build/desktop build",
     "package": "pnpm --filter @grok-build/desktop package",
     "typecheck": "pnpm --filter @grok-build/desktop typecheck",
+    "test:smoke": "pnpm --filter @grok-build/desktop test:smoke",
     "sync:grok-upstream": "bash scripts/sync-grok-fork.sh"
   },
   "packageManager": "pnpm@9.15.0",

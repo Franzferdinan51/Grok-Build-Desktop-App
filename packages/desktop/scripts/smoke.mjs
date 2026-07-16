@@ -1,0 +1,38 @@
+import assert from "node:assert/strict"
+import { execFileSync } from "node:child_process"
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { splitThinking } from "../src/renderer/chat-utils.ts"
+import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "../src/main/workspace-tools.ts"
+
+const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
+await writeFile(join(root, "hello.txt"), "hello\n")
+await mkdir(join(root, "node_modules"))
+await writeFile(join(root, "node_modules", "ignored.js"), "ignored")
+await symlink("/etc/passwd", join(root, "escape"))
+
+assert.deepEqual((await listWorkspaceFiles(root)).map((file) => file.path), ["hello.txt"])
+await writeWorkspaceFile(root, "hello.txt", "updated\n")
+assert.equal(await readWorkspaceFile(root, "hello.txt"), "updated\n")
+await assert.rejects(readWorkspaceFile(root, "../outside"), /escapes the workspace/)
+assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim(), root)
+
+execFileSync("git", ["init", "-q"], { cwd: root })
+execFileSync("git", ["add", "hello.txt"], { cwd: root })
+execFileSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "initial"], { cwd: root })
+await writeFile(join(root, "hello.txt"), "changed\n")
+assert.equal((await gitChangedFiles(root))[0]?.path, "hello.txt")
+assert.match(await gitFileDiff(root, "hello.txt"), /changed/)
+
+assert.deepEqual(splitThinking([
+  { kind: "text", content: "<thi" },
+  { kind: "text", content: "nk>private reasoning</think>Public answer" },
+]), [
+  { kind: "thought", content: "private reasoning" },
+  { kind: "text", content: "Public answer" },
+])
+
+assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
+assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
+console.log("Smoke test passed: CLI, chat parsing, workspace, containment, terminal, and Git review")

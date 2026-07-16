@@ -21,9 +21,15 @@ If the executable is not on `PATH`, set `GROK_BUILD_PATH` to the installed `grok
 ## Production validation
 
 ```bash
+pnpm test:smoke
 pnpm typecheck
 pnpm build
+pnpm package
 ```
+
+`test:smoke` validates the installed Grok CLI/model catalog, streamed reasoning parser, project file policies, traversal blocking, symlink exclusion, terminal working directory, and Git status/diff behavior in a temporary workspace.
+
+Packaged output is written to `packages/desktop/dist`. On macOS, closing the last window keeps the application available in the Dock; activating it recreates and reloads the Grok Build window.
 
 ## LM Studio
 

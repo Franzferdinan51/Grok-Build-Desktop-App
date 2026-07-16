@@ -11,7 +11,7 @@
  *  - Grok Build execution backend lifecycle
  */
 
-import { app, BrowserWindow, Menu, Tray } from "electron"
+import { app, BrowserWindow, Menu } from "electron"
 import { join } from "path"
 import windowStateKeeper from "electron-window-state"
 import { registerIpcHandlers } from "./ipc"
@@ -26,7 +26,6 @@ const APP_NAME = "Grok Build Desktop"
 const APP_ID = "ai.grokbuild.desktop"
 
 let mainWindow: BrowserWindow | null = null
-let tray: Tray | null = null
 const backend = new GrokBuildBackend()
 const telegram = new TelegramBridge()
 const localStudio = new LocalStudioController()
@@ -73,6 +72,14 @@ function createMainWindow(): BrowserWindow {
   return win
 }
 
+async function createAndLoadMainWindow(): Promise<BrowserWindow> {
+  const win = createMainWindow()
+  mainWindow = win
+  if (process.env.ELECTRON_RENDERER_URL) await win.loadURL(process.env.ELECTRON_RENDERER_URL)
+  else await win.loadFile(join(__dirname, "../renderer/index.html"))
+  return win
+}
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
@@ -87,16 +94,7 @@ app.whenReady().then(async () => {
     getMainWindow: () => mainWindow,
   })
 
-  mainWindow = createMainWindow()
-
-  // Load the renderer
-  if (process.env.ELECTRON_RENDERER_URL) {
-    // Dev mode — Vite dev server URL
-    await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
-  } else {
-    // Prod mode — built files
-    await mainWindow.loadFile(join(__dirname, "../renderer/index.html"))
-  }
+  mainWindow = await createAndLoadMainWindow()
 
   // Set up app menu
   const menu = createMenu(mainWindow)
@@ -106,7 +104,7 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     // macOS: re-create window when dock icon is clicked and no windows exist
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow()
+      void createAndLoadMainWindow().catch((error) => writeLog("error", `Could not reopen window: ${String(error)}`))
     }
   })
 })

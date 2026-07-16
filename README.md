@@ -12,6 +12,11 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 - Editable endpoints/model IDs, encrypted API keys, provider diagnostics, and selectable Grok CLI binary.
 - Skills browser, searchable run history, persistent schedules, Local Studio monitoring, and Telegram connection.
 - Path containment, symlink rejection, terminal limits, explicit approvals, and no automatic model loading.
+- Hermes-style persistent project chats with streamed messages, collapsed reasoning, prompt queues, history recall, copy/retry actions, and a bottom-docked composer.
+
+## Chat workflow
+
+Each workspace has its own locally persisted conversation. Grok Build output streams into the thread, `thought` events and `<think>…</think>` blocks stay collapsed by default, and a second instruction entered during a run is queued and drained automatically. Use `Cmd/Ctrl+Enter` to send, arrow up/down at the input boundary to browse prompt history, and **New chat** to clear only the active workspace conversation.
 
 ## Install
 
@@ -58,6 +63,18 @@ pnpm sync:grok-upstream
 - [Cross-platform contract](docs/PLATFORM-PARITY.md)
 - [Install](docs/INSTALL.md)
 - [Telegram](docs/TELEGRAM.md)
+- [Testing and release checks](docs/TESTING.md)
+
+## Verification
+
+```bash
+pnpm test:smoke   # CLI, reasoning parsing, filesystem sandbox, terminal, Git review
+pnpm typecheck
+pnpm build
+pnpm package      # signed installers/artifacts for the current platform
+```
+
+The smoke suite creates an isolated temporary Git workspace and never modifies a real project. Provider and Telegram live tests require credentials and are initiated explicitly from their settings pages.
 
 ## License
 
