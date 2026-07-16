@@ -89,19 +89,25 @@ export class GrokBuildBackend {
     }
   }
 
-  async startOAuth(provider: "xai"): Promise<{ ok: boolean; message: string }> {
-    if (provider !== "xai") throw new Error("This provider does not expose a supported OAuth flow")
+  async startOAuth(provider: "xai" | "openai" | "minimax"): Promise<{ ok: boolean; message: string }> {
     const status = await this.status()
-    if (!status.available) throw new Error(status.error)
+    if (provider === "xai" && !status.available) throw new Error(status.error)
+    const executable = provider === "xai" ? status.command : "hermes"
+    const oauthArgs = provider === "xai" ? ["--oauth"] : ["auth", "add", provider === "openai" ? "openai-codex" : "minimax-oauth", "--type", "oauth"]
+    if (provider !== "xai") {
+      try { await execFileAsync(executable, ["auth", "--help"], { timeout: 10_000 }) }
+      catch { throw new Error("Hermes Agent is required for this OAuth flow. Install Hermes, then try again.") }
+    }
     if (process.platform === "darwin") {
-      const command = `${JSON.stringify(status.command)} --oauth`
+      const command = [executable, ...oauthArgs].map((part) => JSON.stringify(part)).join(" ")
       await execFileAsync("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(command)}`], { timeout: 10_000 })
     } else if (process.platform === "win32") {
-      const child = spawn("cmd.exe", ["/c", "start", "", status.command, "--oauth"], { detached: true, stdio: "ignore" }); child.unref()
+      const child = spawn("cmd.exe", ["/c", "start", "", executable, ...oauthArgs], { detached: true, stdio: "ignore" }); child.unref()
     } else {
-      const child = spawn(status.command, ["--oauth"], { detached: true, stdio: "ignore" }); child.unref()
+      const child = spawn(executable, oauthArgs, { detached: true, stdio: "ignore" }); child.unref()
     }
-    return { ok: true, message: "xAI OAuth opened. Finish sign-in, then return and refresh models." }
+    const label = provider === "xai" ? "xAI" : provider === "openai" ? "OpenAI Codex" : "MiniMax Coding Plan"
+    return { ok: true, message: `${label} OAuth opened in Terminal. Finish browser sign-in, then return to the app.` }
   }
 
   async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void): Promise<void> {

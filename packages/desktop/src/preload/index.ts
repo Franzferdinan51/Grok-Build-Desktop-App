@@ -20,7 +20,7 @@ export type ElectronAPI = {
     autoLearn: (input: { prompt: string; cwd: string; model?: string }) => Promise<{ ok: boolean }>
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
-    oauthLogin: (provider: "xai") => Promise<{ ok: boolean; message: string }>
+    oauthLogin: (provider: "xai" | "openai" | "minimax") => Promise<{ ok: boolean; message: string }>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
   }
   telegram: {
@@ -29,6 +29,7 @@ export type ElectronAPI = {
     disconnect: () => Promise<void>
     send: (chatId: string, text: string) => Promise<{ ok: boolean; error?: string }>
     allowedChats: () => Promise<string[]>
+    pendingChats: () => Promise<string[]>
     setAllowedChats: (chatIds: string[]) => Promise<string[]>
   }
   projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; scratch: () => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
@@ -66,7 +67,7 @@ const api: ElectronAPI = {
   telegram: {
     status: () => ipcRenderer.invoke("telegram:status"), connect: (token) => ipcRenderer.invoke("telegram:connect", token),
     disconnect: () => ipcRenderer.invoke("telegram:disconnect"), send: (chatId, text) => ipcRenderer.invoke("telegram:send", chatId, text),
-    allowedChats: () => ipcRenderer.invoke("telegram:allowed-chats"), setAllowedChats: (chatIds) => ipcRenderer.invoke("telegram:set-allowed-chats", chatIds),
+    allowedChats: () => ipcRenderer.invoke("telegram:allowed-chats"), pendingChats: () => ipcRenderer.invoke("telegram:pending-chats"), setAllowedChats: (chatIds) => ipcRenderer.invoke("telegram:set-allowed-chats", chatIds),
   },
   projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), scratch: () => ipcRenderer.invoke("projects:scratch"), remove: (id) => ipcRenderer.invoke("projects:remove", id) },
   grokRuns: { list: () => ipcRenderer.invoke("grok-runs:list") },

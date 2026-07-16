@@ -28,7 +28,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
   ipcMain.handle("backend:set-path", (_event, path: string) => { getStore().set("grok.cliPath", path.trim() || undefined); return deps.backend().status() })
-  ipcMain.handle("backend:oauth-login", (_event, provider: "xai") => deps.backend().startOAuth(provider))
+  ipcMain.handle("backend:oauth-login", (_event, provider: "xai" | "openai" | "minimax") => deps.backend().startOAuth(provider))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun(input)
     let grokSessionId: string | undefined
@@ -95,6 +95,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("telegram:disconnect", () => deps.telegram().disconnect())
   ipcMain.handle("telegram:send", async (_event, chatId: string, text: string) => deps.telegram().send(chatId, text))
   ipcMain.handle("telegram:allowed-chats", () => deps.telegram().allowedChats())
+  ipcMain.handle("telegram:pending-chats", () => deps.telegram().pendingChats())
   ipcMain.handle("telegram:set-allowed-chats", (_event, chatIds: string[]) => deps.telegram().setAllowedChats(chatIds))
   ipcMain.handle("local-studio:status", () => deps.localStudio().snapshot())
   ipcMain.handle("local-studio:set-url", (_event, baseUrl: string) => deps.localStudio().setBaseURL(baseUrl))

@@ -101,12 +101,37 @@ app.whenReady().then(async () => {
   })
 
   telegram.setMessageHandler(async (_chatId, text) => {
+    const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
+    const name = command?.[1]?.toLowerCase()
+    const argument = command?.[2]?.trim() || ""
+    const help = "Grok Build Desktop commands:\n/run <task> — run a coding task\n/status — backend status\n/models — available models\n/model <name> — select model\n/workspace — active workspace\n/cancel — stop the current task\n\nPlain messages also run as tasks."
+    if (name === "start" || name === "help") return help
+    if (name === "cancel") { backend.cancel(); return "Cancelled the active Grok Build task." }
+    if (name === "workspace") return `Active workspace: ${(getStore().get("workspace.last") as string | undefined) || "Scratch"}`
+    if (name === "status") {
+      const status = await backend.status()
+      return status.available ? `Grok Build ready${status.version ? ` · ${status.version}` : ""}${backend.isRunning() ? " · task running" : " · idle"}` : `Grok Build unavailable: ${status.error}`
+    }
+    if (name === "models") {
+      const catalog = await backend.models()
+      return [`Default: ${catalog.defaultModel || "Grok Build default"}`, ...catalog.models.map((entry) => `• ${entry}`)].join("\n").slice(0, 4096)
+    }
+    if (name === "model") {
+      if (!argument) return "Usage: /model <name>\nUse /models to see available models."
+      const catalog = await backend.models()
+      if (!catalog.models.includes(argument)) return `Unknown model: ${argument}\nUse /models to see available models.`
+      getStore().set("defaults.model", argument)
+      return `Default model set to ${argument}.`
+    }
+    if (name && name !== "run") return `Unknown command /${name}.\n\n${help}`
+    const taskText = name === "run" ? argument : text
+    if (!taskText) return "Usage: /run <task>"
     if (backend.isRunning()) return "Grok Build is busy with another task. Try again when the current run finishes."
     const storedWorkspace = getStore().get("workspace.last") as string | undefined
     const cwd = storedWorkspace || join(app.getPath("userData"), "Scratch")
     mkdirSync(cwd, { recursive: true })
     let response = ""
-    const input = { prompt: text.slice(0, 20_000), cwd, model: getStore().get("defaults.model") as string | undefined }
+    const input = { prompt: taskText.slice(0, 20_000), cwd, model: getStore().get("defaults.model") as string | undefined }
     const run = startGrokRun(input)
     try {
       await backend.run(input, (event) => { if (event.type === "text" && typeof event.data === "string") response += event.data })

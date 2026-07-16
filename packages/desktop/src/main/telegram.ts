@@ -19,9 +19,10 @@ export class TelegramBridge {
 
   setMessageHandler(handler: (chatId: string, text: string) => Promise<string>): void { this.handler = handler }
   allowedChats(): string[] { return getStore().get("telegram").allowedChatIds || [] }
+  pendingChats(): string[] { return getStore().get("telegram").pendingChatIds || [] }
   setAllowedChats(chatIds: string[]): string[] {
     const allowedChatIds = [...new Set(chatIds.map((id) => id.trim()).filter((id) => /^-?\d+$/.test(id)))]
-    getStore().set("telegram", { ...getStore().get("telegram"), allowedChatIds })
+    getStore().set("telegram", { ...getStore().get("telegram"), allowedChatIds, pendingChatIds: this.pendingChats().filter((id) => !allowedChatIds.includes(id)) })
     return allowedChatIds
   }
   private token(): string | undefined {
@@ -53,11 +54,12 @@ export class TelegramBridge {
     } catch (error) { return { connected: false, error: error instanceof Error ? error.message : String(error) } }
   }
 
-  disconnect(): void { this.stop(); getStore().set("telegram", { allowedChatIds: this.allowedChats() }) }
+  disconnect(): void { this.stop(); getStore().set("telegram", { allowedChatIds: this.allowedChats(), pendingChatIds: this.pendingChats() }) }
 
   start(): void {
     if (this.polling || !this.token()) return
     this.polling = true
+    void this.configureCommands()
     void this.poll()
   }
   stop(): void { this.polling = false }
@@ -75,9 +77,10 @@ export class TelegramBridge {
           const text = update.message?.text?.trim()
           if (!chatId || !text) continue
           if (!this.allowedChats().includes(chatId)) {
+            if (!this.pendingChats().includes(chatId)) getStore().set("telegram", { ...getStore().get("telegram"), pendingChatIds: [...this.pendingChats(), chatId] })
             if (!this.unauthorizedNotified.has(chatId)) {
               this.unauthorizedNotified.add(chatId)
-              await this.send(chatId, `This chat is not authorized. Add chat ID ${chatId} to Grok Build Desktop → Telegram.`)
+              await this.send(chatId, `Pairing required. Open Grok Build Desktop → Telegram and approve chat ${chatId}. The bot command menu is ready, but tasks stay blocked until you approve this chat.`)
             }
             continue
           }
@@ -90,6 +93,25 @@ export class TelegramBridge {
         await new Promise((resolve) => setTimeout(resolve, 2_000))
       }
     }
+  }
+
+  private async configureCommands(): Promise<void> {
+    const token = this.token()
+    if (!token) return
+    try {
+      await telegramRequest(`https://api.telegram.org/bot${token}/setMyCommands`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commands: [
+          { command: "start", description: "Show setup and available commands" },
+          { command: "help", description: "Show command help" },
+          { command: "run", description: "Run a Grok Build task" },
+          { command: "status", description: "Show backend and workspace status" },
+          { command: "models", description: "List available models" },
+          { command: "model", description: "Select a model" },
+          { command: "workspace", description: "Show the active workspace" },
+          { command: "cancel", description: "Cancel the active task" },
+        ] }),
+      })
+    } catch { /* Command-menu setup is retried on the next app start. */ }
   }
 
   async send(chatId: string, text: string): Promise<{ ok: boolean; error?: string }> {
