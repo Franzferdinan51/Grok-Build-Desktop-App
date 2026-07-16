@@ -11,6 +11,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 | [openclaw/openclaw](https://github.com/openclaw/openclaw) | Personal assistant gateway with Telegram among supported channels | Telegram is modeled as a protected integration with explicit routing boundaries | Shipping OpenClaw inside this app or bypassing its channel controls |
 | [Oct1AtJoe/zcode-desktop](https://github.com/Oct1AtJoe/zcode-desktop) | MIT community floating monitor for ZCode local token/task state | Future local task/usage monitor concept | Official ZCode desktop source or product identity |
 | [dyad-sh/dyad](https://github.com/dyad-sh/dyad) | Apache-2.0 app builder with a sandboxed iframe preview, reload controls, and responsive viewport modes | Optional collapsible preview rail alongside Grok chat, URL detection, device widths, and external-browser handoff | Dyad branding, proprietary `src/pro` code, app-generation backend, or preview instrumentation |
+| [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | MIT desktop exposes configurable Mixture of Agents reference-model and aggregator presets | MoA control surface and visible candidate count, executed by Grok Build's native headless `--best-of-n` implementation | Hermes gateway, model router, provider identity, or recursive MoA provider |
 
 ## Product choices made from the research
 

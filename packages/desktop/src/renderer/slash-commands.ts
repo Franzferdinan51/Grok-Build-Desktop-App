@@ -11,6 +11,7 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommand[] = [
   { name: "model", description: "Select a Grok Build model", usage: "/model <model-id>" },
   { name: "think", description: "Toggle reasoning", usage: "/think [on|off]" },
   { name: "approve", description: "Toggle automatic tool approval", usage: "/approve [on|off]" },
+  { name: "moa", description: "Run multiple Grok candidates and synthesize the best", usage: "/moa [off|2-10]" },
   { name: "preview", description: "Open or close the live preview", usage: "/preview [on|off]" },
   { name: "workspace", description: "Open the workspace editor" },
   { name: "terminal", description: "Open the project terminal" },

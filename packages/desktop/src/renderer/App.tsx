@@ -81,6 +81,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [previewStatus, setPreviewStatus] = createSignal("Ready to connect")
   const [slashSelection, setSlashSelection] = createSignal(0)
   const [slashNotice, setSlashNotice] = createSignal("")
+  const [moaEnabled, setMoaEnabled] = createSignal(false)
+  const [moaCandidates, setMoaCandidates] = createSignal(3)
   let messagesElement: HTMLDivElement | undefined
 
   createEffect(() => {
@@ -118,6 +120,16 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       else setSlashNotice(`Unknown model: ${parsed.args}`)
     } else if (command.name === "think") { const next = setToggle(parsed.args, thinking()); setThinking(next); setSlashNotice(`Reasoning ${next ? "enabled" : "disabled"}`) }
     else if (command.name === "approve") { const next = setToggle(parsed.args, autoApprove()); setAutoApprove(next); setSlashNotice(`Automatic approval ${next ? "enabled" : "disabled"}`) }
+    else if (command.name === "moa") {
+      if (parsed.args === "off") { setMoaEnabled(false); await window.api.store.set("moa.enabled", false); setSlashNotice("Mixture of Agents disabled") }
+      else {
+        const requested = Number(parsed.args || moaCandidates())
+        const count = Number.isFinite(requested) ? Math.min(10, Math.max(2, Math.floor(requested))) : moaCandidates()
+        setMoaCandidates(count); setMoaEnabled(true)
+        await window.api.store.set("moa.candidates", count); await window.api.store.set("moa.enabled", true)
+        setSlashNotice(`Mixture of Agents enabled with ${count} candidates`)
+      }
+    }
     else if (command.name === "preview") {
       const next = setToggle(parsed.args, previewOpen()); setPreviewEnabled(true); setPreviewOpen(next)
       await window.api.store.set("preview.enabled", true); setSlashNotice(`Preview ${next ? "opened" : "closed"}`)
@@ -161,6 +173,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const savedPreviewEnabled = (await window.api.store.get<boolean>("preview.enabled")) ?? false
     const savedPreviewURL = (await window.api.store.get<string>("preview.url")) || "http://localhost:3000"
     setPreviewEnabled(savedPreviewEnabled); setPreviewOpen(savedPreviewEnabled); setPreviewURL(savedPreviewURL); setPreviewDraft(savedPreviewURL)
+    setMoaEnabled((await window.api.store.get<boolean>("moa.enabled")) ?? false)
+    setMoaCandidates(Math.min(10, Math.max(2, (await window.api.store.get<number>("moa.candidates")) || 3)))
     window.api.backend.onEvent((event: BackendEvent) => {
       if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
       if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
@@ -202,7 +216,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await saveConversation([...messages(), { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
     setPrompt(""); setEvents([]); setRunning(true)
     try {
-      await window.api.backend.run({ prompt: submitted, cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove() })
+      await window.api.backend.run({ prompt: submitted, cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), bestOfN: moaEnabled() ? moaCandidates() : undefined })
     } catch (error) {
       setEvents((old) => [...old, { kind: "error", content: (error as Error).message }])
     } finally {
@@ -366,6 +380,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <button class="composer-icon" onClick={chooseWorkspace} title="Attach or open a workspace">＋</button>
             <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} />◇ Think</label>
             <label class={`composer-toggle ${autoApprove() ? "composer-toggle--warning" : ""}`} title="Allow Grok Build to execute tools without asking"><input type="checkbox" checked={autoApprove()} onChange={(event) => setAutoApprove(event.currentTarget.checked)} />⚡ Auto</label>
+            <label class={`composer-toggle ${moaEnabled() ? "composer-toggle--moa" : ""}`} title={`Run ${moaCandidates()} candidates in parallel and synthesize the best result`}><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set("moa.enabled", event.currentTarget.checked) }} />⌘ MoA ×{moaCandidates()}</label>
             <select class="composer-model" value={model()} onChange={(event) => setModel(event.currentTarget.value)} aria-label="Model">
               <option value="">{catalog().defaultModel || "Default model"}</option>
               <For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For>
@@ -411,6 +426,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       }>
         <section class="runs-panel"><span class="eyebrow">GROK BUILD SETTINGS</span><h1>Backend, models, and providers.</h1><p>The maintained backend is your <button class="link-button" onClick={() => window.api.app.openExternal("https://github.com/Franzferdinan51/grok-build")}>Franzferdinan51/grok-build fork</button>, with xAI upstream sync preserved. Every provider remains a Grok Build model target.</p>
           <div class="settings-card"><strong>Grok Build CLI backend</strong><span>{props.backendStatus().version || "Select a locally built fork binary or a PATH command."}</span><div class="token-row"><input value={cliPath()} onInput={(e) => setCliPath(e.currentTarget.value)} placeholder="/path/to/grok or grok"/><button class="primary" onClick={async () => { const status = await window.api.backend.setPath(cliPath()); setCliNotice(status.available ? `Connected: ${status.version || status.command}` : status.error || "Unavailable"); if (status.available) setCatalog(await window.api.backend.models()) }}>Save + Probe</button></div><Show when={cliNotice()}><p class="provider-notice">{cliNotice()}</p></Show></div>
+          <div class="settings-card"><div><strong>Mixture of Agents</strong><span>Hermes-inspired multi-candidate reasoning powered by Grok Build's native <code>--best-of-n</code>.</span></div><div class="moa-setting"><label class="settings-switch"><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set("moa.enabled", event.currentTarget.checked) }} /><span />Enable MoA</label><label>Candidate agents<select value={moaCandidates()} onChange={async (event) => { const count = Number(event.currentTarget.value); setMoaCandidates(count); await window.api.store.set("moa.candidates", count) }}><For each={[2,3,4,5,6,8,10]}>{(count) => <option value={count}>{count}</option>}</For></select></label></div><p class="provider-notice">Each candidate independently tackles the task; Grok Build judges and synthesizes the strongest result. This costs roughly one model run per candidate, so it is off by default.</p></div>
           <div class="settings-card"><div><strong>Live coding preview</strong><span>Dyad-style sandboxed right rail available while chatting.</span></div><div class="preview-setting"><label class="settings-switch"><input type="checkbox" checked={previewEnabled()} onChange={async (event) => { const enabled = event.currentTarget.checked; setPreviewEnabled(enabled); setPreviewOpen(enabled); await window.api.store.set("preview.enabled", enabled) }} /><span />Enable preview</label><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} placeholder="http://localhost:3000"/><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); await window.api.store.set("preview.url", value) } }}>Save URL</button></div><p class="provider-notice">URLs printed by project terminal commands are detected automatically. The preview never starts or stops your dev server.</p></div>
           <div class="settings-card"><strong>Add another OpenAI-compatible provider</strong><div class="provider-fields"><label>Name<input value={customName()} onInput={(e) => setCustomName(e.currentTarget.value)} placeholder="Together AI" /></label><label>Base URL<input value={customURL()} onInput={(e) => setCustomURL(e.currentTarget.value)} placeholder="https://api.example.com/v1" /></label><label>Model ID<input value={customModel()} onInput={(e) => setCustomModel(e.currentTarget.value)} placeholder="coding-model" /></label><button onClick={addProvider}>Add provider</button></div></div>
           <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.envKey}</span></div><div class="provider-fields"><label>Base URL<input value={endpointDrafts()[provider.id] || ""} onInput={(event) => setEndpointDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} /></label><label>Model ID<input value={modelDrafts()[provider.id] || ""} onInput={(event) => setModelDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder="e.g. my-coding-model" /></label><button onClick={() => saveProvider(provider.id)}>Save endpoint</button></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save key</button><button onClick={async () => { const result = await window.api.providerSecrets.test(provider.id); setProviderNotices((old) => ({ ...old, [provider.id]: result.message })) }}>Test</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove key</button></Show><Show when={provider.id.startsWith("custom-")}><button onClick={async () => { await window.api.providers.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Delete provider</button></Show></div><Show when={providerNotices()[provider.id]}><p class="provider-notice">{providerNotices()[provider.id]}</p></Show></article>}</For>

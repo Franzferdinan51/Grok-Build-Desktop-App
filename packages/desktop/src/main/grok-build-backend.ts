@@ -40,6 +40,7 @@ export type RunTaskInput = {
   thinking?: boolean
   autoApprove?: boolean
   resume?: string
+  bestOfN?: number
 }
 
 export class GrokBuildBackend {
@@ -94,6 +95,7 @@ export class GrokBuildBackend {
     if (input.thinking) args.push("--reasoning-effort", "high")
     if (input.autoApprove) args.push("--yolo")
     if (input.resume) args.push("--resume", input.resume)
+    if (input.bestOfN && input.bestOfN >= 2) args.push("--best-of-n", String(Math.min(10, Math.floor(input.bestOfN))))
 
     const command = this.command()
     writeLog("info", `Starting Grok Build task in ${input.cwd}`)
