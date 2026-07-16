@@ -151,7 +151,11 @@ export class GrokBuildBackend {
     }
 
     child.stdout?.on("data", emitLines)
-    child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString() })
+    child.stderr?.on("data", (chunk: Buffer) => {
+      // Preserve the useful tail without allowing a noisy child process to
+      // consume unbounded memory during a long-running task.
+      stderr = (stderr + chunk.toString()).slice(-1_000_000)
+    })
 
     await new Promise<void>((resolve, reject) => {
       child.on("error", (error) => reject(error))

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, Show, onMount } from "solid-js"
+import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
 import { splitThinking, type TaskLog } from "./chat-utils"
@@ -96,10 +96,48 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [autoLearnStatus, setAutoLearnStatus] = createSignal("Disabled")
   const [goal, setGoal] = createSignal<WorkspaceGoal | null>(null)
   let messagesElement: HTMLDivElement | undefined
+  let scrollFrame = 0
+  let eventFrame = 0
+  let pendingEvents: TaskLog[] = []
+  let unsubscribeBackend = () => {}
+
+  const mergeLogs = (target: TaskLog[], incoming: TaskLog[]): TaskLog[] => {
+    if (!incoming.length) return target
+    const next = target.slice()
+    for (const log of incoming) {
+      const previous = next[next.length - 1]
+      if (previous?.kind === log.kind) next[next.length - 1] = { ...previous, content: previous.content + log.content }
+      else next.push(log)
+    }
+    return next
+  }
+
+  const flushBackendEvents = () => {
+    if (eventFrame) cancelAnimationFrame(eventFrame)
+    eventFrame = 0
+    if (!pendingEvents.length) return
+    const batch = pendingEvents
+    pendingEvents = []
+    setEvents((old) => mergeLogs(old, batch))
+  }
+
+  const queueBackendEvent = (log: TaskLog) => {
+    pendingEvents = mergeLogs(pendingEvents, [log])
+    if (!eventFrame) eventFrame = requestAnimationFrame(flushBackendEvents)
+  }
 
   createEffect(() => {
     messages(); events()
-    queueMicrotask(() => messagesElement?.scrollTo({ top: messagesElement.scrollHeight, behavior: running() ? "smooth" : "auto" }))
+    cancelAnimationFrame(scrollFrame)
+    scrollFrame = requestAnimationFrame(() => {
+      if (messagesElement) messagesElement.scrollTop = messagesElement.scrollHeight
+    })
+  })
+
+  onCleanup(() => {
+    cancelAnimationFrame(scrollFrame)
+    cancelAnimationFrame(eventFrame)
+    unsubscribeBackend()
   })
 
   const conversationKey = (root = workspace()) => `chat.${encodeURIComponent(root)}`
@@ -244,10 +282,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setWebSearchEnabled((await window.api.store.get<boolean>("defaults.webSearch")) ?? true)
     const savedModel = await window.api.store.get<string>("defaults.model")
     if (savedModel && catalog().models.includes(savedModel)) setModel(savedModel)
-    window.api.backend.onEvent((event: BackendEvent) => {
-      if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
-      if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
-      if (event.type === "error" && event.message) setEvents((old) => [...old, { kind: "error", content: event.message! }])
+    unsubscribeBackend = window.api.backend.onEvent((event: BackendEvent) => {
+      if (event.type === "text" && event.data) queueBackendEvent({ kind: "text", content: event.data })
+      if (event.type === "thought" && event.data) queueBackendEvent({ kind: "thought", content: event.data })
+      if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
     })
   })
 
@@ -316,8 +354,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await window.api.backend.run({ prompt: executionPrompt, cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled() })
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
-      setEvents((old) => [...old, { kind: "error", content: (error as Error).message }])
+      queueBackendEvent({ kind: "error", content: (error as Error).message })
     } finally {
+      flushBackendEvents()
       setRunning(false)
       const completed = splitThinking(events())
       if (completed.length) await saveConversation([...messages(), { id: crypto.randomUUID(), role: "assistant", logs: completed, createdAt: Date.now() }])

@@ -6,7 +6,7 @@ import { write as writeLog } from "./logging"
 import { TelegramBridge } from "./telegram"
 import { LocalStudioController } from "./local-studio"
 import { addProject, inspectProject, listProjects, removeProject, type ProjectRecord } from "./projects"
-import { GrokBuildBackend, type RunTaskInput } from "./grok-build-backend"
+import { GrokBuildBackend, type GrokBuildEvent, type RunTaskInput } from "./grok-build-backend"
 import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
 import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
@@ -28,13 +28,35 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun(input)
     let grokSessionId: string | undefined
+    let eventTimer: ReturnType<typeof setTimeout> | undefined
+    let pendingEvents: GrokBuildEvent[] = []
+    const flushEvents = () => {
+      if (eventTimer) clearTimeout(eventTimer)
+      eventTimer = undefined
+      const updates = pendingEvents
+      pendingEvents = []
+      if (event.sender.isDestroyed()) return
+      for (const update of updates) event.sender.send("backend:event", update)
+    }
+    const queueEvent = (update: GrokBuildEvent) => {
+      const previous = pendingEvents[pendingEvents.length - 1]
+      if ((update.type === "text" || update.type === "thought") && previous?.type === update.type && typeof previous.data === "string" && typeof update.data === "string") {
+        previous.data += update.data
+      } else {
+        pendingEvents.push(update)
+      }
+      if (update.type === "end" || update.type === "error") flushEvents()
+      else if (!eventTimer) eventTimer = setTimeout(flushEvents, 16)
+    }
     try {
       await deps.backend().run(input, (update) => {
         if (update.type === "end" && typeof update.sessionId === "string") grokSessionId = update.sessionId
-        if (!event.sender.isDestroyed()) event.sender.send("backend:event", update)
+        queueEvent(update)
       })
+      flushEvents()
       finishGrokRun(run.id, { status: "completed", grokSessionId })
     } catch (error) {
+      flushEvents()
       const message = error instanceof Error ? error.message : String(error)
       finishGrokRun(run.id, { status: "failed", grokSessionId, error: message })
       throw error
