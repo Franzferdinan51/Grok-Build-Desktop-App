@@ -9,6 +9,7 @@ import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
 import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
+import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -21,6 +22,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:status", () => deps.backend().status())
   ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
+  ipcMain.handle("backend:set-path", (_event, path: string) => { getStore().set("grok.cliPath", path.trim() || undefined); return deps.backend().status() })
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun(input)
     let grokSessionId: string | undefined
@@ -61,6 +63,12 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("projects:list", async () => Promise.all(listProjects().map(inspectProject)))
   ipcMain.handle("projects:add", async (_event, path: string) => addProject(path))
   ipcMain.handle("projects:remove", (_event, id: string) => removeProject(id))
+  ipcMain.handle("workspace:files", (_event, root: string) => listWorkspaceFiles(root))
+  ipcMain.handle("workspace:read", (_event, root: string, path: string) => readWorkspaceFile(root, path))
+  ipcMain.handle("workspace:write", (_event, root: string, path: string, content: string) => writeWorkspaceFile(root, path, content))
+  ipcMain.handle("workspace:command", (_event, root: string, command: string) => runWorkspaceCommand(root, command))
+  ipcMain.handle("workspace:git-changes", (_event, root: string) => gitChangedFiles(root))
+  ipcMain.handle("workspace:git-diff", (_event, root: string, path: string) => gitFileDiff(root, path))
 
   ipcMain.handle("store:get", (_event, key: string) => getStore().get(key))
   ipcMain.handle("store:set", (_event, key: string, value: unknown) => getStore().set(key, value))
@@ -73,6 +81,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("window:close", () => deps.getMainWindow()?.close())
   ipcMain.handle("app:open-external", (_event, url: string) => shell.openExternal(url))
   ipcMain.handle("app:get-version", () => app.getVersion())
+  ipcMain.handle("app:backend-repository", () => "https://github.com/Franzferdinan51/grok-build")
   ipcMain.handle("dialog:open-file", async (_event, options?: { filters?: { name: string; extensions: string[] }[] }) =>
     dialog.showOpenDialog({ properties: ["openFile"], filters: options?.filters }))
   ipcMain.handle("dialog:open-directory", async () => dialog.showOpenDialog({ properties: ["openDirectory"] }))

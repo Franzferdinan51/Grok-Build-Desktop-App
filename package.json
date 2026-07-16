@@ -10,7 +10,8 @@
     "dev": "pnpm --filter @grok-build/desktop dev",
     "build": "pnpm --filter @grok-build/desktop build",
     "package": "pnpm --filter @grok-build/desktop package",
-    "typecheck": "pnpm --filter @grok-build/desktop typecheck"
+    "typecheck": "pnpm --filter @grok-build/desktop typecheck",
+    "sync:grok-upstream": "bash scripts/sync-grok-fork.sh"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {

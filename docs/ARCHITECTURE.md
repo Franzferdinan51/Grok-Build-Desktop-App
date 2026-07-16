@@ -1,5 +1,11 @@
 # Architecture
 
+## Maintained Grok Build backend
+
+The desktop application targets `Franzferdinan51/grok-build`, which remains a GitHub fork of `xai-org/grok-build`. The fork is where app-required connectors and CLI contracts can evolve. It must retain the official CLI's headless streaming contract so both desktop targets remain thin clients.
+
+Run `pnpm sync:grok-upstream` to sync the fork's `main` branch from xAI. Desktop changes and experimental backend work should use feature branches so upstream synchronization stays reviewable.
+
 ## Rule zero
 
 **Grok Build is the coding-agent backend.** The canonical desktop client is now the vendored MIT OpenClaw macOS application. It supplies the desktop information architecture; it does not replace Grok Build with a parallel coding agent.

@@ -2,6 +2,8 @@
 
 Local-first desktop workbench for **Grok Build**. The canonical UI base is the MIT-licensed OpenClaw macOS desktop application; Grok Build is the coding-agent backend.
 
+The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzferdinan51/grok-build), an Apache-2.0 fork of xAI's official CLI. Desktop-specific connectors and backend improvements land there while `pnpm sync:grok-upstream` preserves a clean update path from `xai-org/grok-build:main`.
+
 There are two maintained desktop targets: the native macOS app based on OpenClaw, and a cross-platform Electron app based on Hermes Desktop. Both keep their upstream MIT license/notices, use Grok Build as the only coding backend, and follow one feature-parity contract.
 
 ## What is implemented
@@ -20,6 +22,9 @@ There are two maintained desktop targets: the native macOS app based on OpenClaw
 - **Local Studio monitor** — optional read-only controller integration in both desktop targets for `/health`, `/status`, and `/gpus`. It never invokes model lifecycle routes.
 - **Telegram bot connection** — validates a BotFather token with `getMe`, stores it only with Electron `safeStorage`, and supports sending through Telegram’s Bot API. Inbound routing stays off until a chat allowlist is added.
 - **Coding cockpit projects** — persistent project rail, Git branch/change state, and a read-only review pane; this replaces the disposable folder-picker design.
+- **Coding workspace** — sandboxed project file explorer, text editor with save shortcuts, ignored build/vendor directories, symlink rejection, and workspace-bound path validation.
+- **Project terminal** — explicit commands run inside the selected project with captured output, exit status, timeout, and output limits.
+- **Selectable fork backend** — settings can probe and select a locally built fork binary without rebuilding the desktop application.
 - **No subscription UI** — there is no “Plus Plan,” upsell, or fake entitlement surface.
 
 ## Design sources actually used

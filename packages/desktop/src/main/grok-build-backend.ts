@@ -13,6 +13,7 @@ import { promisify } from "util"
 import { write as writeLog } from "./logging"
 import { resolveGrokBuild } from "./grok-build-resolver"
 import { providerSecretEnvironment } from "./model-secrets"
+import { getStore } from "./store"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -47,11 +48,11 @@ export class GrokBuildBackend {
   isRunning(): boolean { return this.current !== null }
 
   private command(): string {
-    return process.env.GROK_BUILD_PATH || "grok"
+    return getStore().get("grok.cliPath") || process.env.GROK_BUILD_PATH || "grok"
   }
 
   async status(): Promise<GrokBuildStatus> {
-    return resolveGrokBuild()
+    return resolveGrokBuild({ ...process.env, GROK_BUILD_PATH: this.command() })
   }
 
   /**

@@ -1,12 +1,14 @@
 import { createSignal, For, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
 import "./styles.css"
 
 type TaskLog = { kind: "text" | "thought" | "error"; content: string }
 
 const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },
+  { id: "workspace", label: "Workspace", icon: "▤" },
+  { id: "terminal", label: "Terminal", icon: ">_" },
   { id: "runs", label: "Grok runs", icon: "◴" },
   { id: "review", label: "Review", icon: "⌘" },
   { id: "skills", label: "Skills", icon: "◇" },
@@ -50,6 +52,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [customModel, setCustomModel] = createSignal("")
   const [skillSearch, setSkillSearch] = createSignal("")
   const [runSearch, setRunSearch] = createSignal("")
+  const [files, setFiles] = createSignal<WorkspaceFile[]>([])
+  const [fileSearch, setFileSearch] = createSignal("")
+  const [openFile, setOpenFile] = createSignal("")
+  const [fileContent, setFileContent] = createSignal("")
+  const [fileNotice, setFileNotice] = createSignal("")
+  const [terminalCommand, setTerminalCommand] = createSignal("")
+  const [terminalOutput, setTerminalOutput] = createSignal("")
+  const [terminalRunning, setTerminalRunning] = createSignal(false)
+  const [cliPath, setCliPath] = createSignal("")
+  const [cliNotice, setCliNotice] = createSignal("")
+  const [gitChanges, setGitChanges] = createSignal<{ status: string; path: string }[]>([])
+  const [selectedDiff, setSelectedDiff] = createSignal("")
+  const [diffContent, setDiffContent] = createSignal("")
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
@@ -69,6 +84,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setProviderSecrets(providers)
     setEndpointDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.baseUrl])))
     setModelDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.modelId])))
+    setCliPath((await window.api.store.get<string>("grok.cliPath")) || props.backendStatus().command || "grok")
     window.api.backend.onEvent((event: BackendEvent) => {
       if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
       if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
@@ -136,6 +152,15 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setEndpointDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.baseUrl]))); setModelDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.modelId])))
     setCustomName(""); setCustomURL(""); setCustomModel("")
   }
+  const refreshFiles = async () => { if (workspace()) setFiles(await window.api.workspace.files(workspace())) }
+  const selectFile = async (path: string) => { setOpenFile(path); setFileContent(await window.api.workspace.read(workspace(), path)); setFileNotice("") }
+  const saveFile = async () => { if (!openFile()) return; await window.api.workspace.write(workspace(), openFile(), fileContent()); setFileNotice("Saved") }
+  const runCommand = async () => {
+    if (!workspace() || !terminalCommand().trim() || terminalRunning()) return
+    setTerminalRunning(true); const command = terminalCommand(); setTerminalOutput((old) => `${old}${old ? "\n" : ""}$ ${command}\n`)
+    const result = await window.api.workspace.command(workspace(), command); setTerminalOutput((old) => old + result.stdout + result.stderr + `\n[exit ${result.code}]\n`); setTerminalRunning(false)
+  }
+  const refreshDiff = async () => { if (workspace()) { setGitChanges(await window.api.workspace.gitChanges(workspace())); setSelectedDiff(""); setDiffContent("") } }
 
   return <div class="app-root">
     <aside class="sidebar">
@@ -154,6 +179,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     </aside>
 
     <main class="main-content">
+      <Show when={active() === "review"} fallback={
+      <Show when={active() === "workspace"} fallback={
+      <Show when={active() === "terminal"} fallback={
       <Show when={active() === "skills"} fallback={
       <Show when={active() === "scheduled"} fallback={
       <Show when={active() === "settings"} fallback={
@@ -217,7 +245,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         </section>
       </Show>
       }>
-        <section class="runs-panel"><span class="eyebrow">GROK BUILD SETTINGS</span><h1>Models and provider credentials.</h1><p>Every provider remains a Grok Build model target. Keys are encrypted with the operating system and injected only into the Grok CLI process.</p>
+        <section class="runs-panel"><span class="eyebrow">GROK BUILD SETTINGS</span><h1>Backend, models, and providers.</h1><p>The maintained backend is your <button class="link-button" onClick={() => window.api.app.openExternal("https://github.com/Franzferdinan51/grok-build")}>Franzferdinan51/grok-build fork</button>, with xAI upstream sync preserved. Every provider remains a Grok Build model target.</p>
+          <div class="settings-card"><strong>Grok Build CLI backend</strong><span>{props.backendStatus().version || "Select a locally built fork binary or a PATH command."}</span><div class="token-row"><input value={cliPath()} onInput={(e) => setCliPath(e.currentTarget.value)} placeholder="/path/to/grok or grok"/><button class="primary" onClick={async () => { const status = await window.api.backend.setPath(cliPath()); setCliNotice(status.available ? `Connected: ${status.version || status.command}` : status.error || "Unavailable"); if (status.available) setCatalog(await window.api.backend.models()) }}>Save + Probe</button></div><Show when={cliNotice()}><p class="provider-notice">{cliNotice()}</p></Show></div>
           <div class="settings-card"><strong>Add another OpenAI-compatible provider</strong><div class="provider-fields"><label>Name<input value={customName()} onInput={(e) => setCustomName(e.currentTarget.value)} placeholder="Together AI" /></label><label>Base URL<input value={customURL()} onInput={(e) => setCustomURL(e.currentTarget.value)} placeholder="https://api.example.com/v1" /></label><label>Model ID<input value={customModel()} onInput={(e) => setCustomModel(e.currentTarget.value)} placeholder="coding-model" /></label><button onClick={addProvider}>Add provider</button></div></div>
           <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.envKey}</span></div><div class="provider-fields"><label>Base URL<input value={endpointDrafts()[provider.id] || ""} onInput={(event) => setEndpointDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} /></label><label>Model ID<input value={modelDrafts()[provider.id] || ""} onInput={(event) => setModelDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder="e.g. my-coding-model" /></label><button onClick={() => saveProvider(provider.id)}>Save endpoint</button></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save key</button><button onClick={async () => { const result = await window.api.providerSecrets.test(provider.id); setProviderNotices((old) => ({ ...old, [provider.id]: result.message })) }}>Test</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove key</button></Show><Show when={provider.id.startsWith("custom-")}><button onClick={async () => { await window.api.providers.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Delete provider</button></Show></div><Show when={providerNotices()[provider.id]}><p class="provider-notice">{providerNotices()[provider.id]}</p></Show></article>}</For>
           <p class="telegram-note">Model names and endpoints are configured in Grok Build. This page secures credentials; the model picker is populated by <code>grok models</code>.</p>
@@ -233,6 +262,15 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <section class="runs-panel"><span class="eyebrow">GROK BUILD SKILLS</span><h1>Project and user skills.</h1><p>Discovered from Grok, agent, Claude, and Cursor-compatible skill directories. Project skills win on name conflicts.</p><div class="token-row"><input value={skillSearch()} onInput={(e) => setSkillSearch(e.currentTarget.value)} placeholder="Search skills"/><button onClick={async () => setSkills(await window.api.skills.list(workspace()))}>Refresh</button></div>
           <For each={skills().filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(skillSearch().toLowerCase()))}>{(skill) => <article class="run-row"><div><strong>{skill.name}</strong><span>{skill.description || skill.path}</span></div><div class="skill-scope">{skill.scope}</div></article>}</For>
         </section>
+      </Show>
+      }>
+        <section class="ide-panel"><div class="terminal-toolbar"><div><span class="eyebrow">PROJECT TERMINAL</span><strong>{workspace() || "Choose a project"}</strong></div><button onClick={() => setTerminalOutput("")}>Clear</button></div><pre class="terminal-output">{terminalOutput() || "Run project commands here. Commands execute only inside the selected workspace."}</pre><div class="terminal-input"><span>$</span><input value={terminalCommand()} onInput={(e) => setTerminalCommand(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") void runCommand() }} placeholder="pnpm test"/><button class="primary" disabled={terminalRunning() || !workspace()} onClick={runCommand}>{terminalRunning() ? "Running…" : "Run"}</button></div></section>
+      </Show>
+      }>
+        <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">CODE WORKSPACE</span><strong>{openFile() || "Select a file"}</strong></div><div><button onClick={refreshFiles}>Refresh files</button><button class="primary" disabled={!openFile()} onClick={saveFile}>Save</button></div></div><div class="ide-grid"><aside class="file-tree"><input value={fileSearch()} onInput={(e) => setFileSearch(e.currentTarget.value)} placeholder="Filter files"/><Show when={files().length} fallback={<button onClick={refreshFiles}>Load project files</button>}><For each={files().filter((file) => file.path.toLowerCase().includes(fileSearch().toLowerCase()))}>{(file) => <button class={openFile() === file.path ? "active" : ""} onClick={() => selectFile(file.path)}>{file.path}</button>}</For></Show></aside><div class="code-editor"><Show when={openFile()} fallback={<div class="editor-empty">Choose a project file to inspect and edit.</div>}><textarea spellcheck={false} value={fileContent()} onInput={(e) => { setFileContent(e.currentTarget.value); setFileNotice("Modified") }} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); void saveFile() } }}/><span class="editor-status">{fileNotice()} · ⌘S to save</span></Show></div></div></section>
+      </Show>
+      }>
+        <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">GIT REVIEW</span><strong>{selectedProject()?.branch || "Selected project"}</strong></div><button onClick={refreshDiff}>Refresh changes</button></div><div class="ide-grid"><aside class="file-tree"><Show when={gitChanges().length} fallback={<button onClick={refreshDiff}>Load changed files</button>}><For each={gitChanges()}>{(change) => <button class={selectedDiff() === change.path ? "active" : ""} onClick={async () => { setSelectedDiff(change.path); setDiffContent(await window.api.workspace.gitDiff(workspace(), change.path)) }}><span class="change-code">{change.status}</span> {change.path}</button>}</For></Show></aside><div class="code-editor"><Show when={selectedDiff()} fallback={<div class="editor-empty">Select a changed file to review its diff.</div>}><pre class="diff-view">{diffContent()}</pre></Show></div></div></section>
       </Show>
     </main>
   </div>
