@@ -82,29 +82,19 @@ export function createMenu(mainWindow: BrowserWindow): Menu {
         { role: "togglefullscreen" },
       ],
     },
-    // Provider menu
+    // Grok Build is the sole coding runtime. LM Studio is configured as a local
+    // endpoint, never presented as a second agent backend.
     {
-      label: "Provider",
+      label: "Coding",
       submenu: [
         {
-          label: "Grok (xAI)",
-          type: "radio",
-          click: () => mainWindow.webContents.send("menu:set-provider", "grok"),
-        },
-        {
-          label: "LM Studio (Local)",
-          type: "radio",
-          click: () => mainWindow.webContents.send("menu:set-provider", "lmstudio"),
-        },
-        {
-          label: "Codex (OpenAI)",
-          type: "radio",
-          click: () => mainWindow.webContents.send("menu:set-provider", "codex"),
+          label: "Grok Build Status",
+          click: () => mainWindow.webContents.send("menu:command", "grok-status"),
         },
         { type: "separator" },
         {
-          label: "Provider Settings...",
-          click: () => mainWindow.webContents.send("menu:provider-settings"),
+          label: "LM Studio Endpoint Settings...",
+          click: () => mainWindow.webContents.send("menu:command", "lmstudio-settings"),
         },
       ],
     },

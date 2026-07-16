@@ -4,6 +4,7 @@ import { write as writeLog } from "./logging"
 import { TelegramBridge } from "./telegram"
 import { addProject, inspectProject, listProjects, removeProject, type ProjectRecord } from "./projects"
 import type { GrokBuildBackend, RunTaskInput } from "./grok-build-backend"
+import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -15,11 +16,22 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:status", () => deps.backend().status())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
-    await deps.backend().run(input, (update) => {
-      if (!event.sender.isDestroyed()) event.sender.send("backend:event", update)
-    })
-    return { ok: true }
+    const run = startGrokRun(input)
+    let grokSessionId: string | undefined
+    try {
+      await deps.backend().run(input, (update) => {
+        if (update.type === "end" && typeof update.sessionId === "string") grokSessionId = update.sessionId
+        if (!event.sender.isDestroyed()) event.sender.send("backend:event", update)
+      })
+      finishGrokRun(run.id, { status: "completed", grokSessionId })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      finishGrokRun(run.id, { status: "failed", grokSessionId, error: message })
+      throw error
+    }
+    return { ok: true, runId: run.id, grokSessionId }
   })
+  ipcMain.handle("grok-runs:list", () => listGrokRuns())
 
   ipcMain.handle("telegram:status", () => deps.telegram().status())
   ipcMain.handle("telegram:connect", async (_event, token: string) => deps.telegram().connect(token))

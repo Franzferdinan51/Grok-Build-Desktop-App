@@ -7,18 +7,20 @@
 
 import Store from "electron-store"
 
-type ProviderConfig = {
-  provider: "grok" | "lmstudio" | "openai" | "codex"
-  apiKey?: string
-  baseUrl?: string
+export type GrokRunRecord = {
+  id: string
+  cwd: string
+  prompt: string
   model?: string
-  enabled: boolean
+  startedAt: number
+  finishedAt?: number
+  status: "running" | "completed" | "failed" | "cancelled"
+  grokSessionId?: string
+  error?: string
 }
 
 type StoreSchema = {
-  providers: Record<string, ProviderConfig>
-  activeProvider: string
-  recentSessions: string[]
+  runs: GrokRunRecord[]
   ui: {
     sidebarPinned: boolean
     theme: "dark" | "light"
@@ -41,7 +43,7 @@ export function getStore(): Store<StoreSchema> {
   if (!_store) {
     _store = new Store<StoreSchema>({
       name: "grok-build-desktop",
-      defaults: { activeProvider: "grok", recentSessions: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, telegram: {}, projects: [], providers: {} },
+      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, telegram: {}, projects: [] },
       clearInvalidConfig: true,
     })
   }

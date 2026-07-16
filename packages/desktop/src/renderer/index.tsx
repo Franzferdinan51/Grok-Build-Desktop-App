@@ -14,22 +14,15 @@ if (!root) {
   throw new Error("#root element not found")
 }
 
-// Global provider state shared across the whole app
-const [activeProvider, setActiveProvider] = createSignal<string>("grok")
 const [backendStatus, setBackendStatus] = createSignal<{ available: boolean; command: string; version?: string; error?: string }>({ available: false, command: "grok" })
 
 // Menu event listeners
 function setupMenuListeners() {
-  const unsubProvider = window.api.onMenuSetProvider((provider) => {
-    setActiveProvider(provider)
-  })
-
   const unsubCommand = window.api.onMenuCommand((command) => {
     console.info("[menu:command]", command)
   })
 
   return () => {
-    unsubProvider()
     unsubCommand()
   }
 }
@@ -63,11 +56,7 @@ onMount(() => {
 
 render(
   () => (
-    <App
-      activeProvider={activeProvider}
-      setActiveProvider={setActiveProvider}
-      backendStatus={backendStatus}
-    />
+    <App backendStatus={backendStatus} />
   ),
   root
 )

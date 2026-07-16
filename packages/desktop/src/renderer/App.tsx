@@ -1,20 +1,18 @@
 import { createSignal, For, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord } from "../preload"
 import "./styles.css"
 
-type Provider = "grok" | "lmstudio"
 type TaskLog = { kind: "text" | "thought" | "error"; content: string }
 
 const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },
-  { id: "search", label: "Search", icon: "⌕" },
-  { id: "skills", label: "Skills", icon: "⌘" },
-  { id: "scheduled", label: "Scheduled", icon: "◷" },
+  { id: "runs", label: "Grok runs", icon: "◴" },
+  { id: "review", label: "Review", icon: "⌘" },
   { id: "telegram", label: "Telegram", icon: "✈" },
 ]
 
-export function App(props: { activeProvider: Accessor<string>; setActiveProvider: (provider: string) => void; backendStatus: Accessor<BackendStatus> }) {
+export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [prompt, setPrompt] = createSignal("")
   const [workspace, setWorkspace] = createSignal("")
   const [thinking, setThinking] = createSignal(true)
@@ -27,6 +25,7 @@ export function App(props: { activeProvider: Accessor<string>; setActiveProvider
   const [telegramNotice, setTelegramNotice] = createSignal("")
   const [projects, setProjects] = createSignal<ProjectSnapshot[]>([])
   const [selectedProject, setSelectedProject] = createSignal<ProjectSnapshot | null>(null)
+  const [runs, setRuns] = createSignal<GrokRunRecord[]>([])
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
@@ -36,6 +35,7 @@ export function App(props: { activeProvider: Accessor<string>; setActiveProvider
     const current = savedProjects.find((project) => project.path === savedWorkspace) ?? savedProjects[0]
     if (current) { setSelectedProject(current); setWorkspace(current.path) }
     setTelegram(await window.api.telegram.status())
+    setRuns(await window.api.grokRuns.list())
     window.api.backend.onEvent((event: BackendEvent) => {
       if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
       if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
@@ -62,6 +62,7 @@ export function App(props: { activeProvider: Accessor<string>; setActiveProvider
     } catch (error) {
       setEvents((old) => [...old, { kind: "error", content: (error as Error).message }])
     } finally { setRunning(false) }
+    setRuns(await window.api.grokRuns.list())
   }
 
   const connectTelegram = async () => {
@@ -89,7 +90,8 @@ export function App(props: { activeProvider: Accessor<string>; setActiveProvider
     </aside>
 
     <main class="main-content">
-      <Show when={active() === "telegram"} fallback={<>
+      <Show when={active() === "telegram"} fallback={
+        <Show when={active() === "runs"} fallback={<>
         <section class="hero">
           <span class="eyebrow">LOCAL-FIRST CODING WORKBENCH</span>
           <h1>Build with Grok. Keep your models close.</h1>
@@ -97,8 +99,8 @@ export function App(props: { activeProvider: Accessor<string>; setActiveProvider
         </section>
         <section class="workspace-bar"><span>Project</span><button onClick={chooseWorkspace}>{workspace() || "Choose folder"}</button><Show when={selectedProject()?.isGit}><span class="git-pill">{selectedProject()?.branch} · {selectedProject()?.changedFiles} changed</span></Show></section>
         <section class="provider-row">
-          <button class={`provider ${props.activeProvider() === "grok" ? "provider--active" : ""}`} onClick={() => props.setActiveProvider("grok")}><strong>Grok Build</strong><span>agent backend</span></button>
-          <button class={`provider ${props.activeProvider() === "lmstudio" ? "provider--active" : ""}`} onClick={() => props.setActiveProvider("lmstudio")}><strong>LM Studio</strong><span>local endpoint</span></button>
+          <div class="provider provider--active"><strong>Grok Build</strong><span>the only coding and tool-execution backend</span></div>
+          <div class="provider"><strong>LM Studio</strong><span>local endpoint; never auto-loads a model</span></div>
         </section>
         <section class="composer">
           <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} placeholder="Describe the coding task…" rows={5} />
@@ -110,7 +112,16 @@ export function App(props: { activeProvider: Accessor<string>; setActiveProvider
         </section>
         <Show when={events().length > 0}><section class="task-output"><For each={events()}>{(entry) => <pre class={`task-output__entry task-output__entry--${entry.kind}`}>{entry.content}</pre>}</For></section></Show>
         <Show when={selectedProject()?.isGit}><section class="review-pane"><div><span class="eyebrow">REVIEW</span><strong>{selectedProject()?.changedFiles} changed files</strong></div><pre>{selectedProject()?.diffStat || "Working tree is clean."}</pre></section></Show>
-      </>}>
+        </>}>
+        <section class="runs-panel">
+          <span class="eyebrow">GROK BUILD RUN HISTORY</span>
+          <h1>Every coding task is a Grok Build run.</h1>
+          <Show when={runs().length > 0} fallback={<p>No runs yet. Pick a project and start a Grok Build task.</p>}>
+            <For each={runs()}>{(run) => <article class="run-row"><div><strong>{run.prompt}</strong><span>{run.cwd}</span></div><div class={`run-status run-status--${run.status}`}>{run.status}</div></article>}</For>
+          </Show>
+        </section>
+        </Show>
+      }>
         <section class="telegram-panel">
           <span class="eyebrow">TELEGRAM BOT CONNECTION</span><h1>Connect your coding workspace to Telegram.</h1>
           <p>Enter a BotFather token. It is verified with <code>getMe</code> and stored only through macOS credential encryption.</p>

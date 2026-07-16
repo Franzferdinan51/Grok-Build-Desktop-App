@@ -66,7 +66,13 @@ export class GrokBuildBackend {
       buffer = lines.pop() ?? ""
       for (const line of lines) {
         if (!line.trim()) continue
-        try { onEvent(JSON.parse(line) as GrokBuildEvent) }
+        try {
+          const parsed = JSON.parse(line) as GrokBuildEvent & { sessionId?: string; session_id?: string }
+          // Keep upstream JSON field spelling intact while exposing a stable
+          // desktop session id for persistent run history.
+          if (!parsed.sessionId && typeof parsed.session_id === "string") parsed.sessionId = parsed.session_id
+          onEvent(parsed)
+        }
         catch { onEvent({ type: "text", data: line + "\n" }) }
       }
     }
