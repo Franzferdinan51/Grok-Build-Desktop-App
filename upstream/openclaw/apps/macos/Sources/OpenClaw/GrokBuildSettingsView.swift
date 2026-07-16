@@ -3,6 +3,8 @@ import SwiftUI
 struct GrokBuildSettingsView: View {
     @State private var drafts: [String: String] = [:]
     @State private var configured = Set<String>()
+    @State private var endpoints: [String: String] = [:]
+    @State private var models: [String: String] = [:]
     @State private var notice = ""
 
     var body: some View {
@@ -13,7 +15,12 @@ struct GrokBuildSettingsView: View {
                 ForEach(GrokProviderPreset.all) { provider in
                     VStack(alignment: .leading, spacing: 7) {
                         HStack { Text(provider.label).font(.headline); Spacer(); if self.configured.contains(provider.id) { Label("Configured", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
-                        Text("\(provider.baseURL) · \(provider.environmentKey)").font(.caption).foregroundStyle(.secondary)
+                        Text(provider.environmentKey).font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            TextField("Base URL", text: Binding(get: { self.endpoints[provider.id, default: provider.baseURL] }, set: { self.endpoints[provider.id] = $0 }))
+                            TextField("Model ID", text: Binding(get: { self.models[provider.id, default: ""] }, set: { self.models[provider.id] = $0 }))
+                            Button("Save endpoint") { self.saveSettings(provider) }
+                        }
                         HStack {
                             SecureField("API key (optional for local providers)", text: Binding(get: { self.drafts[provider.id, default: ""] }, set: { self.drafts[provider.id] = $0 }))
                             Button("Save") { self.save(provider) }.disabled(self.drafts[provider.id, default: ""].isEmpty)
@@ -26,10 +33,14 @@ struct GrokBuildSettingsView: View {
             if !self.notice.isEmpty { Text(self.notice).foregroundStyle(.secondary) }
         }
         .formStyle(.grouped).padding().frame(minWidth: 680, minHeight: 460)
-        .onAppear { self.configured = Set(GrokProviderPreset.all.filter { GrokProviderKeyStore.value(for: $0.environmentKey) != nil }.map(\.id)) }
+        .onAppear { self.configured = Set(GrokProviderPreset.all.filter { GrokProviderKeyStore.value(for: $0.environmentKey) != nil }.map(\.id)); self.endpoints = Dictionary(uniqueKeysWithValues: GrokProviderPreset.all.map { ($0.id, GrokProviderKeyStore.endpoint(for: $0)) }); self.models = Dictionary(uniqueKeysWithValues: GrokProviderPreset.all.map { ($0.id, GrokProviderKeyStore.modelID(for: $0)) }) }
     }
     private func save(_ provider: GrokProviderPreset) {
         do { try GrokProviderKeyStore.save(self.drafts[provider.id, default: ""], for: provider.environmentKey); self.drafts[provider.id] = ""; self.configured.insert(provider.id); self.notice = "Saved securely in Keychain." }
+        catch { self.notice = error.localizedDescription }
+    }
+    private func saveSettings(_ provider: GrokProviderPreset) {
+        do { try GrokProviderKeyStore.saveSettings(provider: provider, endpoint: self.endpoints[provider.id, default: provider.baseURL], modelID: self.models[provider.id, default: ""]); self.notice = "Provider endpoint saved to Grok Build's model catalog." }
         catch { self.notice = error.localizedDescription }
     }
 }

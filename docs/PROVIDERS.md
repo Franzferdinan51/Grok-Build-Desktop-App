@@ -41,6 +41,9 @@ All providers remain **Grok Build model targets**: selecting one always runs the
 | LM Studio | user-configured OpenAI-compatible `/v1` endpoint | optional server key via an `env_key` |
 | ODS | ODS's local OpenAI-compatible inference endpoint (`/v1`) | local server token, if enabled, via an `env_key` |
 | MiniMax | MiniMax's OpenAI-compatible API endpoint | MiniMax API key via an `env_key` |
+| OpenAI-compatible | Any user-supplied OpenAI-compatible `/v1` endpoint | Provider key via `OPENAI_COMPATIBLE_API_KEY` |
+
+Both desktop settings pages can edit the base URL and model ID for these entries. They update only the `GROK BUILD DESKTOP MANAGED PROVIDERS` section of `~/.grok/config.toml`; hand-written configuration outside that block is preserved.
 
 Create a model entry in `~/.grok/config.toml`, then it appears in `grok models` and both desktop pickers:
 

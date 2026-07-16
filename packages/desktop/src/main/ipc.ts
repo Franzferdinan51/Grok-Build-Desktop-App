@@ -8,7 +8,7 @@ import type { GrokBuildBackend, RunTaskInput } from "./grok-build-backend"
 import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
 import { addSchedule, listSchedules, removeSchedule, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
-import { listProviderSecrets, removeProviderSecret, saveProviderSecret } from "./model-secrets"
+import { listProviderSecrets, removeProviderSecret, saveProviderSecret, saveProviderSettings } from "./model-secrets"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -45,6 +45,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("schedules:toggle", (_event, id: string, enabled: boolean) => toggleSchedule(id, enabled))
   ipcMain.handle("provider-secrets:list", () => listProviderSecrets())
   ipcMain.handle("provider-secrets:save", (_event, id: string, value: string) => saveProviderSecret(id, value))
+  ipcMain.handle("provider-secrets:save-settings", (_event, id: string, baseUrl: string, modelId: string) => saveProviderSettings(id, baseUrl, modelId))
   ipcMain.handle("provider-secrets:remove", (_event, id: string) => removeProviderSecret(id))
 
   ipcMain.handle("telegram:status", () => deps.telegram().status())

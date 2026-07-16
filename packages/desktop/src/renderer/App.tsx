@@ -42,6 +42,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [scheduleAt, setScheduleAt] = createSignal("")
   const [repeatMinutes, setRepeatMinutes] = createSignal(0)
   const [secretDrafts, setSecretDrafts] = createSignal<Record<string, string>>({})
+  const [endpointDrafts, setEndpointDrafts] = createSignal<Record<string, string>>({})
+  const [modelDrafts, setModelDrafts] = createSignal<Record<string, string>>({})
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
@@ -57,7 +59,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setCatalog(await window.api.backend.models())
     setSkills(await window.api.skills.list(savedWorkspace))
     setSchedules(await window.api.schedules.list())
-    setProviderSecrets(await window.api.providerSecrets.list())
+    const providers = await window.api.providerSecrets.list()
+    setProviderSecrets(providers)
+    setEndpointDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.baseUrl])))
+    setModelDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.modelId])))
     window.api.backend.onEvent((event: BackendEvent) => {
       if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
       if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
@@ -113,6 +118,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const value = secretDrafts()[id]
     if (!value?.trim()) return
     await window.api.providerSecrets.save(id, value); setSecretDrafts((old) => ({ ...old, [id]: "" })); setProviderSecrets(await window.api.providerSecrets.list())
+  }
+
+  const saveProvider = async (id: string) => {
+    await window.api.providerSecrets.saveSettings(id, endpointDrafts()[id] || "", modelDrafts()[id] || "")
+    setProviderSecrets(await window.api.providerSecrets.list()); setCatalog(await window.api.backend.models())
   }
 
   return <div class="app-root">
@@ -194,7 +204,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       </Show>
       }>
         <section class="runs-panel"><span class="eyebrow">GROK BUILD SETTINGS</span><h1>Models and provider credentials.</h1><p>Every provider remains a Grok Build model target. Keys are encrypted with the operating system and injected only into the Grok CLI process.</p>
-          <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.baseUrl} · {provider.envKey}</span></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove</button></Show></div></article>}</For>
+          <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.envKey}</span></div><div class="provider-fields"><label>Base URL<input value={endpointDrafts()[provider.id] || ""} onInput={(event) => setEndpointDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} /></label><label>Model ID<input value={modelDrafts()[provider.id] || ""} onInput={(event) => setModelDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder="e.g. my-coding-model" /></label><button onClick={() => saveProvider(provider.id)}>Save endpoint</button></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save key</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove</button></Show></div></article>}</For>
           <p class="telegram-note">Model names and endpoints are configured in Grok Build. This page secures credentials; the model picker is populated by <code>grok models</code>.</p>
         </section>
       </Show>

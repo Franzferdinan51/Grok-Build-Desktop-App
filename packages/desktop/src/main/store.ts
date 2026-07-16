@@ -34,6 +34,7 @@ type StoreSchema = {
   grok: {
     cliPath?: string
     providerSecrets?: Record<string, { label: string; envKey: string; encrypted: string }>
+    providerSettings?: Record<string, { baseUrl: string; modelId: string }>
   }
   lmstudio: {
     baseUrl: string
