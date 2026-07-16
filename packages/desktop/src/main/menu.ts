@@ -36,13 +36,13 @@ export function createMenu(mainWindow: BrowserWindow): Menu {
         {
           label: "New Task",
           accelerator: "CmdOrCtrl+N",
-          click: () => mainWindow.webContents.send("menu:new-task"),
+          click: () => mainWindow.webContents.send("menu:command", "new-task"),
         },
         { type: "separator" },
         {
           label: "Open Project...",
           accelerator: "CmdOrCtrl+O",
-          click: () => mainWindow.webContents.send("menu:open-project"),
+          click: () => mainWindow.webContents.send("menu:command", "open-project"),
         },
         { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" },
@@ -124,7 +124,7 @@ export function createMenu(mainWindow: BrowserWindow): Menu {
         { type: "separator" },
         {
           label: "About Grok Build Desktop",
-          click: () => mainWindow.webContents.send("menu:about"),
+          click: () => mainWindow.webContents.send("menu:command", "about"),
         },
       ],
     },

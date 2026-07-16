@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { splitThinking } from "../src/renderer/chat-utils.ts"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "../src/main/workspace-tools.ts"
+import { inspectProject } from "../src/main/project-inspection.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -24,6 +25,9 @@ execFileSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.in
 await writeFile(join(root, "hello.txt"), "changed\n")
 assert.equal((await gitChangedFiles(root))[0]?.path, "hello.txt")
 assert.match(await gitFileDiff(root, "hello.txt"), /changed/)
+const project = await inspectProject({ id: "smoke", name: "smoke", path: root, addedAt: Date.now() })
+assert.equal(project.isGit, true)
+assert.equal(project.changedFiles >= 1, true)
 
 assert.deepEqual(splitThinking([
   { kind: "text", content: "<thi" },

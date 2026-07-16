@@ -101,6 +101,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   let eventFrame = 0
   let pendingEvents: TaskLog[] = []
   let unsubscribeBackend = () => {}
+  let unsubscribeMenu = () => {}
+  let backendWasAvailable = false
 
   const mergeLogs = (target: TaskLog[], incoming: TaskLog[]): TaskLog[] => {
     if (!incoming.length) return target
@@ -139,6 +141,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     cancelAnimationFrame(scrollFrame)
     cancelAnimationFrame(eventFrame)
     unsubscribeBackend()
+    unsubscribeMenu()
   })
 
   const conversationKey = (root = workspace()) => `chat.${encodeURIComponent(root)}`
@@ -168,7 +171,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   ])]
   const refreshModelCatalog = async () => setCatalog(await window.api.backend.models())
   createEffect(() => {
-    if (props.backendStatus().available) void refreshModelCatalog()
+    const available = props.backendStatus().available
+    if (available && !backendWasAvailable) void refreshModelCatalog()
+    backendWasAvailable = available
   })
   const modelPickerValue = () => moaEnabled() ? `__moa__:${moaCandidates()}` : model()
   const selectModelValue = async (value: string) => {
@@ -296,15 +301,29 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (event.type === "thought" && event.data) queueBackendEvent({ kind: "thought", content: event.data })
       if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
     })
+    unsubscribeMenu = window.api.onMenuCommand((command) => {
+      if (command === "new-task") {
+        setActive("new-task")
+        void saveConversation([]).then(() => setEvents([]))
+      } else if (command === "open-project") void chooseWorkspace()
+      else if (command === "grok-status") {
+        setActive("new-task")
+        setSlashNotice(props.backendStatus().available ? `Grok Build ready · ${props.backendStatus().version || props.backendStatus().command}` : props.backendStatus().error || "Grok Build unavailable")
+      } else if (command === "lmstudio-settings") void navigate("runtime")
+      else if (command === "about") {
+        setActive("settings")
+        setSlashNotice("Grok Build Desktop")
+      }
+    })
   })
 
   const chooseWorkspace = async () => {
     const result = await window.api.dialog.openDirectory()
     if (!result.canceled && result.filePaths[0]) {
       const project = await window.api.projects.add(result.filePaths[0])
-      setProjects(await window.api.projects.list())
       setSelectedProject(project)
       setWorkspace(project.path)
+      setProjects((current) => [project, ...current.filter((entry) => entry.id !== project.id)])
       await window.api.store.set("workspace.last", project.path)
       await loadProject(project)
     }
@@ -312,10 +331,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
   const useScratchWorkspace = async () => {
     const scratch = await window.api.projects.scratch()
-    const allProjects = await window.api.projects.list()
-    setProjects(allProjects)
     setSelectedProject(scratch)
     setWorkspace(scratch.path)
+    setProjects((current) => [scratch, ...current.filter((entry) => entry.id !== scratch.id)])
     await window.api.store.set("workspace.last", scratch.path)
     await loadProject(scratch)
   }
@@ -349,25 +367,25 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const submitted = (requested ?? prompt()).trim()
     if (!submitted) return
     if (await executeSlashCommand(submitted)) return
-    let runWorkspace = workspace()
-    if (!runWorkspace) {
-      const scratch = await window.api.projects.scratch()
-      setProjects(await window.api.projects.list())
-      setSelectedProject(scratch)
-      setWorkspace(scratch.path)
-      runWorkspace = scratch.path
-      await window.api.store.set("workspace.last", scratch.path)
-      await loadConversation(scratch.path)
-      await loadGoal(scratch.path)
-    }
     if (running()) {
       setQueuedPrompts((old) => [...old, { id: crypto.randomUUID(), text: submitted }])
       setPrompt(""); setHistoryIndex(-1)
       return
     }
-    await saveConversation([...messages(), { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
     setPrompt(""); setEvents([]); setRunning(true)
     try {
+      let runWorkspace = workspace()
+      if (!runWorkspace) {
+        const scratch = await window.api.projects.scratch()
+        setProjects((current) => current.some((project) => project.path === scratch.path) ? current : [scratch, ...current])
+        setSelectedProject(scratch)
+        setWorkspace(scratch.path)
+        runWorkspace = scratch.path
+        await window.api.store.set("workspace.last", scratch.path)
+        await loadConversation(scratch.path)
+        await loadGoal(scratch.path)
+      }
+      await saveConversation([...messages(), { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
       const activeGoal = goal()?.status === "active" ? goal() : null
       const executionPrompt = activeGoal ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.` : submitted
       const references = moaReferenceModels().slice(0, moaCandidates()).filter(Boolean)

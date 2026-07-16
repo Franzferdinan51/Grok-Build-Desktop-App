@@ -16,17 +16,6 @@ if (!root) {
 
 const [backendStatus, setBackendStatus] = createSignal<{ available: boolean; command: string; version?: string; error?: string }>({ available: false, command: "grok" })
 
-// Menu event listeners
-function setupMenuListeners() {
-  const unsubCommand = window.api.onMenuCommand((command) => {
-    console.info("[menu:command]", command)
-  })
-
-  return () => {
-    unsubCommand()
-  }
-}
-
 // Backend probes spawn the Grok CLI, so keep them infrequent, non-overlapping,
 // and paused while the window is hidden.
 function setupStatusPolling() {
@@ -55,11 +44,9 @@ function setupStatusPolling() {
 }
 
 onMount(() => {
-  const cleanupMenu = setupMenuListeners()
   const cleanupPoll = setupStatusPolling()
 
   onCleanup(() => {
-    cleanupMenu()
     cleanupPoll()
   })
 })

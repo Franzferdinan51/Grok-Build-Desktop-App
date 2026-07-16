@@ -1,26 +1,10 @@
 import { existsSync } from "fs"
 import { basename } from "path"
-import { execFile } from "child_process"
-import { promisify } from "util"
 import { getStore } from "./store"
+import { inspectProject, type ProjectRecord, type ProjectSnapshot } from "./project-inspection"
 
-const run = promisify(execFile)
-
-export type ProjectRecord = { id: string; name: string; path: string; addedAt: number }
-export type ProjectSnapshot = ProjectRecord & { isGit: boolean; branch?: string; changedFiles: number; diffStat?: string }
-
-export async function inspectProject(project: ProjectRecord): Promise<ProjectSnapshot> {
-  if (!existsSync(project.path)) return { ...project, isGit: false, changedFiles: 0 }
-  try {
-    const [{ stdout: root }, { stdout: branch }, { stdout: porcelain }, { stdout: diffStat }] = await Promise.all([
-      run("git", ["rev-parse", "--show-toplevel"], { cwd: project.path }),
-      run("git", ["branch", "--show-current"], { cwd: project.path }),
-      run("git", ["status", "--porcelain"], { cwd: project.path }),
-      run("git", ["diff", "--stat"], { cwd: project.path }),
-    ])
-    return { ...project, path: root.trim() || project.path, isGit: true, branch: branch.trim() || "detached", changedFiles: porcelain.split("\n").filter(Boolean).length, diffStat: diffStat.trim() }
-  } catch { return { ...project, isGit: false, changedFiles: 0 } }
-}
+export { inspectProject }
+export type { ProjectRecord, ProjectSnapshot }
 
 export function listProjects(): ProjectRecord[] { return getStore().get("projects") }
 
