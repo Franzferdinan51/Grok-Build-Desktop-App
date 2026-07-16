@@ -16,7 +16,7 @@ export type ElectronAPI = {
   backend: {
     status: () => Promise<BackendStatus>
     models: () => Promise<GrokBuildModelCatalog>
-    run: (input: { prompt: string; cwd: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string; bestOfN?: number }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
+    run: (input: { prompt: string; cwd: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string; bestOfN?: number; selfVerify?: boolean; maxTurns?: number; disableWebSearch?: boolean }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
     onEvent: (handler: (event: BackendEvent) => void) => () => void

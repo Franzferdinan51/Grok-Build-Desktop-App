@@ -41,6 +41,9 @@ export type RunTaskInput = {
   autoApprove?: boolean
   resume?: string
   bestOfN?: number
+  selfVerify?: boolean
+  maxTurns?: number
+  disableWebSearch?: boolean
 }
 
 export class GrokBuildBackend {
@@ -96,6 +99,9 @@ export class GrokBuildBackend {
     if (input.autoApprove) args.push("--yolo")
     if (input.resume) args.push("--resume", input.resume)
     if (input.bestOfN && input.bestOfN >= 2) args.push("--best-of-n", String(Math.min(10, Math.floor(input.bestOfN))))
+    if (input.selfVerify) args.push("--check")
+    if (input.maxTurns && input.maxTurns > 0) args.push("--max-turns", String(Math.min(100, Math.floor(input.maxTurns))))
+    if (input.disableWebSearch) args.push("--disable-web-search")
 
     const command = this.command()
     writeLog("info", `Starting Grok Build task in ${input.cwd}`)
