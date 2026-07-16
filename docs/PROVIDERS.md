@@ -32,6 +32,36 @@ The same mechanism supports other API providers. The applications never invent a
 
 The apps read Grok Build's model catalog and never issue LM Studio load/unload calls. This prevents the desktop UI from becoming another source of accidental model churn.
 
+## First-class provider presets
+
+All providers remain **Grok Build model targets**: selecting one always runs the same Grok Build CLI task, never a second agent runtime.
+
+| Provider | Endpoint shape | Credential boundary |
+| --- | --- | --- |
+| LM Studio | user-configured OpenAI-compatible `/v1` endpoint | optional server key via an `env_key` |
+| ODS | ODS's local OpenAI-compatible inference endpoint (`/v1`) | local server token, if enabled, via an `env_key` |
+| MiniMax | MiniMax's OpenAI-compatible API endpoint | MiniMax API key via an `env_key` |
+
+Create a model entry in `~/.grok/config.toml`, then it appears in `grok models` and both desktop pickers:
+
+```toml
+[model.ods-local]
+model = "your-loaded-model-id"
+base_url = "http://localhost:11434/v1"
+name = "ODS Local"
+api_backend = "chat_completions"
+env_key = "ODS_API_KEY" # omit if ODS auth is disabled
+
+[model.minimax]
+model = "MiniMax-M2.7"
+base_url = "https://api.minimax.io/v1"
+name = "MiniMax"
+api_backend = "chat_completions"
+env_key = "MINIMAX_API_KEY"
+```
+
+ODS defaults vary by platform and install; confirm its active endpoint in the ODS dashboard before saving the model entry. The desktop apps must not install, start, or load an ODS model implicitly.
+
 ## Why no fake multi-provider buttons
 
 The first scaffold advertised Codex/OpenAI choices that had no connected execution backend. They were removed from the executable UI. New providers must supply a real adapter, credential boundary, model discovery, and error handling before they are shown as runnable.
