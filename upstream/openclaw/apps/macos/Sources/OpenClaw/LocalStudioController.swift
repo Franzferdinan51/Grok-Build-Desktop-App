@@ -38,10 +38,11 @@ final class LocalStudioController: ObservableObject {
         UserDefaults.standard.set(baseURL, forKey: "localStudio.baseURL")
 
         do {
-            async let health = self.fetch(baseURL: baseURL, path: "/health")
-            async let status = self.fetch(baseURL: baseURL, path: "/status")
-            async let gpus = self.fetch(baseURL: baseURL, path: "/gpus")
-            let payload: [String: Any] = ["health": try await health, "status": try await status, "gpus": try await gpus]
+            // Keep Foundation's non-Sendable JSON values on the main actor.
+            let health = try await self.fetch(baseURL: baseURL, path: "/health")
+            let status = try await self.fetch(baseURL: baseURL, path: "/status")
+            let gpus = try await self.fetch(baseURL: baseURL, path: "/gpus")
+            let payload: [String: Any] = ["health": health, "status": status, "gpus": gpus]
             let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
             self.snapshot = String(decoding: data, as: UTF8.self)
             self.error = nil
