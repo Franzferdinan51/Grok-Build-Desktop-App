@@ -25,7 +25,7 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 
 Each workspace has its own locally persisted conversation. Grok Build output streams into the thread, `thought` events and `<think>…</think>` blocks stay collapsed by default, and a second instruction entered during a run is queued and drained automatically. Press **Enter** to send, **Shift+Enter** for a new line, use arrow up/down at the input boundary to browse prompt history, and choose **New chat** to clear only the active workspace conversation.
 
-Type `/` to open the command palette. Arrow keys select a command and Enter or Tab completes it. Desktop commands such as `/new`, `/model`, `/think`, `/moa`, `/preview`, `/terminal`, and `/settings` execute locally; discovered skill commands are sent through Grok Build.
+Type `/` to open the command palette. Arrow keys select a command and Enter or Tab completes it. Desktop commands such as `/new`, `/model`, `/think`, `/moa`, `/goal`, `/learn`, `/preview`, `/terminal`, and `/settings` execute locally; discovered skill commands are sent through Grok Build. `/learn <URL, path, notes, or workflow>` uses the live Grok Build agent to inspect every named source and author a reusable project skill under `.grok/skills/`; bare `/learn` distills the recent conversation.
 
 Use `/goal <objective>` to create a durable workspace goal. `/goal status`, `/goal pause`, `/goal resume`, `/goal done`, and `/goal clear` manage it. While active, the goal is persisted, shown above the composer, carried into every Grok Build run, and automatically enables final self-verification.
 

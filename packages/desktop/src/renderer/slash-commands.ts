@@ -13,6 +13,7 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommand[] = [
   { name: "approve", description: "Toggle automatic tool approval", usage: "/approve [on|off]" },
   { name: "moa", description: "Run multiple Grok candidates and synthesize the best", usage: "/moa [off|2-10]" },
   { name: "goal", description: "Set or manage a durable workspace goal", usage: "/goal <objective|status|pause|resume|done|clear>" },
+  { name: "learn", description: "Distill sources or this chat into a reusable skill", usage: "/learn [URL, path, notes, or workflow]" },
   { name: "preview", description: "Open or close the live preview", usage: "/preview [on|off]" },
   { name: "workspace", description: "Open the workspace editor" },
   { name: "terminal", description: "Open the project terminal" },

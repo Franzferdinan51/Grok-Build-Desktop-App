@@ -3,6 +3,7 @@ import type { Accessor } from "solid-js"
 import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
 import { splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
+import { buildLearnPrompt } from "./learn-prompt"
 import "./styles.css"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
@@ -172,6 +173,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         queueMicrotask(() => void run(`Begin working toward this goal: ${parsed.args}`))
       }
     }
+    else if (command.name === "learn") {
+      const conversation = messages().map((message) => ({ role: message.role, text: message.logs.map((log) => log.content).join("\n") }))
+      const learnPrompt = buildLearnPrompt(parsed.args, conversation)
+      setSlashNotice(parsed.args ? "Learning a reusable project skill from your sources…" : "Learning a reusable project skill from this conversation…")
+      queueMicrotask(() => void run(learnPrompt))
+    }
     else if (command.name === "preview") {
       const next = setToggle(parsed.args, previewOpen()); setPreviewEnabled(true); setPreviewOpen(next)
       await window.api.store.set("preview.enabled", true); setSlashNotice(`Preview ${next ? "opened" : "closed"}`)
@@ -203,6 +210,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
     setTelegram(await window.api.telegram.status())
     setRuns(await window.api.grokRuns.list())
+    setSkills(await window.api.skills.list(workspace()))
     const runtime = await window.api.localStudio.status()
     setLocalStudio(runtime); setLocalStudioURL(runtime.baseUrl)
     setCatalog(await window.api.backend.models())
