@@ -17,6 +17,7 @@ import windowStateKeeper from "electron-window-state"
 import { registerIpcHandlers } from "./ipc"
 import { GrokBuildBackend } from "./grok-build-backend"
 import { TelegramBridge } from "./telegram"
+import { LocalStudioController } from "./local-studio"
 import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
 
@@ -27,6 +28,7 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 const backend = new GrokBuildBackend()
 const telegram = new TelegramBridge()
+const localStudio = new LocalStudioController()
 let logger: ReturnType<typeof initLogging>
 
 // ── Window factory ────────────────────────────────────────────────────────────
@@ -79,6 +81,7 @@ app.whenReady().then(async () => {
   registerIpcHandlers({
     backend: () => backend,
     telegram: () => telegram,
+    localStudio: () => localStudio,
     getMainWindow: () => mainWindow,
   })
 

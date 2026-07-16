@@ -108,6 +108,13 @@ struct OpenClawApp: App {
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
         .defaultSize(width: 900, height: 680)
+
+        Window("Local Studio Runtime", id: "local-studio-runtime") {
+            LocalStudioRuntimeView()
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+        .defaultSize(width: 800, height: 600)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Session") {
@@ -126,6 +133,9 @@ struct OpenClawApp: App {
                     self.openWindow(id: "grok-build-coding")
                 }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
+                Button("Open Local Studio Runtime") {
+                    self.openWindow(id: "local-studio-runtime")
+                }
             }
             SidebarCommands()
             CommandMenu("Navigate") {

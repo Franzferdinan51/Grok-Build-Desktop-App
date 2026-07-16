@@ -31,6 +31,9 @@ type StoreSchema = {
   lmstudio: {
     baseUrl: string
   }
+  localStudio: {
+    baseUrl: string
+  }
   telegram: {
     token?: string
   }
@@ -43,7 +46,7 @@ export function getStore(): Store<StoreSchema> {
   if (!_store) {
     _store = new Store<StoreSchema>({
       name: "grok-build-desktop",
-      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, telegram: {}, projects: [] },
+      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, localStudio: { baseUrl: "" }, telegram: {}, projects: [] },
       clearInvalidConfig: true,
     })
   }

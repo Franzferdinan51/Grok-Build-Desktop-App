@@ -2,6 +2,7 @@ import { ipcMain, dialog, shell, app, BrowserWindow } from "electron"
 import { getStore } from "./store"
 import { write as writeLog } from "./logging"
 import { TelegramBridge } from "./telegram"
+import { LocalStudioController } from "./local-studio"
 import { addProject, inspectProject, listProjects, removeProject, type ProjectRecord } from "./projects"
 import type { GrokBuildBackend, RunTaskInput } from "./grok-build-backend"
 import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
@@ -9,6 +10,7 @@ import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
 type Deps = {
   backend: () => GrokBuildBackend
   telegram: () => TelegramBridge
+  localStudio: () => LocalStudioController
   getMainWindow: () => BrowserWindow | null
 }
 
@@ -37,6 +39,8 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("telegram:connect", async (_event, token: string) => deps.telegram().connect(token))
   ipcMain.handle("telegram:disconnect", () => deps.telegram().disconnect())
   ipcMain.handle("telegram:send", async (_event, chatId: string, text: string) => deps.telegram().send(chatId, text))
+  ipcMain.handle("local-studio:status", () => deps.localStudio().snapshot())
+  ipcMain.handle("local-studio:set-url", (_event, baseUrl: string) => deps.localStudio().setBaseURL(baseUrl))
   ipcMain.handle("projects:list", async () => Promise.all(listProjects().map(inspectProject)))
   ipcMain.handle("projects:add", async (_event, path: string) => addProject(path))
   ipcMain.handle("projects:remove", (_event, id: string) => removeProject(id))

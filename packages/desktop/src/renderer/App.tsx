@@ -1,6 +1,6 @@
 import { createSignal, For, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot } from "../preload"
 import "./styles.css"
 
 type TaskLog = { kind: "text" | "thought" | "error"; content: string }
@@ -9,6 +9,7 @@ const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },
   { id: "runs", label: "Grok runs", icon: "◴" },
   { id: "review", label: "Review", icon: "⌘" },
+  { id: "runtime", label: "Local runtimes", icon: "▣" },
   { id: "telegram", label: "Telegram", icon: "✈" },
 ]
 
@@ -26,6 +27,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [projects, setProjects] = createSignal<ProjectSnapshot[]>([])
   const [selectedProject, setSelectedProject] = createSignal<ProjectSnapshot | null>(null)
   const [runs, setRuns] = createSignal<GrokRunRecord[]>([])
+  const [localStudioURL, setLocalStudioURL] = createSignal("")
+  const [localStudio, setLocalStudio] = createSignal<LocalStudioSnapshot>({ configured: false, reachable: false, baseUrl: "" })
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
@@ -36,6 +39,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (current) { setSelectedProject(current); setWorkspace(current.path) }
     setTelegram(await window.api.telegram.status())
     setRuns(await window.api.grokRuns.list())
+    const runtime = await window.api.localStudio.status()
+    setLocalStudio(runtime); setLocalStudioURL(runtime.baseUrl)
     window.api.backend.onEvent((event: BackendEvent) => {
       if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
       if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
@@ -73,6 +78,13 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setTelegramNotice(status.connected ? `Connected as @${status.username ?? "bot"}` : status.error ?? "Could not connect")
   }
 
+  const refreshLocalStudio = async () => setLocalStudio(await window.api.localStudio.status())
+  const saveLocalStudioURL = async () => {
+    const baseUrl = await window.api.localStudio.setURL(localStudioURL())
+    setLocalStudioURL(baseUrl)
+    await refreshLocalStudio()
+  }
+
   return <div class="app-root">
     <aside class="sidebar">
       <div class="brand"><span class="brand__mark">✦</span><span>Grok Build</span></div>
@@ -91,6 +103,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
     <main class="main-content">
       <Show when={active() === "telegram"} fallback={
+        <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
         <section class="hero">
           <span class="eyebrow">LOCAL-FIRST CODING WORKBENCH</span>
@@ -120,6 +133,18 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <For each={runs()}>{(run) => <article class="run-row"><div><strong>{run.prompt}</strong><span>{run.cwd}</span></div><div class={`run-status run-status--${run.status}`}>{run.status}</div></article>}</For>
           </Show>
         </section>
+        </Show>
+        }>
+          <section class="runtime-panel">
+            <span class="eyebrow">LOCAL STUDIO CONTROLLER</span>
+            <h1>Watch local inference without touching model lifecycle.</h1>
+            <p>Optional read-only connection for GPU/runtime status from Local Studio. Grok Build still powers coding; this never launches, evicts, downloads, or loads a model.</p>
+            <div class="token-row"><input value={localStudioURL()} onInput={(event) => setLocalStudioURL(event.currentTarget.value)} placeholder="http://127.0.0.1:8080" /><button class="primary" onClick={saveLocalStudioURL}>Save + Refresh</button></div>
+            <Show when={localStudio().configured} fallback={<p class="telegram-note">Add a controller URL to enable monitoring.</p>}>
+              <div class={localStudio().reachable ? "connected" : "notice notice--error"}>{localStudio().reachable ? `Connected to ${localStudio().baseUrl}` : localStudio().error}</div>
+              <Show when={localStudio().reachable}><pre class="runtime-json">{JSON.stringify({ health: localStudio().health, status: localStudio().status, gpus: localStudio().gpus }, null, 2)}</pre></Show>
+            </Show>
+          </section>
         </Show>
       }>
         <section class="telegram-panel">

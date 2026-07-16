@@ -11,6 +11,7 @@ Grok Build Desktop ships two maintained implementations without removing either:
 | Skills, schedules, approvals, channels | OpenClaw native information architecture | Hermes desktop information architecture port | must remain explicit and user-controlled |
 | Telegram | OpenClaw channel foundation | encrypted Bot API bridge; allowlist pending | no implicit inbound routing |
 | LM Studio | operator-controlled endpoint | operator-controlled endpoint | never auto-load models |
+| Local Studio monitor | optional read-only `/health`, `/status`, `/gpus` monitor | optional read-only `/health`, `/status`, `/gpus` monitor | no lifecycle routes are called |
 | Windows / Linux distribution | not applicable | Electron packaging target | feature parity target |
 
 ## Electron source base
