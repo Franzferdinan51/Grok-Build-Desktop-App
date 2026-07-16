@@ -295,16 +295,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setGrokUpdateChannel((await window.api.store.get<"stable" | "alpha">("grok.updateChannel")) ?? "stable")
     const savedPreviewEnabled = (await window.api.store.get<boolean>("preview.enabled")) ?? false
     const savedPreviewURL = (await window.api.store.get<string>("preview.url")) || "http://localhost:3000"
-    setPreviewEnabled(savedPreviewEnabled); setPreviewOpen(savedPreviewEnabled); setPreviewURL(savedPreviewURL); setPreviewDraft(savedPreviewURL)
-    if (savedPreviewEnabled && current?.path) {
-      try {
-        const result = await window.api.preview.start(current.path)
-        setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview")
-      } catch (error) {
-        setPreviewStatus(error instanceof Error ? error.message : String(error))
-        setPreviewOpen(false)
-      }
-    }
+    // Remember that Preview is available, but never force the rail open on
+    // launch. The user or agent opens it deliberately for the current task.
+    setPreviewEnabled(savedPreviewEnabled); setPreviewOpen(false); setPreviewURL(savedPreviewURL); setPreviewDraft(savedPreviewURL)
     setMoaEnabled((await window.api.store.get<boolean>("moa.enabled")) ?? false)
     setMoaCandidates(Math.min(10, Math.max(2, (await window.api.store.get<number>("moa.candidates")) || 3)))
     const savedReferences = (await window.api.store.get<string[]>("moa.referenceModels")) ?? []
