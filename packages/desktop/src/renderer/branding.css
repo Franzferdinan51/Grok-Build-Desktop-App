@@ -1,0 +1,23 @@
+.brand__logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(65, 175, 255, 0.35));
+}
+
+.settings-brand {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+
+.settings-brand > img {
+  width: 86px;
+  height: 86px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 18px rgba(65, 175, 255, 0.3));
+}
+
+.settings-brand h1 { margin: 6px 0; }
+.settings-brand p { margin: 0; }

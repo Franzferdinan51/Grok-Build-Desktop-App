@@ -20,15 +20,18 @@ const config: Configuration = {
     main: "out/main/index.js",
   },
   mac: {
+    icon: "icon.icns",
     category: "public.app-category.developer-tools",
     target: ["dmg", "zip"],
     artifactName: "${productName}-${version}-mac.${ext}",
   },
   win: {
+    icon: "icon.png",
     target: ["nsis"],
     artifactName: "${productName}-${version}-win.${ext}",
   },
   linux: {
+    icon: "icon.png",
     target: ["AppImage"],
     category: "Development",
     artifactName: "${productName}-${version}-linux.${ext}",
