@@ -17,6 +17,7 @@ export type ElectronAPI = {
     status: () => Promise<BackendStatus>
     models: () => Promise<GrokBuildModelCatalog>
     run: (input: { prompt: string; cwd: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string; bestOfN?: number; selfVerify?: boolean; maxTurns?: number; disableWebSearch?: boolean; moa?: { referenceModels: string[]; aggregatorModel?: string } }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
+    autoLearn: (input: { prompt: string; cwd: string; model?: string }) => Promise<{ ok: boolean }>
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
@@ -48,6 +49,7 @@ const api: ElectronAPI = {
     status: () => ipcRenderer.invoke("backend:status"),
     models: () => ipcRenderer.invoke("backend:models"),
     run: (input) => ipcRenderer.invoke("backend:run", input),
+    autoLearn: (input) => ipcRenderer.invoke("backend:auto-learn", input),
     cancel: () => ipcRenderer.invoke("backend:cancel"),
     setPath: (path) => ipcRenderer.invoke("backend:set-path", path),
     onEvent: (handler) => {

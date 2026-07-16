@@ -15,6 +15,7 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 - Hermes-style persistent project chats with streamed messages, collapsed reasoning, prompt queues, history recall, copy/retry actions, and a bottom-docked composer.
 - Optional Dyad-style live preview beside the chat, with automatic dev-server URL detection, responsive device widths, reload, and browser handoff.
 - Slash-command palette with keyboard autocomplete, desktop controls, model/reasoning switches, navigation commands, and dynamically discovered Grok Build skills.
+- Optional Hermes-style automatic learning: a quiet, configurable post-turn Grok review updates or creates project skills only when it finds a durable correction or reusable workflow.
 - Optional Hermes-inspired Mixture of Agents mode using Grok Build's native `--best-of-n`: 2–10 parallel candidate solutions with a synthesized winner.
 - MoA appears as a virtual model family in the main picker (Fast ×2, Balanced ×3, Thorough ×5, Exhaustive ×8) while retaining the selected Grok model underneath.
 - Hermes-style MoA routing supports per-reference models and a separate aggregator: references run concurrently in plan-only mode, then the acting aggregator implements the synthesized solution.
@@ -26,6 +27,8 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 Each workspace has its own locally persisted conversation. Grok Build output streams into the thread, `thought` events and `<think>…</think>` blocks stay collapsed by default, and a second instruction entered during a run is queued and drained automatically. Press **Enter** to send, **Shift+Enter** for a new line, use arrow up/down at the input boundary to browse prompt history, and choose **New chat** to clear only the active workspace conversation.
 
 Type `/` to open the command palette. Arrow keys select a command and Enter or Tab completes it. Desktop commands such as `/new`, `/model`, `/think`, `/moa`, `/goal`, `/learn`, `/preview`, `/terminal`, and `/settings` execute locally; discovered skill commands are sent through Grok Build. `/learn <URL, path, notes, or workflow>` uses the live Grok Build agent to inspect every named source and author a reusable project skill under `.grok/skills/`; bare `/learn` distills the recent conversation.
+
+Automatic learning is opt-in under Settings. Its review interval and model are configurable per installation. Reviews run quietly after successful turns, can write only under the active workspace's `.grok/skills/`, prefer targeted improvements over narrow duplicate skills, and skip sessions without a strong reusable lesson. It is disabled by default because it consumes model usage and automatically writes procedural knowledge.
 
 Use `/goal <objective>` to create a durable workspace goal. `/goal status`, `/goal pause`, `/goal resume`, `/goal done`, and `/goal clear` manage it. While active, the goal is persisted, shown above the composer, carried into every Grok Build run, and automatically enables final self-verification.
 

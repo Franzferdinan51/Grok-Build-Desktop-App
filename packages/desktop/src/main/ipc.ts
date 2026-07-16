@@ -6,7 +6,7 @@ import { write as writeLog } from "./logging"
 import { TelegramBridge } from "./telegram"
 import { LocalStudioController } from "./local-studio"
 import { addProject, inspectProject, listProjects, removeProject, type ProjectRecord } from "./projects"
-import type { GrokBuildBackend, RunTaskInput } from "./grok-build-backend"
+import { GrokBuildBackend, type RunTaskInput } from "./grok-build-backend"
 import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
 import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
@@ -40,6 +40,14 @@ export function registerIpcHandlers(deps: Deps): void {
       throw error
     }
     return { ok: true, runId: run.id, grokSessionId }
+  })
+  ipcMain.handle("backend:auto-learn", async (_event, input: Pick<RunTaskInput, "prompt" | "cwd" | "model">) => {
+    // A separate quiet Grok process keeps the foreground chat transcript clean.
+    // This endpoint is only called after a completed turn and only when the
+    // user has explicitly enabled auto-learn in Settings.
+    const reviewer = new GrokBuildBackend()
+    await reviewer.run({ ...input, thinking: true, autoApprove: true, maxTurns: 24 }, () => undefined)
+    return { ok: true }
   })
   ipcMain.handle("grok-runs:list", () => listGrokRuns())
   ipcMain.handle("grok-skills:list", (_event, workspace?: string) => listGrokSkills(workspace))

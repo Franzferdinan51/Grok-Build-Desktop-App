@@ -3,7 +3,7 @@ import type { Accessor } from "solid-js"
 import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
 import { splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
-import { buildLearnPrompt } from "./learn-prompt"
+import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
 import "./styles.css"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
@@ -90,6 +90,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [selfVerify, setSelfVerify] = createSignal(false)
   const [maxTurns, setMaxTurns] = createSignal(0)
   const [webSearchEnabled, setWebSearchEnabled] = createSignal(true)
+  const [autoLearnEnabled, setAutoLearnEnabled] = createSignal(false)
+  const [autoLearnInterval, setAutoLearnInterval] = createSignal(10)
+  const [autoLearnModel, setAutoLearnModel] = createSignal("")
+  const [autoLearnStatus, setAutoLearnStatus] = createSignal("Disabled")
   const [goal, setGoal] = createSignal<WorkspaceGoal | null>(null)
   let messagesElement: HTMLDivElement | undefined
 
@@ -233,6 +237,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setAutoApprove((await window.api.store.get<boolean>("defaults.autoApprove")) ?? false)
     setSelfVerify((await window.api.store.get<boolean>("defaults.selfVerify")) ?? false)
     setMaxTurns(Math.min(100, Math.max(0, (await window.api.store.get<number>("defaults.maxTurns")) || 0)))
+    setAutoLearnEnabled((await window.api.store.get<boolean>("autoLearn.enabled")) ?? false)
+    setAutoLearnInterval(Math.min(50, Math.max(1, (await window.api.store.get<number>("autoLearn.interval")) || 10)))
+    setAutoLearnModel((await window.api.store.get<string>("autoLearn.model")) || "")
+    setAutoLearnStatus((await window.api.store.get<string>("autoLearn.lastStatus")) || "No review has run yet")
     setWebSearchEnabled((await window.api.store.get<boolean>("defaults.webSearch")) ?? true)
     const savedModel = await window.api.store.get<string>("defaults.model")
     if (savedModel && catalog().models.includes(savedModel)) setModel(savedModel)
@@ -265,6 +273,31 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await loadProject(scratch)
   }
 
+  const maybeAutoLearn = async () => {
+    if (!autoLearnEnabled() || !workspace()) return
+    const key = `autoLearn.turns.${encodeURIComponent(workspace())}`
+    const turns = ((await window.api.store.get<number>(key)) || 0) + 1
+    if (turns < autoLearnInterval()) {
+      await window.api.store.set(key, turns)
+      const remaining = autoLearnInterval() - turns
+      setAutoLearnStatus(`Next review in ${remaining} completed turn${remaining === 1 ? "" : "s"}`)
+      return
+    }
+    await window.api.store.set(key, 0)
+    const conversation = messages().map((message) => ({ role: message.role, text: message.logs.map((log) => log.content).join("\n") }))
+    setAutoLearnStatus("Background review running…")
+    void window.api.backend.autoLearn({ prompt: buildAutoLearnPrompt(conversation), cwd: workspace(), model: autoLearnModel() || model() || undefined })
+      .then(async () => {
+        const status = `Last review completed ${new Date().toLocaleString()}`
+        setAutoLearnStatus(status); await window.api.store.set("autoLearn.lastStatus", status)
+        setSkills(await window.api.skills.list(workspace()))
+      })
+      .catch(async (error) => {
+        const status = `Last review failed: ${error instanceof Error ? error.message : String(error)}`
+        setAutoLearnStatus(status); await window.api.store.set("autoLearn.lastStatus", status)
+      })
+  }
+
   const run = async (requested?: string) => {
     const submitted = (requested ?? prompt()).trim()
     if (!submitted || !workspace()) return
@@ -291,6 +324,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setEvents([])
     }
     setRuns(await window.api.grokRuns.list())
+    setSkills(await window.api.skills.list(workspace()))
+    if (!submitted.startsWith("[/learn]")) await maybeAutoLearn()
     const next = queuedPrompts()[0]
     if (next) {
       setQueuedPrompts((old) => old.slice(1))
@@ -498,6 +533,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <div class="settings-card"><strong>Grok Build CLI backend</strong><span>{props.backendStatus().version || "Select a locally built fork binary or a PATH command."}</span><div class="token-row"><input value={cliPath()} onInput={(e) => setCliPath(e.currentTarget.value)} placeholder="/path/to/grok or grok"/><button class="primary" onClick={async () => { const status = await window.api.backend.setPath(cliPath()); setCliNotice(status.available ? `Connected: ${status.version || status.command}` : status.error || "Unavailable"); if (status.available) setCatalog(await window.api.backend.models()) }}>Save + Probe</button></div><Show when={cliNotice()}><p class="provider-notice">{cliNotice()}</p></Show></div>
           <div class="settings-card"><div><strong>Mixture of Agents</strong><span>Hermes-inspired multi-candidate reasoning powered by Grok Build's native <code>--best-of-n</code>.</span></div><div class="moa-setting"><label class="settings-switch"><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set("moa.enabled", event.currentTarget.checked) }} /><span />Enable MoA</label><label>Candidate agents<select value={moaCandidates()} onChange={async (event) => { const count = Number(event.currentTarget.value); setMoaCandidates(count); await window.api.store.set("moa.candidates", count) }}><For each={[2,3,4,5,6,8,10]}>{(count) => <option value={count}>{count}</option>}</For></select></label></div><p class="provider-notice">Each candidate independently tackles the task; Grok Build judges and synthesizes the strongest result. This costs roughly one model run per candidate, so it is off by default.</p></div>
           <div class="settings-card"><div><strong>Coding-agent defaults</strong><span>Hermes-style session defaults mapped directly to supported Grok Build flags.</span></div><div class="agent-defaults-grid"><label>Default model<select value={model()} onChange={async (event) => { setModel(event.currentTarget.value); await window.api.store.set("defaults.model", event.currentTarget.value) }}><option value="">{catalog().defaultModel || "Grok Build default"}</option><For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label><label>Maximum turns<input type="number" min="0" max="100" value={maxTurns()} onInput={async (event) => { const value = Math.min(100, Math.max(0, Number(event.currentTarget.value) || 0)); setMaxTurns(value); await window.api.store.set("defaults.maxTurns", value) }} /><small>0 uses the CLI default</small></label><label class="settings-switch"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set("defaults.thinking", event.currentTarget.checked) }} /><span />High reasoning</label><label class="settings-switch"><input type="checkbox" checked={selfVerify()} onChange={async (event) => { setSelfVerify(event.currentTarget.checked); await window.api.store.set("defaults.selfVerify", event.currentTarget.checked) }} /><span />Self-verify changes</label><label class="settings-switch"><input type="checkbox" checked={webSearchEnabled()} onChange={async (event) => { setWebSearchEnabled(event.currentTarget.checked); await window.api.store.set("defaults.webSearch", event.currentTarget.checked) }} /><span />Web search</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set("defaults.autoApprove", event.currentTarget.checked) }} /><span />Automatic approvals</label></div><p class="provider-notice">Self-verify uses <code>--check</code>; turn limits use <code>--max-turns</code>; disabling web search uses <code>--disable-web-search</code>. Automatic approvals remain visibly marked because they reduce safety prompts.</p></div>
+          <div class="settings-card"><div><strong>Automatic learning</strong><span>Hermes-style background skill review after completed coding turns.</span></div><div class="agent-defaults-grid"><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={autoLearnEnabled()} onChange={async (event) => { setAutoLearnEnabled(event.currentTarget.checked); await window.api.store.set("autoLearn.enabled", event.currentTarget.checked); setAutoLearnStatus(event.currentTarget.checked ? "Waiting for completed turns" : "Disabled") }} /><span />Enable auto-learn</label><label>Review interval<input type="number" min="1" max="50" value={autoLearnInterval()} onInput={async (event) => { const value = Math.min(50, Math.max(1, Number(event.currentTarget.value) || 10)); setAutoLearnInterval(value); await window.api.store.set("autoLearn.interval", value) }} /><small>Completed coding turns</small></label><label>Review model<select value={autoLearnModel()} onChange={async (event) => { setAutoLearnModel(event.currentTarget.value); await window.api.store.set("autoLearn.model", event.currentTarget.value) }}><option value="">Current/default model</option><For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label></div><p class="provider-notice">{autoLearnStatus()}. When enabled, a quiet Grok Build review looks for corrections, reusable fixes, and incomplete skills. It may modify only <code>.grok/skills/**</code>; it skips weak lessons instead of creating junk. Disabled by default because reviews consume model usage and write project skills automatically.</p></div>
           <div class="settings-card"><div><strong>Live coding preview</strong><span>Dyad-style sandboxed right rail available while chatting.</span></div><div class="preview-setting"><label class="settings-switch"><input type="checkbox" checked={previewEnabled()} onChange={async (event) => { const enabled = event.currentTarget.checked; setPreviewEnabled(enabled); setPreviewOpen(enabled); await window.api.store.set("preview.enabled", enabled) }} /><span />Enable preview</label><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} placeholder="http://localhost:3000"/><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); await window.api.store.set("preview.url", value) } }}>Save URL</button></div><p class="provider-notice">URLs printed by project terminal commands are detected automatically. The preview never starts or stops your dev server.</p></div>
           <div class="settings-card"><strong>Add another OpenAI-compatible provider</strong><div class="provider-fields"><label>Name<input value={customName()} onInput={(e) => setCustomName(e.currentTarget.value)} placeholder="Together AI" /></label><label>Base URL<input value={customURL()} onInput={(e) => setCustomURL(e.currentTarget.value)} placeholder="https://api.example.com/v1" /></label><label>Model ID<input value={customModel()} onInput={(e) => setCustomModel(e.currentTarget.value)} placeholder="coding-model" /></label><button onClick={addProvider}>Add provider</button></div></div>
           <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.envKey}</span></div><div class="provider-fields"><label>Base URL<input value={endpointDrafts()[provider.id] || ""} onInput={(event) => setEndpointDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} /></label><label>Model ID<input value={modelDrafts()[provider.id] || ""} onInput={(event) => setModelDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder="e.g. my-coding-model" /></label><button onClick={() => saveProvider(provider.id)}>Save endpoint</button></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save key</button><button onClick={async () => { const result = await window.api.providerSecrets.test(provider.id); setProviderNotices((old) => ({ ...old, [provider.id]: result.message })) }}>Test</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove key</button></Show><Show when={provider.id.startsWith("custom-")}><button onClick={async () => { await window.api.providers.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Delete provider</button></Show></div><Show when={providerNotices()[provider.id]}><p class="provider-notice">{providerNotices()[provider.id]}</p></Show></article>}</For>

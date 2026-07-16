@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { buildLearnPrompt } from "./learn-prompt.ts"
+import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt.ts"
 
 test("learn prompt preserves explicit sources and requirements", () => {
   const prompt = buildLearnPrompt("https://example.com/docs focus on auth", [])
@@ -17,4 +17,11 @@ test("bare learn prompt uses recent conversation", () => {
   assert.match(prompt, /workflow we just completed/)
   assert.match(prompt, /User: Deploy this with the release script/)
   assert.match(prompt, /Grok: Deployment verified/)
+})
+
+test("auto learn is scoped to project skills", () => {
+  const prompt = buildAutoLearnPrompt([{ role: "user", text: "That fix worked" }])
+  assert.match(prompt, /Modify only \.grok\/skills\/\*\*/)
+  assert.match(prompt, /make no changes/)
+  assert.match(prompt, /User: That fix worked/)
 })

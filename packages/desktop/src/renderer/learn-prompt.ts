@@ -35,3 +35,24 @@ ${SKILL_STANDARD}
 
 When finished, report the skill name, its saved path, what it learned, and how you verified it.`
 }
+
+export function buildAutoLearnPrompt(conversation: LearnMessage[]): string {
+  const transcript = conversation
+    .slice(-16)
+    .map((message) => `${message.role === "user" ? "User" : "Grok"}: ${message.text}`)
+    .join("\n\n")
+    .slice(-16_000)
+
+  return `[/auto-learn] Quietly review the recent completed coding conversation below for durable procedural learning.
+
+## Recent conversation
+${transcript}
+
+Look specifically for a user correction, a non-obvious successful fix, a reusable debugging path, a workflow improvement, or an existing project skill that proved incomplete. First inspect the existing skills under .grok/skills. Prefer a small targeted improvement to an existing relevant skill. Create a new class-level skill only when no existing skill fits and the lesson is genuinely reusable.
+
+If there is no strong reusable lesson, make no changes. Do not manufacture a skill merely to appear productive. Modify only .grok/skills/** and never touch application source, configuration, Git state, or files outside this workspace.
+
+${SKILL_STANDARD}
+
+Finish with a terse internal result. This is a background review; do not ask the user questions.`
+}

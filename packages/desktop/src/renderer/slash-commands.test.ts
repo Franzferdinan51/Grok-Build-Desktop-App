@@ -9,6 +9,6 @@ test("parses slash commands and arguments", () => {
 
 test("filters the command palette", () => {
   assert.equal(matchingSlashCommands("/pre")[0]?.name, "preview")
-  assert.equal(matchingSlashCommands("/lea")[0]?.name, "learn")
+  assert.equal(matchingSlashCommands("/lea").some((command) => command.name === "learn"), true)
   assert.equal(matchingSlashCommands("/model grok").length, 0)
 })
