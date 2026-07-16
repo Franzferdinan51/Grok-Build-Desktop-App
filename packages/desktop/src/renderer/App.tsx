@@ -241,19 +241,23 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <p>Grok Build executes every task using its configured catalog: LM Studio models or supported API models.</p>
         </section>
         <section class="workspace-bar"><span>Workspace</span><button onClick={chooseWorkspace}>{selectedProject()?.name || "Choose folder"}</button><button onClick={useScratchWorkspace}>Start without a project</button><Show when={selectedProject()?.isGit}><span class="git-pill">{selectedProject()?.branch} · {selectedProject()?.changedFiles} changed</span></Show></section>
-        <section class="composer">
-          <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void run() } }} placeholder="Describe the coding task… (⌘↵ to run)" rows={5} />
-          <div class="composer__controls">
-            <label class="model-select">Model
-              <select value={model()} onChange={(event) => setModel(event.currentTarget.value)}>
-                <option value="">Grok Build default{catalog().defaultModel ? ` (${catalog().defaultModel})` : ""}</option>
-                <For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For>
-              </select>
-            </label>
-            <label><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} /> Reasoning effort</label>
-            <label title="Passes Grok Build's documented --yolo flag"><input type="checkbox" checked={autoApprove()} onChange={(event) => setAutoApprove(event.currentTarget.checked)} /> Auto-approve tools</label>
-            <button class="primary" disabled={!workspace() || !prompt().trim() || running()} onClick={run}>{running() ? "Running…" : "Run with Grok Build"}</button>
-            <Show when={running()}><button onClick={() => window.api.backend.cancel()}>Stop</button></Show>
+        <section class="chat-composer" aria-label="Grok Build task composer">
+          <div class="chat-composer__context">
+            <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
+            <span class="composer-hint">Grok Build can read and edit this workspace</span>
+          </div>
+          <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void run() } }} placeholder="Ask Grok Build to code, debug, or explain…" rows={3} />
+          <div class="chat-composer__footer">
+            <button class="composer-icon" onClick={chooseWorkspace} title="Attach or open a workspace">＋</button>
+            <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} />◇ Think</label>
+            <label class={`composer-toggle ${autoApprove() ? "composer-toggle--warning" : ""}`} title="Allow Grok Build to execute tools without asking"><input type="checkbox" checked={autoApprove()} onChange={(event) => setAutoApprove(event.currentTarget.checked)} />⚡ Auto</label>
+            <select class="composer-model" value={model()} onChange={(event) => setModel(event.currentTarget.value)} aria-label="Model">
+              <option value="">{catalog().defaultModel || "Default model"}</option>
+              <For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For>
+            </select>
+            <Show when={running()} fallback={<button class="composer-send" disabled={!workspace() || !prompt().trim()} onClick={run} title="Send (⌘↵)">↑</button>}>
+              <button class="composer-send composer-send--stop" onClick={() => window.api.backend.cancel()} title="Stop task"><span /></button>
+            </Show>
           </div>
         </section>
         <Show when={events().length > 0}><section class="task-output"><For each={events()}>{(entry) => <pre class={`task-output__entry task-output__entry--${entry.kind}`}>{entry.content}</pre>}</For></section></Show>
