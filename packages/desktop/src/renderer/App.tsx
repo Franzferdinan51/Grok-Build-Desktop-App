@@ -1,10 +1,37 @@
-import { createSignal, For, Show, onMount } from "solid-js"
+import { createEffect, createSignal, For, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
 import "./styles.css"
 
 type TaskLog = { kind: "text" | "thought" | "error"; content: string }
-type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[] }
+type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
+type QueuedPrompt = { id: string; text: string }
+
+const splitThinking = (logs: TaskLog[]): TaskLog[] => {
+  const merged = logs.reduce<TaskLog[]>((all, log) => {
+    const previous = all.at(-1)
+    if (previous?.kind === log.kind) previous.content += log.content
+    else all.push({ ...log })
+    return all
+  }, [])
+  return merged.flatMap((log) => {
+    if (log.kind !== "text" || !log.content.includes("<think>")) return [log]
+    const parts: TaskLog[] = []
+    const pattern = /<think>([\s\S]*?)(?:<\/think>|$)/gi
+    let cursor = 0
+    for (const match of log.content.matchAll(pattern)) {
+      const index = match.index ?? 0
+      const before = log.content.slice(cursor, index).trim()
+      if (before) parts.push({ kind: "text", content: before })
+      const thought = match[1]?.trim()
+      if (thought) parts.push({ kind: "thought", content: thought })
+      cursor = index + match[0].length
+    }
+    const after = log.content.slice(cursor).replace(/<\/think>/gi, "").trim()
+    if (after) parts.push({ kind: "text", content: after })
+    return parts
+  })
+}
 
 const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },
@@ -28,6 +55,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [active, setActive] = createSignal("new-task")
   const [events, setEvents] = createSignal<TaskLog[]>([])
   const [messages, setMessages] = createSignal<ChatMessage[]>([])
+  const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
+  const [historyIndex, setHistoryIndex] = createSignal(-1)
+  const [historyDraft, setHistoryDraft] = createSignal("")
   const [telegram, setTelegram] = createSignal<TelegramStatus>({ connected: false })
   const [token, setToken] = createSignal("")
   const [telegramNotice, setTelegramNotice] = createSignal("")
@@ -67,6 +97,22 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [gitChanges, setGitChanges] = createSignal<{ status: string; path: string }[]>([])
   const [selectedDiff, setSelectedDiff] = createSignal("")
   const [diffContent, setDiffContent] = createSignal("")
+  let messagesElement: HTMLDivElement | undefined
+
+  createEffect(() => {
+    messages(); events()
+    queueMicrotask(() => messagesElement?.scrollTo({ top: messagesElement.scrollHeight, behavior: running() ? "smooth" : "auto" }))
+  })
+
+  const conversationKey = (root = workspace()) => `chat.${encodeURIComponent(root)}`
+  const loadConversation = async (root: string) => {
+    setMessages((await window.api.store.get<ChatMessage[]>(conversationKey(root))) ?? [])
+    setQueuedPrompts([]); setHistoryIndex(-1); setHistoryDraft("")
+  }
+  const saveConversation = async (next: ChatMessage[]) => {
+    setMessages(next)
+    if (workspace()) await window.api.store.set(conversationKey(), next)
+  }
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
@@ -81,6 +127,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setSelectedProject(current)
       setWorkspace(current.path)
       await window.api.store.set("workspace.last", current.path)
+      await loadConversation(current.path)
     }
     setTelegram(await window.api.telegram.status())
     setRuns(await window.api.grokRuns.list())
@@ -123,10 +170,15 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await loadProject(scratch)
   }
 
-  const run = async () => {
-    if (!prompt().trim() || !workspace() || running()) return
-    const submitted = prompt().trim()
-    setMessages((old) => [...old, { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }] }])
+  const run = async (requested?: string) => {
+    const submitted = (requested ?? prompt()).trim()
+    if (!submitted || !workspace()) return
+    if (running()) {
+      setQueuedPrompts((old) => [...old, { id: crypto.randomUUID(), text: submitted }])
+      setPrompt(""); setHistoryIndex(-1)
+      return
+    }
+    await saveConversation([...messages(), { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
     setPrompt(""); setEvents([]); setRunning(true)
     try {
       await window.api.backend.run({ prompt: submitted, cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove() })
@@ -134,11 +186,30 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setEvents((old) => [...old, { kind: "error", content: (error as Error).message }])
     } finally {
       setRunning(false)
-      const completed = events()
-      if (completed.length) setMessages((old) => [...old, { id: crypto.randomUUID(), role: "assistant", logs: completed }])
+      const completed = splitThinking(events())
+      if (completed.length) await saveConversation([...messages(), { id: crypto.randomUUID(), role: "assistant", logs: completed, createdAt: Date.now() }])
       setEvents([])
     }
     setRuns(await window.api.grokRuns.list())
+    const next = queuedPrompts()[0]
+    if (next) {
+      setQueuedPrompts((old) => old.slice(1))
+      queueMicrotask(() => void run(next.text))
+    }
+  }
+
+  const browsePromptHistory = (direction: -1 | 1) => {
+    const history = messages().filter((message) => message.role === "user").map((message) => message.logs.map((log) => log.content).join("\n")).reverse()
+    if (!history.length) return
+    if (direction === -1) {
+      if (historyIndex() === -1) setHistoryDraft(prompt())
+      const next = Math.min(history.length - 1, historyIndex() + 1)
+      setHistoryIndex(next); setPrompt(history[next]!)
+    } else if (historyIndex() > 0) {
+      const next = historyIndex() - 1; setHistoryIndex(next); setPrompt(history[next]!)
+    } else if (historyIndex() === 0) {
+      setHistoryIndex(-1); setPrompt(historyDraft())
+    }
   }
 
   const connectTelegram = async () => {
@@ -194,6 +265,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (active() === "workspace") await refreshFiles(project.path)
     if (active() === "review") await refreshDiff(project.path)
     if (active() === "skills") setSkills(await window.api.skills.list(project.path))
+    await loadConversation(project.path)
   }
 
   const selectProject = async (project: ProjectSnapshot) => {
@@ -245,20 +317,21 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
         <section class="chat-thread">
-          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><button onClick={chooseWorkspace}>Open project</button></header>
-          <div class="chat-messages">
+          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><button onClick={async () => { await saveConversation([]); setEvents([]) }}>New chat</button><button onClick={chooseWorkspace}>Open project</button></div></header>
+          <div class="chat-messages" ref={messagesElement}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
-              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={message.logs}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Reasoning</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For></div></article>}</For>
-              <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={events()}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Reasoning</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For></Show></div></article></Show>
+              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(message.logs.map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) setPrompt(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
+              <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={splitThinking(events())}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thinking…</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For></Show></div></article></Show>
             </Show>
           </div>
         </section>
+        <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => setQueuedPrompts((old) => old.filter((item) => item.id !== entry.id))}>×</button></div>}</For></section></Show>
         <section class="chat-composer chat-composer--docked" aria-label="Grok Build task composer">
           <div class="chat-composer__context">
             <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
             <span class="composer-hint">Grok Build can read and edit this workspace</span>
           </div>
-          <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void run() } }} placeholder="Ask Grok Build to code, debug, or explain…" rows={3} />
+          <textarea value={prompt()} onInput={(event) => { setPrompt(event.currentTarget.value); setHistoryIndex(-1) }} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void run() } else if (event.key === "ArrowUp" && (event.currentTarget.selectionStart === 0 || !prompt())) { event.preventDefault(); browsePromptHistory(-1) } else if (event.key === "ArrowDown" && event.currentTarget.selectionStart === prompt().length) { event.preventDefault(); browsePromptHistory(1) } }} placeholder={running() ? "Send another instruction — it will be queued…" : "Ask Grok Build to code, debug, or explain…"} rows={3} />
           <div class="chat-composer__footer">
             <button class="composer-icon" onClick={chooseWorkspace} title="Attach or open a workspace">＋</button>
             <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} />◇ Think</label>
@@ -267,9 +340,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
               <option value="">{catalog().defaultModel || "Default model"}</option>
               <For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For>
             </select>
-            <Show when={running()} fallback={<button class="composer-send" disabled={!workspace() || !prompt().trim()} onClick={run} title="Send (⌘↵)">↑</button>}>
-              <button class="composer-send composer-send--stop" onClick={() => window.api.backend.cancel()} title="Stop task"><span /></button>
-            </Show>
+            <button class="composer-send" disabled={!workspace() || !prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (⌘↵)" : "Send (⌘↵)"}>{running() ? "+" : "↑"}</button>
+            <Show when={running()}><button class="composer-stop" onClick={() => window.api.backend.cancel()} title="Stop current task"><span /></button></Show>
           </div>
         </section>
         </>}>
