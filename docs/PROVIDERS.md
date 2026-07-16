@@ -17,9 +17,11 @@ The app may add documented flags only:
 
 Reference: [Grok Build headless mode](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md).
 
-## LM Studio — local-first endpoint
+## LM Studio and API models — Grok Build's catalog
 
-LM Studio is the local provider and model server. Configure its OpenAI-compatible base URL in the app; `http://localhost:1234` is the portable default. A LAN endpoint can be configured by the user.
+LM Studio is a first-class **Grok Build model provider**, not a separate agent path. Configure it as a custom OpenAI-compatible `[model.<name>]` entry in `~/.grok/config.toml`; Grok Build then exposes it through `grok models` and the desktop model picker passes that model id to `grok --model`.
+
+The same mechanism supports other API providers. The applications never invent a second provider runtime: every selection is still a Grok Build CLI task.
 
 ### Model-load policy
 
@@ -28,7 +30,7 @@ LM Studio is the local provider and model server. Configure its OpenAI-compatibl
 3. Never load multiple models speculatively or duplicate an already loaded embedding model.
 4. Treat catalog entries as installed files, not proof that a model is in VRAM.
 
-The current foundation never issues LM Studio load/unload calls. It prevents the desktop UI from becoming another source of accidental model churn.
+The apps read Grok Build's model catalog and never issue LM Studio load/unload calls. This prevents the desktop UI from becoming another source of accidental model churn.
 
 ## Why no fake multi-provider buttons
 

@@ -17,10 +17,55 @@ final class GrokBuildBackend: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var output = ""
+    @Published private(set) var availableModels: [String] = []
+    @Published private(set) var defaultModel: String?
 
     private var process: Process?
     private var currentRunID: UUID?
     private var currentSessionID: String?
+
+    /// Reads Grok Build's own catalog, including LM Studio and API models
+    /// configured in ~/.grok/config.toml. This does not call LM Studio or
+    /// alter its loaded-model state.
+    func refreshModels() async {
+        let task = Process()
+        let pipe = Pipe()
+        let configuredPath = ProcessInfo.processInfo.environment["GROK_BUILD_PATH"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let configuredPath, !configuredPath.isEmpty {
+            task.executableURL = URL(fileURLWithPath: configuredPath)
+            task.arguments = ["models"]
+        } else {
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            task.arguments = ["grok", "models"]
+        }
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            guard task.terminationStatus == 0,
+                  let output = String(data: data, encoding: .utf8)
+            else { return }
+            var discovered: [String] = []
+            var selectedDefault: String?
+            for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+                let value = line.trimmingCharacters(in: .whitespaces)
+                if value.hasPrefix("* "), value.hasSuffix(" (default)") {
+                    let name = String(value.dropFirst(2).dropLast(" (default)".count))
+                    selectedDefault = name
+                    discovered.append(name)
+                } else if value.hasPrefix("- ") {
+                    discovered.append(String(value.dropFirst(2)))
+                }
+            }
+            self.defaultModel = selectedDefault
+            self.availableModels = Array(NSOrderedSet(array: discovered)) as? [String] ?? discovered
+        } catch {
+            // A missing CLI is already represented by the run-state error.
+        }
+    }
 
     func run(
         prompt: String,

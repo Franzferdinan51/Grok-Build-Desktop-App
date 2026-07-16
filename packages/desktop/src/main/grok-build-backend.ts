@@ -8,13 +8,21 @@
  * Source: xai-org/grok-build, user-guide/14-headless-mode.md.
  */
 
-import { spawn, type ChildProcess } from "child_process"
+import { execFile, spawn, type ChildProcess } from "child_process"
+import { promisify } from "util"
 import { write as writeLog } from "./logging"
 import { resolveGrokBuild } from "./grok-build-resolver"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
   | { available: false; command: string; error: string }
+
+export type GrokBuildModelCatalog = {
+  defaultModel?: string
+  models: string[]
+}
+
+const execFileAsync = promisify(execFile)
 
 export type GrokBuildEvent =
   | { type: "text"; data: string }
@@ -41,6 +49,36 @@ export class GrokBuildBackend {
 
   async status(): Promise<GrokBuildStatus> {
     return resolveGrokBuild()
+  }
+
+  /**
+   * Grok Build owns model configuration. `grok models` includes built-in,
+   * LM Studio, and other OpenAI-compatible models configured in ~/.grok.
+   * This reads that catalog; it never contacts LM Studio directly or changes
+   * its loaded-model state.
+   */
+  async models(): Promise<GrokBuildModelCatalog> {
+    const status = await this.status()
+    if (!status.available) return { models: [] }
+    try {
+      const { stdout } = await execFileAsync(status.command, ["models"], { timeout: 10_000 })
+      const models: string[] = []
+      let defaultModel: string | undefined
+      for (const raw of stdout.split(/\r?\n/)) {
+        const defaultMatch = raw.match(/^\s*\*\s+(.+?)\s+\(default\)\s*$/)
+        const regularMatch = raw.match(/^\s*-\s+(.+?)\s*$/)
+        if (defaultMatch) {
+          defaultModel = defaultMatch[1]
+          models.push(defaultModel)
+        } else if (regularMatch) {
+          models.push(regularMatch[1])
+        }
+      }
+      return { defaultModel, models: [...new Set(models)] }
+    } catch (error) {
+      writeLog("error", `Could not read Grok Build model catalog: ${String(error)}`)
+      return { models: [] }
+    }
   }
 
   async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void): Promise<void> {

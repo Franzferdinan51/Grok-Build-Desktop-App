@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
 
 export type BackendStatus = { available: boolean; command: string; version?: string; error?: string }
+export type GrokBuildModelCatalog = { defaultModel?: string; models: string[] }
 export type BackendEvent = { type: string; data?: string; message?: string; sessionId?: string; usage?: unknown }
 export type TelegramStatus = { connected: boolean; username?: string; botId?: number; error?: string }
 export type ProjectSnapshot = { id: string; name: string; path: string; addedAt: number; isGit: boolean; branch?: string; changedFiles: number; diffStat?: string }
@@ -10,6 +11,7 @@ export type LocalStudioSnapshot = { configured: boolean; reachable: boolean; bas
 export type ElectronAPI = {
   backend: {
     status: () => Promise<BackendStatus>
+    models: () => Promise<GrokBuildModelCatalog>
     run: (input: { prompt: string; cwd: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
     cancel: () => Promise<void>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
@@ -34,6 +36,7 @@ export type ElectronAPI = {
 const api: ElectronAPI = {
   backend: {
     status: () => ipcRenderer.invoke("backend:status"),
+    models: () => ipcRenderer.invoke("backend:models"),
     run: (input) => ipcRenderer.invoke("backend:run", input),
     cancel: () => ipcRenderer.invoke("backend:cancel"),
     onEvent: (handler) => {

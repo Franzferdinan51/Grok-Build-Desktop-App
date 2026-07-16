@@ -44,8 +44,14 @@ struct GrokBuildCodingView: View {
                 }
 
             HStack {
-                TextField("Optional Grok Build model", text: self.$model)
-                    .textFieldStyle(.roundedBorder)
+                Picker("Model", selection: self.$model) {
+                    Text(self.backend.defaultModel.map { "Grok Build default (\($0))" } ?? "Grok Build default")
+                        .tag("")
+                    ForEach(self.backend.availableModels, id: \.self) { model in
+                        Text(model).tag(model)
+                    }
+                }
+                .frame(minWidth: 240)
                 Toggle("High reasoning", isOn: self.$reasoningEffort)
                 Toggle("Auto-approve tools", isOn: self.$autoApproveTools)
             }
@@ -67,7 +73,7 @@ struct GrokBuildCodingView: View {
                 Button("Stop") { self.backend.cancel() }
                     .disabled(self.backend.state != .running)
                 Spacer()
-                Text("LM Studio remains operator-controlled; this view never loads a model.")
+                Text("Model catalog comes from Grok Build: LM Studio and API models run through the same backend. No model is auto-loaded.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -102,6 +108,7 @@ struct GrokBuildCodingView: View {
         }
         .padding(20)
         .frame(minWidth: 720, minHeight: 560)
+        .task { await self.backend.refreshModels() }
     }
 
     @ViewBuilder

@@ -16,6 +16,7 @@ type Deps = {
 
 export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:status", () => deps.backend().status())
+  ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun(input)

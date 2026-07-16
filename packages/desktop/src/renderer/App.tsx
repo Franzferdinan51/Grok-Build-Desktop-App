@@ -1,6 +1,6 @@
 import { createSignal, For, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog } from "../preload"
 import "./styles.css"
 
 type TaskLog = { kind: "text" | "thought" | "error"; content: string }
@@ -29,6 +29,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [runs, setRuns] = createSignal<GrokRunRecord[]>([])
   const [localStudioURL, setLocalStudioURL] = createSignal("")
   const [localStudio, setLocalStudio] = createSignal<LocalStudioSnapshot>({ configured: false, reachable: false, baseUrl: "" })
+  const [catalog, setCatalog] = createSignal<GrokBuildModelCatalog>({ models: [] })
+  const [model, setModel] = createSignal("")
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
@@ -41,6 +43,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setRuns(await window.api.grokRuns.list())
     const runtime = await window.api.localStudio.status()
     setLocalStudio(runtime); setLocalStudioURL(runtime.baseUrl)
+    setCatalog(await window.api.backend.models())
     window.api.backend.onEvent((event: BackendEvent) => {
       if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
       if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
@@ -63,7 +66,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (!prompt().trim() || !workspace() || running()) return
     setEvents([]); setRunning(true)
     try {
-      await window.api.backend.run({ prompt: prompt(), cwd: workspace(), thinking: thinking(), autoApprove: autoApprove() })
+      await window.api.backend.run({ prompt: prompt(), cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove() })
     } catch (error) {
       setEvents((old) => [...old, { kind: "error", content: (error as Error).message }])
     } finally { setRunning(false) }
@@ -107,17 +110,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={active() === "runs"} fallback={<>
         <section class="hero">
           <span class="eyebrow">LOCAL-FIRST CODING WORKBENCH</span>
-          <h1>Build with Grok. Keep your models close.</h1>
-          <p>Grok Build executes the task. LM Studio stays available as your local model endpoint.</p>
+          <h1>Build with Grok. Use your model stack.</h1>
+          <p>Grok Build executes every task using its configured catalog: LM Studio models or supported API models.</p>
         </section>
         <section class="workspace-bar"><span>Project</span><button onClick={chooseWorkspace}>{workspace() || "Choose folder"}</button><Show when={selectedProject()?.isGit}><span class="git-pill">{selectedProject()?.branch} · {selectedProject()?.changedFiles} changed</span></Show></section>
-        <section class="provider-row">
-          <div class="provider provider--active"><strong>Grok Build</strong><span>the only coding and tool-execution backend</span></div>
-          <div class="provider"><strong>LM Studio</strong><span>local endpoint; never auto-loads a model</span></div>
-        </section>
         <section class="composer">
           <textarea value={prompt()} onInput={(event) => setPrompt(event.currentTarget.value)} placeholder="Describe the coding task…" rows={5} />
           <div class="composer__controls">
+            <label class="model-select">Model
+              <select value={model()} onChange={(event) => setModel(event.currentTarget.value)}>
+                <option value="">Grok Build default{catalog().defaultModel ? ` (${catalog().defaultModel})` : ""}</option>
+                <For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For>
+              </select>
+            </label>
             <label><input type="checkbox" checked={thinking()} onChange={(event) => setThinking(event.currentTarget.checked)} /> Reasoning effort</label>
             <label title="Passes Grok Build's documented --yolo flag"><input type="checkbox" checked={autoApprove()} onChange={(event) => setAutoApprove(event.currentTarget.checked)} /> Auto-approve tools</label>
             <button class="primary" disabled={!workspace() || !prompt().trim() || running()} onClick={run}>{running() ? "Running…" : "Run with Grok Build"}</button>
