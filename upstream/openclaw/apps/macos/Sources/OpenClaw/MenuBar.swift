@@ -20,6 +20,7 @@ struct OpenClawApp: App {
     @State private var statusItemMouseRouter = StatusItemMouseRouter()
     @State private var isMenuPresented = false
     @State private var isPanelVisible = false
+    @State private var didOpenGrokCodingWindow = false
     @State private var tailscaleService = TailscaleService.shared
 
     @MainActor
@@ -53,6 +54,14 @@ struct OpenClawApp: App {
                 iconState: self.effectiveIconState,
                 voiceWakeMeterActive: self.state.voiceWakeMeterActive)
                 .background(SettingsWindowOpenRegistrar())
+                .onAppear {
+                    guard !self.didOpenGrokCodingWindow else { return }
+                    self.didOpenGrokCodingWindow = true
+                    DispatchQueue.main.async {
+                        self.openWindow(id: "grok-build-coding")
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                }
         }
         .menuBarExtraAccess(isPresented: self.$isMenuPresented) { item in
             // SwiftUI can vend a replacement status item during connection churn.
