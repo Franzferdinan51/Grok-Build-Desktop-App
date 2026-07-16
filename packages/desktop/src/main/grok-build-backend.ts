@@ -9,9 +9,8 @@
  */
 
 import { spawn, type ChildProcess } from "child_process"
-import { existsSync } from "fs"
-import { delimiter, dirname } from "path"
 import { write as writeLog } from "./logging"
+import { resolveGrokBuild } from "./grok-build-resolver"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -41,26 +40,7 @@ export class GrokBuildBackend {
   }
 
   async status(): Promise<GrokBuildStatus> {
-    const command = this.command()
-    if (command.includes("/") && !existsSync(command)) {
-      return { available: false, command, error: `Grok Build was not found at ${command}` }
-    }
-
-    return new Promise((resolve) => {
-      const child = spawn(command, ["--version"], { stdio: ["ignore", "pipe", "pipe"] })
-      let output = ""
-      child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString() })
-      child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString() })
-      child.on("error", (error: NodeJS.ErrnoException) => resolve({
-        available: false,
-        command,
-        error: error.code === "ENOENT" ? "Install Grok Build or set GROK_BUILD_PATH." : error.message,
-      }))
-      child.on("exit", (code) => {
-        if (code === 0) resolve({ available: true, command, version: output.trim() || undefined })
-        else resolve({ available: false, command, error: output.trim() || `grok --version exited ${code}` })
-      })
-    })
+    return resolveGrokBuild()
   }
 
   async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void): Promise<void> {

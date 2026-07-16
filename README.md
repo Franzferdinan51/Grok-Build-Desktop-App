@@ -2,11 +2,12 @@
 
 Local-first desktop workbench for **Grok Build**. The canonical UI base is the MIT-licensed OpenClaw macOS desktop application; Grok Build is the coding-agent backend.
 
-The previous Electron/Solid proof of concept remains in `packages/` as a transition reference. New desktop work belongs in `upstream/openclaw/apps/macos`, deliberately vendored from OpenClaw with its license and notices retained.
+There are two maintained desktop targets: the native macOS app based on OpenClaw, and a cross-platform Electron app based on Hermes Desktop. Both keep their upstream MIT license/notices, use Grok Build as the only coding backend, and follow one feature-parity contract.
 
 ## What is implemented
 
 - **Native OpenClaw desktop base** — dashboard, channel, skill, schedule, approval, gateway, and settings information architecture comes from the actual MIT OpenClaw macOS application, not a look-alike.
+- **Cross-platform Hermes Electron base** — the full MIT Hermes Desktop source is vendored under `upstream/hermes`; its hardened Electron, project, review, preview, and packaging patterns drive the Windows/Linux-compatible implementation.
 - **Grok Build backend** — the native coding window runs the documented headless interface: `grok -p … --output-format streaming-json`. No undocumented JSON-RPC or replacement agent backend is invented.
 - **Grok-first coding flow** — workspace picker, prompt composer, stream output, reasoning-effort option, and an explicit auto-approve toggle that maps to Grok Build’s documented `--yolo` flag.
 - **LM Studio first-class** — visible local-endpoint mode and provider configuration. It does not launch or shotgun-load models; model loading remains under the local LM Studio server’s control.
@@ -22,7 +23,7 @@ The previous Electron/Solid proof of concept remains in `packages/` as a transit
 | [anomalyco/opencode](https://github.com/anomalyco/opencode) | Desktop shell boundaries and provider/workspace UX ideas | MIT; desktop app is beta |
 | [MiniMax-AI/OpenRoom](https://github.com/MiniMax-AI/OpenRoom) | Local-first app/action framing and desktop-like organization | MIT |
 | [openclaw/openclaw](https://github.com/openclaw/openclaw) | **Canonical macOS desktop source base**: dashboard, channels, settings, skills, schedules, approvals, gateway health | MIT; vendored under `upstream/openclaw` with notices retained |
-| [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | Project/worktree/session, coding rail, review pane, connection/settings patterns | MIT; patterns only, no source copied yet |
+| [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | **Cross-platform Electron source base**: hardened desktop shell, project/worktree/session, review/preview, connection/settings, packaging | MIT; vendored under `upstream/hermes` with license retained |
 | [Z.ai ZCode](https://zcode.z.ai/en) | Product/UX reference only | Closed source; no code copied |
 
 The app borrows interaction ideas, not branding or proprietary assets. Z.ai ZCode is a product reference only; no Z.ai source code or proprietary assets are included.
@@ -38,7 +39,15 @@ cd upstream/openclaw/apps/macos
 swift build --target OpenClaw
 ```
 
-## Electron transition prototype
+## Electron desktop target
+
+The Electron app in `packages/desktop` is the cross-platform target. It now uses
+the Hermes-style candidate/probe discipline before accepting a Grok Build
+runtime; it never boots Hermes Agent. The preserved source base and attribution
+are in [upstream/hermes/UPSTREAM.md](upstream/hermes/UPSTREAM.md).
+
+See [native/Electron feature parity](docs/PLATFORM-PARITY.md) for the shared
+acceptance contract.
 
 ```bash
 git clone https://github.com/Franzferdinan51/Grok-Build-Desktop-App.git
@@ -74,7 +83,7 @@ When selected, it adds only documented flags: `--model`, `--reasoning-effort hig
 
 ## Status
 
-Native migration is underway. The actual OpenClaw macOS source is now the canonical base; not every OpenClaw pathway has been replaced by Grok Build yet. Run the Swift target above for native validation and `pnpm build` only for the retained Electron transition prototype.
+Both targets are active. Native migration starts from OpenClaw; Electron migration starts from Hermes Desktop. Neither target replaces Grok Build with another coding agent. Run the Swift target above for native validation and `pnpm build` for Electron validation.
 
 ## License
 

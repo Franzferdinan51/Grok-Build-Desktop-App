@@ -11,8 +11,8 @@ OpenClaw macOS (SwiftUI/AppKit) — canonical UI base
        └─ GrokBuildBackend ── spawn documented headless Grok Build command
             grok -p <prompt> --cwd <folder> --output-format streaming-json
 
-Electron/Solid remains in `packages/` as a migration reference; it is not the
-canonical product path.
+Electron remains a first-class cross-platform product path. Its source base is
+the MIT Hermes Desktop app, with Grok Build substituted for Hermes Agent.
 ```
 
 ## Execution flow
@@ -29,6 +29,16 @@ This is deliberately a task-process model. Grok Build’s upstream repository al
 - **Grok Build:** primary coding agent and tool executor.
 - **LM Studio:** first-class local model endpoint. The app stores a configurable endpoint and keeps its role visible, but it does not force-load models. That prevents accidental VRAM churn and preserves user control.
 - **Other clouds:** not part of the execution path in this iteration. A provider must have a real backend integration before appearing as an executable choice.
+
+## Cross-platform Electron base
+
+`upstream/hermes/apps/desktop` is the preserved Hermes Desktop Electron source
+base. Its candidate/probe approach is adapted for Grok Build in
+`packages/desktop/src/main/grok-build-resolver.ts`: a configured path or PATH
+candidate must pass `grok --version` before the UI calls it. This retains the
+reliability pattern while keeping Grok Build as the one coding backend.
+
+The native and Electron targets are held to [one parity contract](PLATFORM-PARITY.md).
 
 ## Permission model
 
