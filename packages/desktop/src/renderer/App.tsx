@@ -5,6 +5,7 @@ import { splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
 import "./styles.css"
+import "./preview-layout.css"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
 type QueuedPrompt = { id: string; text: string }
@@ -346,8 +347,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
   const run = async (requested?: string) => {
     const submitted = (requested ?? prompt()).trim()
-    if (!submitted || !workspace()) return
+    if (!submitted) return
     if (await executeSlashCommand(submitted)) return
+    let runWorkspace = workspace()
+    if (!runWorkspace) {
+      const scratch = await window.api.projects.scratch()
+      setProjects(await window.api.projects.list())
+      setSelectedProject(scratch)
+      setWorkspace(scratch.path)
+      runWorkspace = scratch.path
+      await window.api.store.set("workspace.last", scratch.path)
+      await loadConversation(scratch.path)
+      await loadGoal(scratch.path)
+    }
     if (running()) {
       setQueuedPrompts((old) => [...old, { id: crypto.randomUUID(), text: submitted }])
       setPrompt(""); setHistoryIndex(-1)
@@ -359,7 +371,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const activeGoal = goal()?.status === "active" ? goal() : null
       const executionPrompt = activeGoal ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.` : submitted
       const references = moaReferenceModels().slice(0, moaCandidates()).filter(Boolean)
-      await window.api.backend.run({ prompt: executionPrompt, cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled() })
+      await window.api.backend.run({ prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled() })
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
       queueBackendEvent({ kind: "error", content: (error as Error).message })
@@ -486,7 +498,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => void navigate(item.id)}><span>{item.icon}</span>{item.label}</button>}</For></nav>
       <div class="sidebar__section">
         <div class="section-heading"><span class="sidebar__section-title">Projects</span><button class="project-add" onClick={chooseWorkspace} title="Add project">+</button></div>
-        <Show when={projects().length > 0} fallback={<button class="sidebar__project" onClick={chooseWorkspace}>Add a codebase</button>}>
+        <Show when={projects().length > 0} fallback={<><button class="sidebar__project" onClick={useScratchWorkspace}>Start agent scratch</button><button class="sidebar__project" onClick={chooseWorkspace}>Add a codebase</button></>}>
           <For each={projects()}>{(project) => <button class={`sidebar__project ${selectedProject()?.id === project.id ? "sidebar__project--active" : ""}`} onClick={() => void selectProject(project)}><span class="project-name">{project.name}</span><Show when={project.changedFiles > 0}><span class="project-changes">{project.changedFiles}</span></Show></button>}</For>
         </Show>
       </div>
@@ -507,7 +519,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
         <div class={`chat-workbench ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""}`}><div class="chat-column"><section class="chat-thread">
-          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={() => setPreviewOpen(!previewOpen())}>◫ Preview</button></Show><button onClick={async () => { await saveConversation([]); setEvents([]) }}>New chat</button><button onClick={chooseWorkspace}>Open project</button></div></header>
+          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={() => setPreviewOpen(!previewOpen())}>◫ Preview</button></Show><button onClick={async () => { await saveConversation([]); setEvents([]) }}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
           <div class="chat-messages" ref={messagesElement}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
               <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(message.logs.map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) setPrompt(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
@@ -537,7 +549,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
               <For each={selectableModels()}>{(entry) => <option value={entry}>{entry}</option>}</For>
               </optgroup>
             </select>
-            <button class="composer-send" disabled={!workspace() || !prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (Enter)" : "Send (Enter)"}>{running() ? "+" : "↑"}</button>
+            <button class="composer-send" disabled={!prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (Enter)" : "Send (Enter)"}>{running() ? "+" : "↑"}</button>
             <Show when={running()}><button class="composer-stop" onClick={() => window.api.backend.cancel()} title="Stop current task"><span /></button></Show>
           </div>
         </section>

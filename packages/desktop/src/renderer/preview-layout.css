@@ -1,0 +1,30 @@
+.main-content--preview {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.chat-workbench--preview {
+  height: 100%;
+}
+
+.chat-workbench--preview .chat-column {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-workbench--preview .chat-thread {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.chat-workbench--preview .chat-messages {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.chat-workbench--preview .chat-composer--docked {
+  flex: 0 0 auto;
+}
