@@ -8,7 +8,7 @@ import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, ru
 import { inspectProject } from "../src/main/project-inspection.ts"
 import { PreviewServer } from "../src/main/preview-server.ts"
 import { telegramInlineKeyboard } from "../src/main/telegram-format.ts"
-import { boundedMoaContext } from "../src/main/moa-utils.ts"
+import { boundedMoaContext, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -66,6 +66,9 @@ const oversizedMoaContext = `old-${"x".repeat(20_000)}-latest`
 const boundedContext = boundedMoaContext(oversizedMoaContext)
 assert.equal(boundedContext.endsWith("-latest"), true)
 assert.equal(boundedContext.length < 13_000, true)
+assert.equal(normalizeMoaReferenceBudget(), 600)
+assert.equal(normalizeMoaReferenceBudget(50), 200)
+assert.equal(normalizeMoaReferenceBudget(50_000), 2_000)
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)

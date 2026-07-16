@@ -15,7 +15,7 @@ import { resolveGrokBuild } from "./grok-build-resolver"
 import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
 import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
-import { boundedMoaContext } from "./moa-utils"
+import { boundedMoaContext, normalizeMoaReferenceBudget } from "./moa-utils"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -75,6 +75,7 @@ export type RunTaskInput = {
     aggregatorModel?: string
     referenceReasoningEffort?: "low" | "medium" | "high"
     aggregatorReasoningEffort?: "low" | "medium" | "high"
+    referenceTokenBudget?: number
     context?: string
   }
 }
@@ -213,10 +214,11 @@ export class GrokBuildBackend {
       try {
         const candidates = await Promise.allSettled(references.map(async (referenceModel, index) => {
           const boundedContext = boundedMoaContext(input.moa?.context)
+          const referenceTokenBudget = normalizeMoaReferenceBudget(input.moa?.referenceTokenBudget)
           const conversationContext = boundedContext
             ? `\n\nConversation context available to the acting agent:\n${boundedContext}`
             : ""
-          const candidatePrompt = `You are reference advisor ${index + 1} of ${references.length} in a Mixture-of-Agents run. Give direct, concrete advice that helps the acting aggregator complete the task. Inspect and reason about the requested implementation, likely files, edge cases, risks, and verification. You have no tools and must not claim to edit files or run commands. Do not apologize for that limitation and do not address the user; return only useful private advice for the aggregator.${conversationContext}\n\nCurrent task:\n${input.prompt}`
+          const candidatePrompt = `You are reference advisor ${index + 1} of ${references.length} in a Mixture-of-Agents run. Give direct, concrete advice that helps the acting aggregator complete the task. Inspect and reason about the requested implementation, likely files, edge cases, risks, and verification. You have no tools and must not claim to edit files or run commands. Do not apologize for that limitation and do not address the user; return only useful private advice for the aggregator. Keep the response concise and strictly under ${referenceTokenBudget} tokens; the acting aggregator needs the gist, not a second full answer.${conversationContext}\n\nCurrent task:\n${input.prompt}`
           // Some providers spend an initial turn attempting workspace inspection
           // even in plan mode. A small bounded budget lets them recover and
           // produce advice without granting edit permissions.
