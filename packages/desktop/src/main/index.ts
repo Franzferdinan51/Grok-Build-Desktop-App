@@ -12,6 +12,7 @@
  */
 
 import { app, BrowserWindow, Menu } from "electron"
+import { mkdirSync } from "fs"
 import { join } from "path"
 import windowStateKeeper from "electron-window-state"
 import { registerIpcHandlers } from "./ipc"
@@ -22,6 +23,8 @@ import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
 import { GrokTaskScheduler } from "./scheduled-tasks"
 import { PreviewServer } from "./preview-server"
+import { getStore } from "./store"
+import { finishGrokRun, startGrokRun } from "./grok-runs"
 
 const APP_NAME = "Grok Build Desktop"
 const APP_ID = "ai.grokbuild.desktop"
@@ -96,6 +99,25 @@ app.whenReady().then(async () => {
     getMainWindow: () => mainWindow,
     preview: () => preview,
   })
+
+  telegram.setMessageHandler(async (_chatId, text) => {
+    if (backend.isRunning()) return "Grok Build is busy with another task. Try again when the current run finishes."
+    const storedWorkspace = getStore().get("workspace.last") as string | undefined
+    const cwd = storedWorkspace || join(app.getPath("userData"), "Scratch")
+    mkdirSync(cwd, { recursive: true })
+    let response = ""
+    const input = { prompt: text.slice(0, 20_000), cwd, model: getStore().get("defaults.model") as string | undefined }
+    const run = startGrokRun(input)
+    try {
+      await backend.run(input, (event) => { if (event.type === "text" && typeof event.data === "string") response += event.data })
+      finishGrokRun(run.id, { status: "completed" })
+    } catch (error) {
+      finishGrokRun(run.id, { status: "failed", error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+    return response.trim().slice(0, 4096) || "Task completed without a text response."
+  })
+  telegram.start()
 
   mainWindow = await createAndLoadMainWindow()
 

@@ -93,6 +93,8 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("telegram:connect", async (_event, token: string) => deps.telegram().connect(token))
   ipcMain.handle("telegram:disconnect", () => deps.telegram().disconnect())
   ipcMain.handle("telegram:send", async (_event, chatId: string, text: string) => deps.telegram().send(chatId, text))
+  ipcMain.handle("telegram:allowed-chats", () => deps.telegram().allowedChats())
+  ipcMain.handle("telegram:set-allowed-chats", (_event, chatIds: string[]) => deps.telegram().setAllowedChats(chatIds))
   ipcMain.handle("local-studio:status", () => deps.localStudio().snapshot())
   ipcMain.handle("local-studio:set-url", (_event, baseUrl: string) => deps.localStudio().setBaseURL(baseUrl))
   ipcMain.handle("projects:list", async () => Promise.all(listProjects().map(inspectProject)))

@@ -39,6 +39,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [telegram, setTelegram] = createSignal<TelegramStatus>({ connected: false })
   const [token, setToken] = createSignal("")
   const [telegramNotice, setTelegramNotice] = createSignal("")
+  const [telegramAllowedChats, setTelegramAllowedChats] = createSignal("")
   const [projects, setProjects] = createSignal<ProjectSnapshot[]>([])
   const [selectedProject, setSelectedProject] = createSignal<ProjectSnapshot | null>(null)
   const [runs, setRuns] = createSignal<GrokRunRecord[]>([])
@@ -268,6 +269,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await loadGoal(current.path)
     }
     setTelegram(await window.api.telegram.status())
+    setTelegramAllowedChats((await window.api.telegram.allowedChats()).join(", "))
     setRuns(await window.api.grokRuns.list())
     setSkills(await window.api.skills.list(workspace()))
     const runtime = await window.api.localStudio.status()
@@ -643,11 +645,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <section class="telegram-panel">
           <span class="eyebrow">TELEGRAM BOT CONNECTION</span><h1>Connect your coding workspace to Telegram.</h1>
           <p>Enter a BotFather token. It is verified with <code>getMe</code> and stored only through macOS credential encryption.</p>
-          <Show when={!telegram().connected} fallback={<><div class="connected">Connected as @{telegram().username ?? "bot"}</div><div class="token-row"><button class="primary" onClick={async () => { const status = await window.api.telegram.status(); setTelegram(status); setTelegramNotice(status.connected ? `Connection verified · bot ${status.botId}` : status.error || "Connection failed") }}>Test connection</button><button onClick={async () => { await window.api.telegram.disconnect(); setTelegram({ connected: false }); setTelegramNotice("") }}>Disconnect</button></div><Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show></>}>
+          <Show when={!telegram().connected} fallback={<><div class="connected">Connected as @{telegram().username ?? "bot"} · listening for authorized chats</div><div class="provider-fields"><label>Allowed chat IDs<input value={telegramAllowedChats()} onInput={(event) => setTelegramAllowedChats(event.currentTarget.value)} placeholder="-1001234567890, 123456789" /></label><button class="primary" onClick={async () => { const ids = telegramAllowedChats().split(/[\s,]+/).filter(Boolean); const saved = await window.api.telegram.setAllowedChats(ids); setTelegramAllowedChats(saved.join(", ")); setTelegramNotice(saved.length ? `Listening to ${saved.length} authorized chat${saved.length === 1 ? "" : "s"}` : "No chats are authorized yet") }}>Save allowlist</button></div><div class="token-row"><button onClick={async () => { const status = await window.api.telegram.status(); setTelegram(status); setTelegramNotice(status.connected ? `Connection verified · bot ${status.botId}` : status.error || "Connection failed") }}>Test connection</button><button onClick={async () => { await window.api.telegram.disconnect(); setTelegram({ connected: false }); setTelegramNotice("") }}>Disconnect</button></div><Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show></>}>
             <div class="token-row"><input type="password" value={token()} onInput={(event) => setToken(event.currentTarget.value)} placeholder="123456:ABC…" /><button class="primary" disabled={!token().trim()} onClick={connectTelegram}>Connect bot</button></div>
             <Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show>
           </Show>
-          <p class="telegram-note">This release validates and stores the bot connection and can send a message through the main process. Inbound task routing is deliberately not auto-enabled until a chat allowlist is configured.</p>
+          <p class="telegram-note">The bot polls Telegram while this app is running. Messages from allowed chats become Grok Build tasks in the current workspace; results are sent back to the same chat. Unauthorized chats receive only their chat ID and cannot run tasks.</p>
         </section>
       </Show>
       }>

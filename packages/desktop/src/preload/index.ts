@@ -27,6 +27,8 @@ export type ElectronAPI = {
     connect: (token: string) => Promise<TelegramStatus>
     disconnect: () => Promise<void>
     send: (chatId: string, text: string) => Promise<{ ok: boolean; error?: string }>
+    allowedChats: () => Promise<string[]>
+    setAllowedChats: (chatIds: string[]) => Promise<string[]>
   }
   projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; scratch: () => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
   grokRuns: { list: () => Promise<GrokRunRecord[]> }
@@ -62,6 +64,7 @@ const api: ElectronAPI = {
   telegram: {
     status: () => ipcRenderer.invoke("telegram:status"), connect: (token) => ipcRenderer.invoke("telegram:connect", token),
     disconnect: () => ipcRenderer.invoke("telegram:disconnect"), send: (chatId, text) => ipcRenderer.invoke("telegram:send", chatId, text),
+    allowedChats: () => ipcRenderer.invoke("telegram:allowed-chats"), setAllowedChats: (chatIds) => ipcRenderer.invoke("telegram:set-allowed-chats", chatIds),
   },
   projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), scratch: () => ipcRenderer.invoke("projects:scratch"), remove: (id) => ipcRenderer.invoke("projects:remove", id) },
   grokRuns: { list: () => ipcRenderer.invoke("grok-runs:list") },
