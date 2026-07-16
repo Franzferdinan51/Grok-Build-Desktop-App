@@ -4,6 +4,7 @@ import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, Grok
 import "./styles.css"
 
 type TaskLog = { kind: "text" | "thought" | "error"; content: string }
+type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[] }
 
 const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },
@@ -26,6 +27,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [running, setRunning] = createSignal(false)
   const [active, setActive] = createSignal("new-task")
   const [events, setEvents] = createSignal<TaskLog[]>([])
+  const [messages, setMessages] = createSignal<ChatMessage[]>([])
   const [telegram, setTelegram] = createSignal<TelegramStatus>({ connected: false })
   const [token, setToken] = createSignal("")
   const [telegramNotice, setTelegramNotice] = createSignal("")
@@ -123,12 +125,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
   const run = async () => {
     if (!prompt().trim() || !workspace() || running()) return
-    setEvents([]); setRunning(true)
+    const submitted = prompt().trim()
+    setMessages((old) => [...old, { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }] }])
+    setPrompt(""); setEvents([]); setRunning(true)
     try {
-      await window.api.backend.run({ prompt: prompt(), cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove() })
+      await window.api.backend.run({ prompt: submitted, cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove() })
     } catch (error) {
       setEvents((old) => [...old, { kind: "error", content: (error as Error).message }])
-    } finally { setRunning(false) }
+    } finally {
+      setRunning(false)
+      const completed = events()
+      if (completed.length) setMessages((old) => [...old, { id: crypto.randomUUID(), role: "assistant", logs: completed }])
+      setEvents([])
+    }
     setRuns(await window.api.grokRuns.list())
   }
 
@@ -235,13 +244,16 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       <Show when={active() === "telegram"} fallback={
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
-        <section class="hero">
-          <span class="eyebrow">LOCAL-FIRST CODING WORKBENCH</span>
-          <h1>Build with Grok. Use your model stack.</h1>
-          <p>Grok Build executes every task using its configured catalog: LM Studio models or supported API models.</p>
+        <section class="chat-thread">
+          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><button onClick={chooseWorkspace}>Open project</button></header>
+          <div class="chat-messages">
+            <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
+              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={message.logs}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Reasoning</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For></div></article>}</For>
+              <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={events()}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Reasoning</summary><pre>{entry.content}</pre></details>}><pre class={entry.kind === "error" ? "chat-error" : ""}>{entry.content}</pre></Show>}</For></Show></div></article></Show>
+            </Show>
+          </div>
         </section>
-        <section class="workspace-bar"><span>Workspace</span><button onClick={chooseWorkspace}>{selectedProject()?.name || "Choose folder"}</button><button onClick={useScratchWorkspace}>Start without a project</button><Show when={selectedProject()?.isGit}><span class="git-pill">{selectedProject()?.branch} · {selectedProject()?.changedFiles} changed</span></Show></section>
-        <section class="chat-composer" aria-label="Grok Build task composer">
+        <section class="chat-composer chat-composer--docked" aria-label="Grok Build task composer">
           <div class="chat-composer__context">
             <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
             <span class="composer-hint">Grok Build can read and edit this workspace</span>
@@ -260,8 +272,6 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             </Show>
           </div>
         </section>
-        <Show when={events().length > 0}><section class="task-output"><For each={events()}>{(entry) => <pre class={`task-output__entry task-output__entry--${entry.kind}`}>{entry.content}</pre>}</For></section></Show>
-        <Show when={selectedProject()?.isGit}><section class="review-pane"><div><span class="eyebrow">REVIEW</span><strong>{selectedProject()?.changedFiles} changed files</strong></div><pre>{selectedProject()?.diffStat || "Working tree is clean."}</pre></section></Show>
         </>}>
         <section class="runs-panel">
           <span class="eyebrow">GROK BUILD RUN HISTORY</span>
