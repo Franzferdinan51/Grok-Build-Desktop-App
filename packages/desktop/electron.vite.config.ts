@@ -1,5 +1,6 @@
 import { defineConfig } from "electron-vite"
 import { resolve } from "path"
+import solid from "vite-plugin-solid"
 
 export default defineConfig({
   main: {
@@ -44,6 +45,6 @@ export default defineConfig({
         "@renderer": resolve(__dirname, "src/renderer"),
       },
     },
-    plugins: [],
+    plugins: [solid()],
   },
 })
