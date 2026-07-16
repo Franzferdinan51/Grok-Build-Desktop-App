@@ -1,5 +1,6 @@
 import { ipcMain, dialog, shell, app, BrowserWindow } from "electron"
 import { mkdirSync } from "fs"
+import { writeFile } from "fs/promises"
 import { join } from "path"
 import { getStore } from "./store"
 import { write as writeLog } from "./logging"
@@ -110,6 +111,25 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("workspace:git-diff", (_event, root: string, path: string) => gitFileDiff(root, path))
   ipcMain.handle("preview:start", (_event, root: string) => deps.preview().start(root))
   ipcMain.handle("preview:stop", () => deps.preview().stop())
+  ipcMain.handle("preview:inspect", async () => {
+    const win = deps.getMainWindow()
+    if (!win) throw new Error("Preview window is unavailable")
+    const frame = win.webContents.mainFrame.frames.find((candidate) => /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\//.test(candidate.url))
+    if (!frame) throw new Error("Open the preview before asking the agent to inspect it")
+    const page = await frame.executeJavaScript(`(() => ({
+      url: location.href,
+      title: document.title,
+      text: (document.body?.innerText || '').slice(0, 30000),
+      html: (document.documentElement?.outerHTML || '').slice(0, 60000),
+      viewport: { width: innerWidth, height: innerHeight },
+      links: Array.from(document.querySelectorAll('a')).slice(0, 100).map(a => ({ text: (a.textContent || '').trim(), href: a.href })),
+      controls: Array.from(document.querySelectorAll('button,input,select,textarea')).slice(0, 100).map((el) => ({ tag: el.tagName.toLowerCase(), type: el.getAttribute('type'), label: (el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.textContent || '').trim(), disabled: Boolean(el.disabled) }))
+    }))()`) as Record<string, unknown>
+    const screenshotPath = join(app.getPath("temp"), `grok-build-preview-${Date.now()}.png`)
+    const screenshot = await win.webContents.capturePage()
+    await writeFile(screenshotPath, screenshot.toPNG())
+    return { ...page, screenshotPath }
+  })
 
   ipcMain.handle("store:get", (_event, key: string) => getStore().get(key))
   ipcMain.handle("store:set", (_event, key: string, value: unknown) => getStore().set(key, value))
