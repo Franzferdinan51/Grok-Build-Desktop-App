@@ -161,6 +161,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     ...DESKTOP_SLASH_COMMANDS,
     ...skills().map((skill) => ({ name: skill.name, description: skill.description || "Run Grok Build skill", usage: `/${skill.name} [instructions]` })),
   ])
+  const selectableModels = () => [...new Set([
+    ...catalog().models,
+    ...providerSecrets().map((provider) => provider.modelId).filter(Boolean),
+  ])]
+  const refreshModelCatalog = async () => setCatalog(await window.api.backend.models())
+  createEffect(() => {
+    if (props.backendStatus().available) void refreshModelCatalog()
+  })
   const modelPickerValue = () => moaEnabled() ? `__moa__:${moaCandidates()}` : model()
   const selectModelValue = async (value: string) => {
     if (value.startsWith("__moa__:")) {
@@ -183,7 +191,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (command.name === "help") setSlashNotice(DESKTOP_SLASH_COMMANDS.map((entry) => `/${entry.name} — ${entry.description}`).join("\n"))
     else if (command.name === "new") { await saveConversation([]); setEvents([]); setQueuedPrompts([]); setSlashNotice("Started a new chat") }
     else if (command.name === "model") {
-      const found = catalog().models.find((entry) => entry === parsed.args)
+      const found = selectableModels().find((entry) => entry === parsed.args)
       const moaMatch = parsed.args.match(/^moa(?::(\d+))?$/i)
       if (!parsed.args) setSlashNotice(`Current model: ${moaEnabled() ? `MoA ×${moaCandidates()} (${model() || "Grok Build default"})` : model() || "Grok Build default"}`)
       else if (moaMatch) { const count = Math.min(10, Math.max(2, Number(moaMatch[1]) || 3)); await selectModelValue(`__moa__:${count}`); setSlashNotice(`Model set to Mixture of Agents ×${count}`) }
@@ -281,7 +289,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setAutoLearnStatus((await window.api.store.get<string>("autoLearn.lastStatus")) || "No review has run yet")
     setWebSearchEnabled((await window.api.store.get<boolean>("defaults.webSearch")) ?? true)
     const savedModel = await window.api.store.get<string>("defaults.model")
-    if (savedModel && catalog().models.includes(savedModel)) setModel(savedModel)
+    if (savedModel && selectableModels().includes(savedModel)) setModel(savedModel)
     unsubscribeBackend = window.api.backend.onEvent((event: BackendEvent) => {
       if (event.type === "text" && event.data) queueBackendEvent({ kind: "text", content: event.data })
       if (event.type === "thought" && event.data) queueBackendEvent({ kind: "thought", content: event.data })
@@ -522,11 +530,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set("defaults.thinking", event.currentTarget.checked) }} />◇ Think</label>
             <label class={`composer-toggle ${autoApprove() ? "composer-toggle--warning" : ""}`} title="Allow Grok Build to execute tools without asking"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set("defaults.autoApprove", event.currentTarget.checked) }} />⚡ Auto</label>
             <label class={`composer-toggle ${moaEnabled() ? "composer-toggle--moa" : ""}`} title={`Run ${moaCandidates()} candidates in parallel and synthesize the best result`}><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set("moa.enabled", event.currentTarget.checked) }} />⌘ MoA ×{moaCandidates()}</label>
-            <select class="composer-model" value={modelPickerValue()} onChange={(event) => void selectModelValue(event.currentTarget.value)} aria-label="Model">
+            <select class="composer-model" value={modelPickerValue()} onFocus={() => void refreshModelCatalog()} onChange={(event) => void selectModelValue(event.currentTarget.value)} aria-label="Model">
               <optgroup label="Mixture of Agents"><option value="__moa__:2">MoA · Fast ×2</option><option value="__moa__:3">MoA · Balanced ×3</option><option value="__moa__:5">MoA · Thorough ×5</option><option value="__moa__:8">MoA · Exhaustive ×8</option><Show when={![2,3,5,8].includes(moaCandidates())}><option value={`__moa__:${moaCandidates()}`}>MoA · Custom ×{moaCandidates()}</option></Show></optgroup>
               <optgroup label="Single model">
               <option value="">{catalog().defaultModel || "Default model"}</option>
-              <For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For>
+              <For each={selectableModels()}>{(entry) => <option value={entry}>{entry}</option>}</For>
               </optgroup>
             </select>
             <button class="composer-send" disabled={!workspace() || !prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (Enter)" : "Send (Enter)"}>{running() ? "+" : "↑"}</button>
