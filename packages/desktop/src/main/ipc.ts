@@ -28,6 +28,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
   ipcMain.handle("backend:set-path", (_event, path: string) => { getStore().set("grok.cliPath", path.trim() || undefined); return deps.backend().status() })
+  ipcMain.handle("backend:oauth-login", (_event, provider: "xai") => deps.backend().startOAuth(provider))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun(input)
     let grokSessionId: string | undefined

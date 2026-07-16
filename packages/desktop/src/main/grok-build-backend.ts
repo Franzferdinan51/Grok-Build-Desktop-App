@@ -89,6 +89,21 @@ export class GrokBuildBackend {
     }
   }
 
+  async startOAuth(provider: "xai"): Promise<{ ok: boolean; message: string }> {
+    if (provider !== "xai") throw new Error("This provider does not expose a supported OAuth flow")
+    const status = await this.status()
+    if (!status.available) throw new Error(status.error)
+    if (process.platform === "darwin") {
+      const command = `${JSON.stringify(status.command)} --oauth`
+      await execFileAsync("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(command)}`], { timeout: 10_000 })
+    } else if (process.platform === "win32") {
+      const child = spawn("cmd.exe", ["/c", "start", "", status.command, "--oauth"], { detached: true, stdio: "ignore" }); child.unref()
+    } else {
+      const child = spawn(status.command, ["--oauth"], { detached: true, stdio: "ignore" }); child.unref()
+    }
+    return { ok: true, message: "xAI OAuth opened. Finish sign-in, then return and refresh models." }
+  }
+
   async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void): Promise<void> {
     if (!input.prompt.trim()) throw new Error("A task prompt is required")
     if (this.isRunning()) throw new Error("A Grok Build task is already running")

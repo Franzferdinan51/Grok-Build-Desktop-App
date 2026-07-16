@@ -20,6 +20,7 @@ export type ElectronAPI = {
     autoLearn: (input: { prompt: string; cwd: string; model?: string }) => Promise<{ ok: boolean }>
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
+    oauthLogin: (provider: "xai") => Promise<{ ok: boolean; message: string }>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
   }
   telegram: {
@@ -55,6 +56,7 @@ const api: ElectronAPI = {
     autoLearn: (input) => ipcRenderer.invoke("backend:auto-learn", input),
     cancel: () => ipcRenderer.invoke("backend:cancel"),
     setPath: (path) => ipcRenderer.invoke("backend:set-path", path),
+    oauthLogin: (provider) => ipcRenderer.invoke("backend:oauth-login", provider),
     onEvent: (handler) => {
       const listener = (_event: IpcRendererEvent, update: BackendEvent) => handler(update)
       ipcRenderer.on("backend:event", listener)
