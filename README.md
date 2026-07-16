@@ -12,6 +12,9 @@ There are two maintained desktop targets: the native macOS app based on OpenClaw
 - **Grok-first coding flow** — workspace picker, prompt composer, stream output, reasoning-effort option, and an explicit auto-approve toggle that maps to Grok Build’s documented `--yolo` flag.
 - **LM Studio first-class** — LM Studio and API models live in Grok Build's own model catalog. The native and Electron model pickers read `grok models` and pass the selected id to Grok Build; neither app creates a second agent/provider path or auto-loads models.
 - **ODS + MiniMax first-class** — configure either as a Grok Build custom model and it appears beside LM Studio in both model pickers. Grok Build remains the sole execution backend; see [provider setup](docs/PROVIDERS.md).
+- **Secure provider settings** — Electron stores LM Studio, ODS, and MiniMax credentials with OS `safeStorage`; macOS native uses Keychain. Secrets are injected only into the Grok CLI child process and are never returned to the renderer.
+- **Skills browser** — Electron discovers project and user `SKILL.md` files from Grok and compatible agent directories, with project skills taking precedence. Native retains OpenClaw's full skills interface.
+- **Scheduled coding tasks** — Electron persists one-shot or repeating tasks and executes them through the same Grok Build backend while the app is running. Native retains OpenClaw's scheduler while Grok-specific native scheduling is completed.
 - **Local Studio monitor** — optional read-only controller integration in both desktop targets for `/health`, `/status`, and `/gpus`. It never invokes model lifecycle routes.
 - **Telegram bot connection** — validates a BotFather token with `getMe`, stores it only with Electron `safeStorage`, and supports sending through Telegram’s Bot API. Inbound routing stays off until a chat allowlist is added.
 - **Coding cockpit projects** — persistent project rail, Git branch/change state, and a read-only review pane; this replaces the disposable folder-picker design.
@@ -85,7 +88,7 @@ When selected, it adds only documented flags: `--model`, `--reasoning-effort hig
 
 ## Status
 
-Both targets are active. Native migration starts from OpenClaw; Electron migration starts from Hermes Desktop. Neither target replaces Grok Build with another coding agent. Run the Swift target above for native validation and `pnpm build` for Electron validation.
+Both targets are active. Native migration starts from OpenClaw; Electron migration starts from Hermes Desktop. Electron now has functional Grok skills discovery, Grok-backed schedules, and encrypted provider settings. Native has Grok model selection and Keychain-backed provider settings; Grok-specific native schedule wiring remains an explicit parity item. Neither target replaces Grok Build with another coding agent.
 
 ## License
 

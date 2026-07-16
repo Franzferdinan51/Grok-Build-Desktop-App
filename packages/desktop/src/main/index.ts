@@ -20,6 +20,7 @@ import { TelegramBridge } from "./telegram"
 import { LocalStudioController } from "./local-studio"
 import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
+import { GrokTaskScheduler } from "./scheduled-tasks"
 
 const APP_NAME = "Grok Build Desktop"
 const APP_ID = "ai.grokbuild.desktop"
@@ -29,6 +30,7 @@ let tray: Tray | null = null
 const backend = new GrokBuildBackend()
 const telegram = new TelegramBridge()
 const localStudio = new LocalStudioController()
+const scheduler = new GrokTaskScheduler(backend)
 let logger: ReturnType<typeof initLogging>
 
 // ── Window factory ────────────────────────────────────────────────────────────
@@ -99,6 +101,7 @@ app.whenReady().then(async () => {
   // Set up app menu
   const menu = createMenu(mainWindow)
   Menu.setApplicationMenu(menu)
+  scheduler.start()
 
   app.on("activate", () => {
     // macOS: re-create window when dock icon is clicked and no windows exist
@@ -118,4 +121,5 @@ app.on("window-all-closed", () => {
 app.on("before-quit", async () => {
   writeLog("info", "App quitting — stopping Grok Build task")
   backend.cancel()
+  scheduler.stop()
 })

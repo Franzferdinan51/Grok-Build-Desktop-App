@@ -12,6 +12,7 @@ import { execFile, spawn, type ChildProcess } from "child_process"
 import { promisify } from "util"
 import { write as writeLog } from "./logging"
 import { resolveGrokBuild } from "./grok-build-resolver"
+import { providerSecretEnvironment } from "./model-secrets"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -42,6 +43,8 @@ export type RunTaskInput = {
 
 export class GrokBuildBackend {
   private current: ChildProcess | null = null
+
+  isRunning(): boolean { return this.current !== null }
 
   private command(): string {
     return process.env.GROK_BUILD_PATH || "grok"
@@ -93,7 +96,7 @@ export class GrokBuildBackend {
 
     const command = this.command()
     writeLog("info", `Starting Grok Build task in ${input.cwd}`)
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] })
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...providerSecretEnvironment() } })
     this.current = child
     let buffer = ""
     let stderr = ""

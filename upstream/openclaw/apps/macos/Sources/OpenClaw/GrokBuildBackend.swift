@@ -92,6 +92,7 @@ final class GrokBuildBackend: ObservableObject {
         let outputPipe = Pipe()
         task.standardOutput = outputPipe
         task.standardError = outputPipe
+        task.environment = ProcessInfo.processInfo.environment.merging(GrokProviderKeyStore.environment) { _, secure in secure }
 
         let configuredPath = ProcessInfo.processInfo.environment["GROK_BUILD_PATH"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)

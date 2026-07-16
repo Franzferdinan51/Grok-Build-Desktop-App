@@ -19,6 +19,12 @@ export type GrokRunRecord = {
   error?: string
 }
 
+export type ScheduledGrokTask = {
+  id: string; name: string; prompt: string; cwd: string; model?: string
+  runAt: number; repeatMinutes?: number; enabled: boolean
+  lastRunAt?: number; nextRunAt: number; lastStatus?: "completed" | "failed"
+}
+
 type StoreSchema = {
   runs: GrokRunRecord[]
   ui: {
@@ -27,6 +33,7 @@ type StoreSchema = {
   }
   grok: {
     cliPath?: string
+    providerSecrets?: Record<string, { label: string; envKey: string; encrypted: string }>
   }
   lmstudio: {
     baseUrl: string
@@ -38,6 +45,7 @@ type StoreSchema = {
     token?: string
   }
   projects: { id: string; name: string; path: string; addedAt: number }[]
+  schedules: ScheduledGrokTask[]
 }
 
 let _store: Store<StoreSchema> | null = null
@@ -46,7 +54,7 @@ export function getStore(): Store<StoreSchema> {
   if (!_store) {
     _store = new Store<StoreSchema>({
       name: "grok-build-desktop",
-      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, localStudio: { baseUrl: "" }, telegram: {}, projects: [] },
+      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, localStudio: { baseUrl: "" }, telegram: {}, projects: [], schedules: [] },
       clearInvalidConfig: true,
     })
   }

@@ -1,6 +1,6 @@
 import { createSignal, For, Show, onMount } from "solid-js"
 import type { Accessor } from "solid-js"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokSkill, ScheduledGrokTask, ProviderSecret } from "../preload"
 import "./styles.css"
 
 type TaskLog = { kind: "text" | "thought" | "error"; content: string }
@@ -9,8 +9,11 @@ const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },
   { id: "runs", label: "Grok runs", icon: "◴" },
   { id: "review", label: "Review", icon: "⌘" },
+  { id: "skills", label: "Skills", icon: "◇" },
+  { id: "scheduled", label: "Scheduled", icon: "◷" },
   { id: "runtime", label: "Local runtimes", icon: "▣" },
   { id: "telegram", label: "Telegram", icon: "✈" },
+  { id: "settings", label: "Settings", icon: "⚙" },
 ]
 
 export function App(props: { backendStatus: Accessor<BackendStatus> }) {
@@ -31,6 +34,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [localStudio, setLocalStudio] = createSignal<LocalStudioSnapshot>({ configured: false, reachable: false, baseUrl: "" })
   const [catalog, setCatalog] = createSignal<GrokBuildModelCatalog>({ models: [] })
   const [model, setModel] = createSignal("")
+  const [skills, setSkills] = createSignal<GrokSkill[]>([])
+  const [schedules, setSchedules] = createSignal<ScheduledGrokTask[]>([])
+  const [providerSecrets, setProviderSecrets] = createSignal<ProviderSecret[]>([])
+  const [scheduleName, setScheduleName] = createSignal("")
+  const [schedulePrompt, setSchedulePrompt] = createSignal("")
+  const [scheduleAt, setScheduleAt] = createSignal("")
+  const [repeatMinutes, setRepeatMinutes] = createSignal(0)
+  const [secretDrafts, setSecretDrafts] = createSignal<Record<string, string>>({})
 
   onMount(async () => {
     const savedWorkspace = await window.api.store.get<string>("workspace.last")
@@ -44,6 +55,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const runtime = await window.api.localStudio.status()
     setLocalStudio(runtime); setLocalStudioURL(runtime.baseUrl)
     setCatalog(await window.api.backend.models())
+    setSkills(await window.api.skills.list(savedWorkspace))
+    setSchedules(await window.api.schedules.list())
+    setProviderSecrets(await window.api.providerSecrets.list())
     window.api.backend.onEvent((event: BackendEvent) => {
       if (event.type === "text" && event.data) setEvents((old) => [...old, { kind: "text", content: event.data! }])
       if (event.type === "thought" && event.data) setEvents((old) => [...old, { kind: "thought", content: event.data! }])
@@ -88,6 +102,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await refreshLocalStudio()
   }
 
+  const createSchedule = async () => {
+    const when = Date.parse(scheduleAt())
+    if (!scheduleName().trim() || !schedulePrompt().trim() || !workspace() || !Number.isFinite(when)) return
+    await window.api.schedules.add({ name: scheduleName(), prompt: schedulePrompt(), cwd: workspace(), model: model() || undefined, runAt: when, repeatMinutes: repeatMinutes() || undefined })
+    setSchedules(await window.api.schedules.list()); setScheduleName(""); setSchedulePrompt("")
+  }
+
+  const saveSecret = async (id: string) => {
+    const value = secretDrafts()[id]
+    if (!value?.trim()) return
+    await window.api.providerSecrets.save(id, value); setSecretDrafts((old) => ({ ...old, [id]: "" })); setProviderSecrets(await window.api.providerSecrets.list())
+  }
+
   return <div class="app-root">
     <aside class="sidebar">
       <div class="brand"><span class="brand__mark">✦</span><span>Grok Build</span></div>
@@ -105,6 +132,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     </aside>
 
     <main class="main-content">
+      <Show when={active() === "skills"} fallback={
+      <Show when={active() === "scheduled"} fallback={
+      <Show when={active() === "settings"} fallback={
       <Show when={active() === "telegram"} fallback={
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
@@ -160,6 +190,23 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show>
           </Show>
           <p class="telegram-note">This release validates and stores the bot connection and can send a message through the main process. Inbound task routing is deliberately not auto-enabled until a chat allowlist is configured.</p>
+        </section>
+      </Show>
+      }>
+        <section class="runs-panel"><span class="eyebrow">GROK BUILD SETTINGS</span><h1>Models and provider credentials.</h1><p>Every provider remains a Grok Build model target. Keys are encrypted with the operating system and injected only into the Grok CLI process.</p>
+          <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.baseUrl} · {provider.envKey}</span></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove</button></Show></div></article>}</For>
+          <p class="telegram-note">Model names and endpoints are configured in Grok Build. This page secures credentials; the model picker is populated by <code>grok models</code>.</p>
+        </section>
+      </Show>
+      }>
+        <section class="runs-panel"><span class="eyebrow">GROK BUILD SCHEDULES</span><h1>Run coding tasks on a schedule.</h1><p>Schedules execute through Grok Build while the desktop app is running.</p>
+          <div class="form-grid"><input value={scheduleName()} onInput={(e) => setScheduleName(e.currentTarget.value)} placeholder="Task name"/><input type="datetime-local" value={scheduleAt()} onInput={(e) => setScheduleAt(e.currentTarget.value)}/><textarea value={schedulePrompt()} onInput={(e) => setSchedulePrompt(e.currentTarget.value)} placeholder="Coding task prompt"/><input type="number" min="0" value={repeatMinutes()} onInput={(e) => setRepeatMinutes(Number(e.currentTarget.value))} placeholder="Repeat minutes (optional)"/><button class="primary" onClick={createSchedule}>Create schedule</button></div>
+          <For each={schedules()}>{(task) => <article class="run-row"><div><strong>{task.name}</strong><span>{new Date(task.nextRunAt).toLocaleString()} · {task.cwd}</span></div><div class="row-actions"><button onClick={async () => { await window.api.schedules.toggle(task.id, !task.enabled); setSchedules(await window.api.schedules.list()) }}>{task.enabled ? "Pause" : "Enable"}</button><button onClick={async () => { await window.api.schedules.remove(task.id); setSchedules(await window.api.schedules.list()) }}>Delete</button></div></article>}</For>
+        </section>
+      </Show>
+      }>
+        <section class="runs-panel"><span class="eyebrow">GROK BUILD SKILLS</span><h1>Project and user skills.</h1><p>Discovered from Grok, agent, Claude, and Cursor-compatible skill directories. Project skills win on name conflicts.</p><button onClick={async () => setSkills(await window.api.skills.list(workspace()))}>Refresh</button>
+          <For each={skills()}>{(skill) => <article class="run-row"><div><strong>{skill.name}</strong><span>{skill.description || skill.path}</span></div><div class="skill-scope">{skill.scope}</div></article>}</For>
         </section>
       </Show>
     </main>

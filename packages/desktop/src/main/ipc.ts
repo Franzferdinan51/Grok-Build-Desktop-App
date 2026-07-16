@@ -6,6 +6,9 @@ import { LocalStudioController } from "./local-studio"
 import { addProject, inspectProject, listProjects, removeProject, type ProjectRecord } from "./projects"
 import type { GrokBuildBackend, RunTaskInput } from "./grok-build-backend"
 import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
+import { listGrokSkills } from "./grok-skills"
+import { addSchedule, listSchedules, removeSchedule, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
+import { listProviderSecrets, removeProviderSecret, saveProviderSecret } from "./model-secrets"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -35,6 +38,14 @@ export function registerIpcHandlers(deps: Deps): void {
     return { ok: true, runId: run.id, grokSessionId }
   })
   ipcMain.handle("grok-runs:list", () => listGrokRuns())
+  ipcMain.handle("grok-skills:list", (_event, workspace?: string) => listGrokSkills(workspace))
+  ipcMain.handle("schedules:list", () => listSchedules())
+  ipcMain.handle("schedules:add", (_event, input: NewSchedule) => addSchedule(input))
+  ipcMain.handle("schedules:remove", (_event, id: string) => removeSchedule(id))
+  ipcMain.handle("schedules:toggle", (_event, id: string, enabled: boolean) => toggleSchedule(id, enabled))
+  ipcMain.handle("provider-secrets:list", () => listProviderSecrets())
+  ipcMain.handle("provider-secrets:save", (_event, id: string, value: string) => saveProviderSecret(id, value))
+  ipcMain.handle("provider-secrets:remove", (_event, id: string) => removeProviderSecret(id))
 
   ipcMain.handle("telegram:status", () => deps.telegram().status())
   ipcMain.handle("telegram:connect", async (_event, token: string) => deps.telegram().connect(token))
