@@ -289,6 +289,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview")
       } catch (error) {
         setPreviewStatus(error instanceof Error ? error.message : String(error))
+        setPreviewOpen(false)
       }
     }
     setMoaEnabled((await window.api.store.get<boolean>("moa.enabled")) ?? false)
@@ -642,7 +643,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <section class="telegram-panel">
           <span class="eyebrow">TELEGRAM BOT CONNECTION</span><h1>Connect your coding workspace to Telegram.</h1>
           <p>Enter a BotFather token. It is verified with <code>getMe</code> and stored only through macOS credential encryption.</p>
-          <Show when={!telegram().connected} fallback={<><div class="connected">Connected as @{telegram().username ?? "bot"}</div><button onClick={async () => { await window.api.telegram.disconnect(); setTelegram({ connected: false }) }}>Disconnect</button></>}>
+          <Show when={!telegram().connected} fallback={<><div class="connected">Connected as @{telegram().username ?? "bot"}</div><div class="token-row"><button class="primary" onClick={async () => { const status = await window.api.telegram.status(); setTelegram(status); setTelegramNotice(status.connected ? `Connection verified · bot ${status.botId}` : status.error || "Connection failed") }}>Test connection</button><button onClick={async () => { await window.api.telegram.disconnect(); setTelegram({ connected: false }); setTelegramNotice("") }}>Disconnect</button></div><Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show></>}>
             <div class="token-row"><input type="password" value={token()} onInput={(event) => setToken(event.currentTarget.value)} placeholder="123456:ABC…" /><button class="primary" disabled={!token().trim()} onClick={connectTelegram}>Connect bot</button></div>
             <Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show>
           </Show>

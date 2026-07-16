@@ -37,6 +37,10 @@ assert.match(await (await fetch(previewAddress.url)).text(), /preview works/)
 assert.equal((await fetch(`${previewAddress.url}/escape`)).status, 404)
 await preview.stop()
 
+const plainRoot = await mkdtemp(join(tmpdir(), "grok-build-desktop-plain-"))
+await writeFile(join(plainRoot, "readme.txt"), "not a repository")
+assert.deepEqual(await gitChangedFiles(plainRoot), [])
+
 assert.deepEqual(splitThinking([
   { kind: "text", content: "<thi" },
   { kind: "text", content: "nk>private reasoning</think>Public answer" },

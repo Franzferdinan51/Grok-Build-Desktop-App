@@ -41,7 +41,13 @@ export async function runWorkspaceCommand(root: string, command: string): Promis
 
 export async function gitChangedFiles(root: string): Promise<{ status: string; path: string }[]> {
   const cwd = await realpath(root)
-  const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd, timeout: 10_000 })
+  let stdout: string
+  try { ({ stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd, timeout: 10_000 })) }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/not a git repository/i.test(message)) return []
+    throw error
+  }
   return stdout.split(/\r?\n/).filter(Boolean).map((line) => ({ status: line.slice(0, 2).trim() || "M", path: line.slice(3).replace(/^.* -> /, "") }))
 }
 export async function gitFileDiff(root: string, path: string): Promise<string> {
