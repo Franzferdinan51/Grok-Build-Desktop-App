@@ -18,12 +18,15 @@ Cross-platform, local-first coding workbench powered exclusively by **Grok Build
 - Optional Hermes-inspired Mixture of Agents mode using Grok Build's native `--best-of-n`: 2–10 parallel candidate solutions with a synthesized winner.
 - MoA appears as a virtual model family in the main picker (Fast ×2, Balanced ×3, Thorough ×5, Exhaustive ×8) while retaining the selected Grok model underneath.
 - Persistent coding-agent defaults for model, reasoning, self-verification, maximum turns, web access, and approval policy.
+- Durable workspace goals combining Grok/Hermes standing-goal semantics with Codex-style status control and progress across runs.
 
 ## Chat workflow
 
 Each workspace has its own locally persisted conversation. Grok Build output streams into the thread, `thought` events and `<think>…</think>` blocks stay collapsed by default, and a second instruction entered during a run is queued and drained automatically. Press **Enter** to send, **Shift+Enter** for a new line, use arrow up/down at the input boundary to browse prompt history, and choose **New chat** to clear only the active workspace conversation.
 
 Type `/` to open the command palette. Arrow keys select a command and Enter or Tab completes it. Desktop commands such as `/new`, `/model`, `/think`, `/moa`, `/preview`, `/terminal`, and `/settings` execute locally; discovered skill commands are sent through Grok Build.
+
+Use `/goal <objective>` to create a durable workspace goal. `/goal status`, `/goal pause`, `/goal resume`, `/goal done`, and `/goal clear` manage it. While active, the goal is persisted, shown above the composer, carried into every Grok Build run, and automatically enables final self-verification.
 
 ## Install
 

@@ -7,6 +7,7 @@ import "./styles.css"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
 type QueuedPrompt = { id: string; text: string }
+type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 
 const NAV = [
   { id: "new-task", label: "New task", icon: "✦" },
@@ -86,6 +87,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [selfVerify, setSelfVerify] = createSignal(false)
   const [maxTurns, setMaxTurns] = createSignal(0)
   const [webSearchEnabled, setWebSearchEnabled] = createSignal(true)
+  const [goal, setGoal] = createSignal<WorkspaceGoal | null>(null)
   let messagesElement: HTMLDivElement | undefined
 
   createEffect(() => {
@@ -101,6 +103,13 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const saveConversation = async (next: ChatMessage[]) => {
     setMessages(next)
     if (workspace()) await window.api.store.set(conversationKey(), next)
+  }
+  const goalKey = (root = workspace()) => `goal.${encodeURIComponent(root)}`
+  const loadGoal = async (root: string) => setGoal((await window.api.store.get<WorkspaceGoal>(goalKey(root))) ?? null)
+  const saveGoal = async (next: WorkspaceGoal | null) => {
+    setGoal(next)
+    if (!workspace()) return
+    if (next) await window.api.store.set(goalKey(), next); else await window.api.store.delete(goalKey())
   }
 
   const slashMatches = () => matchingSlashCommands(prompt(), [
@@ -146,6 +155,20 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         setSlashNotice(`Mixture of Agents enabled with ${count} candidates`)
       }
     }
+    else if (command.name === "goal") {
+      const action = parsed.args.toLowerCase()
+      const current = goal()
+      if (!parsed.args || action === "status") setSlashNotice(current ? `Goal: ${current.objective}\nStatus: ${current.status} · ${current.iterations} run${current.iterations === 1 ? "" : "s"}` : "No goal is set for this workspace")
+      else if (action === "clear") { await saveGoal(null); setSlashNotice("Workspace goal cleared") }
+      else if (action === "pause" || action === "resume" || action === "done" || action === "complete") {
+        if (!current) setSlashNotice("No workspace goal is set")
+        else { const status = action === "pause" ? "paused" : action === "resume" ? "active" : "completed"; await saveGoal({ ...current, status, updatedAt: Date.now() }); setSlashNotice(`Goal ${status}`) }
+      } else {
+        const next: WorkspaceGoal = { objective: parsed.args, status: "active", iterations: 0, createdAt: Date.now(), updatedAt: Date.now() }
+        await saveGoal(next); setSlashNotice(`Goal set: ${parsed.args}`)
+        queueMicrotask(() => void run(`Begin working toward this goal: ${parsed.args}`))
+      }
+    }
     else if (command.name === "preview") {
       const next = setToggle(parsed.args, previewOpen()); setPreviewEnabled(true); setPreviewOpen(next)
       await window.api.store.set("preview.enabled", true); setSlashNotice(`Preview ${next ? "opened" : "closed"}`)
@@ -173,6 +196,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setWorkspace(current.path)
       await window.api.store.set("workspace.last", current.path)
       await loadConversation(current.path)
+      await loadGoal(current.path)
     }
     setTelegram(await window.api.telegram.status())
     setRuns(await window.api.grokRuns.list())
@@ -239,7 +263,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await saveConversation([...messages(), { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
     setPrompt(""); setEvents([]); setRunning(true)
     try {
-      await window.api.backend.run({ prompt: submitted, cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), bestOfN: moaEnabled() ? moaCandidates() : undefined, selfVerify: selfVerify(), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled() })
+      const activeGoal = goal()?.status === "active" ? goal() : null
+      const executionPrompt = activeGoal ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.` : submitted
+      await window.api.backend.run({ prompt: executionPrompt, cwd: workspace(), model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), bestOfN: moaEnabled() ? moaCandidates() : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled() })
+      if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
       setEvents((old) => [...old, { kind: "error", content: (error as Error).message }])
     } finally {
@@ -331,6 +358,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (active() === "review") await refreshDiff(project.path)
     if (active() === "skills") setSkills(await window.api.skills.list(project.path))
     await loadConversation(project.path)
+    await loadGoal(project.path)
   }
 
   const selectProject = async (project: ProjectSnapshot) => {
@@ -390,6 +418,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             </Show>
           </div>
         </section>
+        <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => setQueuedPrompts((old) => old.filter((item) => item.id !== entry.id))}>×</button></div>}</For></section></Show>
         <section class="chat-composer chat-composer--docked" aria-label="Grok Build task composer">
           <div class="chat-composer__context">
