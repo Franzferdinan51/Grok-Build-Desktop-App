@@ -92,11 +92,11 @@ export class GrokBuildBackend {
   async startOAuth(provider: "xai" | "openai" | "minimax"): Promise<{ ok: boolean; message: string }> {
     const status = await this.status()
     if (provider === "xai" && !status.available) throw new Error(status.error)
-    const executable = provider === "xai" ? status.command : "hermes"
-    const oauthArgs = provider === "xai" ? ["--oauth"] : ["auth", "add", provider === "openai" ? "openai-codex" : "minimax-oauth", "--type", "oauth"]
+    const executable = provider === "xai" ? status.command : provider === "minimax" ? "mmx" : "hermes"
+    const oauthArgs = provider === "xai" ? ["--oauth"] : provider === "minimax" ? ["auth", "login", "--recommend", "--region=global"] : ["auth", "add", "openai-codex", "--type", "oauth"]
     if (provider !== "xai") {
       try { await execFileAsync(executable, ["auth", "--help"], { timeout: 10_000 }) }
-      catch { throw new Error("Hermes Agent is required for this OAuth flow. Install Hermes, then try again.") }
+      catch { throw new Error(provider === "minimax" ? "MiniMax’s official mmx CLI is required for this OAuth flow." : "Hermes Agent is required for this OAuth flow. Install Hermes, then try again.") }
     }
     if (process.platform === "darwin") {
       const command = [executable, ...oauthArgs].map((part) => JSON.stringify(part)).join(" ")
@@ -106,7 +106,7 @@ export class GrokBuildBackend {
     } else {
       const child = spawn(executable, oauthArgs, { detached: true, stdio: "ignore" }); child.unref()
     }
-    const label = provider === "xai" ? "xAI" : provider === "openai" ? "OpenAI Codex" : "MiniMax Coding Plan"
+    const label = provider === "xai" ? "xAI" : provider === "openai" ? "OpenAI Codex" : "MiniMax"
     return { ok: true, message: `${label} OAuth opened in Terminal. Finish browser sign-in, then return to the app.` }
   }
 
