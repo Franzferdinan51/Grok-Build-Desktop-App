@@ -14,6 +14,7 @@ async function telegramRequest<T>(url: string, init?: RequestInit): Promise<T> {
 
 export class TelegramBridge {
   private polling = false
+  private pollGeneration = 0
   private offset = 0
   private handler?: (chatId: string, text: string) => Promise<string | TelegramReply>
   private unauthorizedNotified = new Set<string>()
@@ -24,12 +25,14 @@ export class TelegramBridge {
   setAllowedChats(chatIds: string[]): string[] {
     const allowedChatIds = [...new Set(chatIds.map((id) => id.trim()).filter((id) => /^-?\d+$/.test(id)))]
     getStore().set("telegram", { ...getStore().get("telegram"), allowedChatIds, pendingChatIds: this.pendingChats().filter((id) => !allowedChatIds.includes(id)) })
+    for (const id of allowedChatIds) this.unauthorizedNotified.delete(id)
     return allowedChatIds
   }
   private token(): string | undefined {
     const encrypted = getStore().get("telegram").token
     if (!encrypted || !safeStorage.isEncryptionAvailable()) return undefined
-    return safeStorage.decryptString(Buffer.from(encrypted, "base64"))
+    try { return safeStorage.decryptString(Buffer.from(encrypted, "base64")) }
+    catch { return undefined }
   }
 
   async status(): Promise<TelegramStatus> {
@@ -60,13 +63,14 @@ export class TelegramBridge {
   start(): void {
     if (this.polling || !this.token()) return
     this.polling = true
+    const generation = ++this.pollGeneration
     void this.configureCommands()
-    void this.poll()
+    void this.poll(generation)
   }
-  stop(): void { this.polling = false }
+  stop(): void { this.polling = false; this.pollGeneration++ }
 
-  private async poll(): Promise<void> {
-    while (this.polling) {
+  private async poll(generation: number): Promise<void> {
+    while (this.polling && generation === this.pollGeneration) {
       try {
         const token = this.token()
         if (!token) return
@@ -95,7 +99,7 @@ export class TelegramBridge {
           catch (error) { await this.send(chatId, `Task failed: ${error instanceof Error ? error.message : String(error)}`) }
         }
       } catch (error) {
-        if (!this.polling) return
+        if (!this.polling || generation !== this.pollGeneration) return
         await new Promise((resolve) => setTimeout(resolve, 2_000))
       }
     }

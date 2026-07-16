@@ -42,13 +42,17 @@ export async function runWorkspaceCommand(root: string, command: string): Promis
 export async function gitChangedFiles(root: string): Promise<{ status: string; path: string }[]> {
   const cwd = await realpath(root)
   let stdout: string
-  try { ({ stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd, timeout: 10_000 })) }
-  catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (/not a git repository/i.test(message)) return []
-    throw error
+  try { ({ stdout } = await execFileAsync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=normal"], { cwd, timeout: 10_000 })) }
+  catch { return [] }
+  const records = stdout.split("\0").filter(Boolean)
+  const changes: { status: string; path: string }[] = []
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index]!
+    const status = record.slice(0, 2).trim() || "M"
+    changes.push({ status, path: record.slice(3) })
+    if (/^[RC]/.test(status) || /[RC]$/.test(status)) index++
   }
-  return stdout.split(/\r?\n/).filter(Boolean).map((line) => ({ status: line.slice(0, 2).trim() || "M", path: line.slice(3).replace(/^.* -> /, "") }))
+  return changes
 }
 export async function gitFileDiff(root: string, path: string): Promise<string> {
   const cwd = await realpath(root); await safePath(cwd, path)

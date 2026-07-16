@@ -528,10 +528,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
   const connectTelegram = async () => {
     setTelegramNotice("")
-    const status = await window.api.telegram.connect(token())
-    setTelegram(status)
-    setToken("")
-    setTelegramNotice(status.connected ? `Connected as @${status.username ?? "bot"}` : status.error ?? "Could not connect")
+    try {
+      const status = await window.api.telegram.connect(token())
+      setTelegram(status)
+      setToken("")
+      setTelegramNotice(status.connected ? `Connected as @${status.username ?? "bot"}` : status.error ?? "Could not connect")
+    } catch (error) { setTelegramNotice(error instanceof Error ? error.message : String(error)) }
   }
 
   const refreshLocalStudio = async () => setLocalStudio(await window.api.localStudio.status())
@@ -570,14 +572,18 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const runCommand = async () => {
     if (!workspace() || !terminalCommand().trim() || terminalRunning()) return
     setTerminalRunning(true); const command = terminalCommand(); setTerminalOutput((old) => `${old}${old ? "\n" : ""}$ ${command}\n`)
-    const result = await window.api.workspace.command(workspace(), command); const output = result.stdout + result.stderr
-    setTerminalOutput((old) => old + output + `\n[exit ${result.code}]\n`); setTerminalRunning(false)
-    const detected = output.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(?:\/[^\s]*)?/i)?.[0]
-    if (detected && previewEnabled()) {
-      const url = detected.replace("0.0.0.0", "127.0.0.1")
-      setPreviewURL(url); setPreviewDraft(url); setPreviewOpen(true); setPreviewStatus("Detected dev server")
-      await window.api.store.set("preview.url", url)
-    }
+    try {
+      const result = await window.api.workspace.command(workspace(), command); const output = result.stdout + result.stderr
+      setTerminalOutput((old) => old + output + `\n[exit ${result.code}]\n`)
+      const detected = output.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(?:\/[^\s]*)?/i)?.[0]
+      if (detected && previewEnabled()) {
+        const url = detected.replace("0.0.0.0", "127.0.0.1")
+        setPreviewURL(url); setPreviewDraft(url); setPreviewOpen(true); setPreviewStatus("Detected dev server")
+        await window.api.store.set("preview.url", url)
+      }
+    } catch (error) {
+      setTerminalOutput((old) => `${old}${error instanceof Error ? error.message : String(error)}\n[command failed]\n`)
+    } finally { setTerminalRunning(false) }
   }
   const refreshDiff = async (root = workspace()) => { if (root) { setGitChanges(await window.api.workspace.gitChanges(root)); setSelectedDiff(""); setDiffContent("") } }
 

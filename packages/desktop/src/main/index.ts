@@ -180,8 +180,11 @@ app.whenReady().then(async () => {
     try {
       const update = await backend.checkUpdate()
       if (update.updateAvailable) {
+        const attemptedTarget = getStore().get("grok.lastAutoUpdateTarget") as string | undefined
+        if (attemptedTarget === `${update.channel}:${update.latestVersion}`) return
         writeLog("info", `Updating Grok Build ${update.currentVersion} → ${update.latestVersion} (${update.channel})`)
         await backend.installUpdate((getStore().get("grok.updateChannel") as "stable" | "alpha" | undefined) || "stable")
+        getStore().set("grok.lastAutoUpdateTarget", `${update.channel}:${update.latestVersion}`)
       }
     } catch (error) { writeLog("error", `Automatic Grok Build update failed: ${String(error)}`) }
   }

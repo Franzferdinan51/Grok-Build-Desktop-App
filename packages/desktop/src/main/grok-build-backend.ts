@@ -52,6 +52,7 @@ export type RunTaskInput = {
 
 export class GrokBuildBackend {
   private current: ChildProcess | null = null
+  private cancelRequested = false
   private moaAbort: AbortController | null = null
   private readonly codexBridge = new CodexOAuthBridge()
 
@@ -162,6 +163,7 @@ export class GrokBuildBackend {
           onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed.\n${stdout.trim()}` })
           return `## Reference ${index + 1} — ${referenceModel}\n${stdout.trim()}`
         }))
+        if (this.cancelRequested) { this.cancelRequested = false; return }
         const answers = candidates.flatMap((candidate, index) => {
           if (candidate.status === "fulfilled") return [candidate.value]
           const reason = candidate.reason instanceof Error ? candidate.reason.message : String(candidate.reason)
@@ -192,8 +194,16 @@ export class GrokBuildBackend {
       writeLog("info", `Starting Grok Build task in ${input.cwd}`)
       const child = spawn(command, childArgs, { stdio: ["ignore", "pipe", "pipe"], env: this.environment() })
       this.current = child
+      this.cancelRequested = false
       let buffer = ""
       let stderr = ""
+      let settled = false
+      const finish = (callback: () => void) => {
+        if (settled) return
+        settled = true
+        if (this.current === child) this.current = null
+        callback()
+      }
       const emitLines = (chunk: Buffer) => {
         buffer += chunk.toString()
         const lines = buffer.split("\n")
@@ -209,12 +219,13 @@ export class GrokBuildBackend {
       }
       child.stdout?.on("data", emitLines)
       child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-1_000_000) })
-      child.on("error", reject)
-      child.on("exit", (code) => {
-        this.current = null
+      child.on("error", (error) => finish(() => reject(error)))
+      child.on("exit", (code, signal) => {
         if (buffer.trim()) emitLines(Buffer.from("\n"))
-        if (code === 0) resolve(stderr)
-        else reject(new Error(stderr.trim() || `Grok Build exited ${code}`))
+        const cancelled = this.cancelRequested && (signal === "SIGTERM" || signal === "SIGKILL" || code === null)
+        this.cancelRequested = false
+        if (code === 0 || cancelled) finish(() => resolve(stderr))
+        else finish(() => reject(new Error(stderr.trim() || `Grok Build exited ${code ?? `from ${signal || "an unknown signal"}`}`)))
       })
     })
 
@@ -228,11 +239,14 @@ export class GrokBuildBackend {
   }
 
   cancel(): void {
+    if (this.moaAbort) this.cancelRequested = true
     this.moaAbort?.abort()
     this.moaAbort = null
     if (!this.current) return
-    this.current.kill("SIGTERM")
-    this.current = null
+    const child = this.current
+    this.cancelRequested = true
+    child.kill("SIGTERM")
+    setTimeout(() => { if (this.current === child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL") }, 2_000).unref()
   }
 
   async shutdown(): Promise<void> {
