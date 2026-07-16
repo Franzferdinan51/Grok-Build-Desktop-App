@@ -8,7 +8,7 @@ There are two maintained desktop targets: the native macOS app based on OpenClaw
 
 - **Native OpenClaw desktop base** — dashboard, channel, skill, schedule, approval, gateway, and settings information architecture comes from the actual MIT OpenClaw macOS application, not a look-alike.
 - **Cross-platform Hermes Electron base** — the full MIT Hermes Desktop source is vendored under `upstream/hermes`; its hardened Electron, project, review, preview, and packaging patterns drive the Windows/Linux-compatible implementation.
-- **Grok Build backend** — every actionable coding task in both targets runs the documented headless interface: `grok -p … --output-format streaming-json`. Persistent run history records the resulting Grok CLI session when supplied. No undocumented JSON-RPC or replacement agent backend is invented.
+- **Grok Build backend** — every actionable coding task in both targets runs the documented headless interface: `grok -p … --output-format streaming-json`. Both native and Electron persist local run history and record the resulting Grok CLI session when supplied. No undocumented JSON-RPC or replacement agent backend is invented.
 - **Grok-first coding flow** — workspace picker, prompt composer, stream output, reasoning-effort option, and an explicit auto-approve toggle that maps to Grok Build’s documented `--yolo` flag.
 - **LM Studio first-class** — visible local-endpoint mode and provider configuration. It does not launch or shotgun-load models; model loading remains under the local LM Studio server’s control.
 - **Telegram bot connection** — validates a BotFather token with `getMe`, stores it only with Electron `safeStorage`, and supports sending through Telegram’s Bot API. Inbound routing stays off until a chat allowlist is added.

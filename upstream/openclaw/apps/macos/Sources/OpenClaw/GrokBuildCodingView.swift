@@ -3,6 +3,7 @@ import SwiftUI
 
 struct GrokBuildCodingView: View {
     @StateObject private var backend = GrokBuildBackend()
+    @ObservedObject private var runStore = GrokRunStore.shared
     @State private var prompt = ""
     @State private var workspace: URL?
     @State private var model = ""
@@ -79,6 +80,25 @@ struct GrokBuildCodingView: View {
                     .textSelection(.enabled)
             }
             .frame(minHeight: 220)
+
+            if !self.runStore.runs.isEmpty {
+                Divider()
+                Text("Recent Grok Build runs")
+                    .font(.headline)
+                ForEach(self.runStore.runs.prefix(5)) { run in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(run.prompt).lineLimit(1)
+                            Text(run.workspacePath).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Text(run.status.rawValue.capitalized)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(run.status == .completed ? .green : run.status == .failed ? .red : .secondary)
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
         }
         .padding(20)
         .frame(minWidth: 720, minHeight: 560)

@@ -19,6 +19,8 @@ final class GrokBuildBackend: ObservableObject {
     @Published private(set) var output = ""
 
     private var process: Process?
+    private var currentRunID: UUID?
+    private var currentSessionID: String?
 
     func run(
         prompt: String,
@@ -38,6 +40,8 @@ final class GrokBuildBackend: ObservableObject {
         self.cancel()
         self.output = ""
         self.state = .running
+        self.currentSessionID = nil
+        self.currentRunID = GrokRunStore.shared.start(prompt: prompt, workspace: workspace, model: model)
 
         let task = Process()
         let outputPipe = Pipe()
@@ -68,7 +72,15 @@ final class GrokBuildBackend: ObservableObject {
         task.terminationHandler = { [weak self] completedTask in
             Task { @MainActor in
                 guard let self, self.process === completedTask else { return }
+                let runID = self.currentRunID
+                let sessionID = self.currentSessionID
                 self.process = nil
+                self.currentRunID = nil
+                GrokRunStore.shared.finish(
+                    id: runID ?? UUID(),
+                    status: completedTask.terminationStatus == 0 ? .completed : .failed,
+                    sessionID: sessionID,
+                    error: completedTask.terminationStatus == 0 ? nil : "Grok Build exited \(completedTask.terminationStatus)")
                 self.state = .completed(completedTask.terminationStatus)
             }
         }
@@ -89,6 +101,10 @@ final class GrokBuildBackend: ObservableObject {
                 }
             }
         } catch {
+            if let runID = self.currentRunID {
+                GrokRunStore.shared.finish(id: runID, status: .failed, error: error.localizedDescription)
+            }
+            self.currentRunID = nil
             self.state = .unavailable("Could not start Grok Build: \(error.localizedDescription)")
         }
     }
@@ -96,14 +112,26 @@ final class GrokBuildBackend: ObservableObject {
     func cancel() {
         guard let process else { return }
         process.terminate()
+        if let runID = self.currentRunID {
+            GrokRunStore.shared.finish(id: runID, status: .cancelled, sessionID: self.currentSessionID)
+        }
+        self.currentRunID = nil
         self.process = nil
         self.state = .idle
     }
 
     private func appendStreamingLine(_ line: String) {
+        self.captureSessionID(from: line)
         let display = Self.displayText(for: line)
         guard !display.isEmpty else { return }
         self.output += (self.output.isEmpty ? "" : "\n") + display
+    }
+
+    private func captureSessionID(from line: String) {
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        self.currentSessionID = (object["session_id"] as? String) ?? (object["sessionId"] as? String) ?? self.currentSessionID
     }
 
     private static func displayText(for line: String) -> String {

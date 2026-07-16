@@ -6,7 +6,7 @@ Grok Build Desktop ships two maintained implementations without removing either:
 | --- | --- | --- | --- |
 | Coding workspace and task composer | `GrokBuildCodingView` | Grok Build composer | Grok Build headless CLI only |
 | Task stream and stop | Native streaming output | IPC streaming output | `streaming-json`; no fake RPC |
-| Grok run history | Native task surface | persistent run history with CLI session ids | every persisted coding task originates from Grok Build |
+| Grok run history | persistent native run history with CLI session ids | persistent run history with CLI session ids | every persisted coding task originates from Grok Build |
 | Projects / Git review | OpenClaw desktop shell + migration work | persistent projects, branch/change count, diff stat | local filesystem/Git only |
 | Skills, schedules, approvals, channels | OpenClaw native information architecture | Hermes desktop information architecture port | must remain explicit and user-controlled |
 | Telegram | OpenClaw channel foundation | encrypted Bot API bridge; allowlist pending | no implicit inbound routing |
