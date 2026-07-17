@@ -12,6 +12,7 @@ export type GrokSkill = { name: string; description: string; path: string; scope
 export type ScheduledGrokTask = { id: string; name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number; enabled: boolean; lastRunAt?: number; nextRunAt: number; lastStatus?: "completed" | "failed" }
 export type ProviderSecret = { id: string; label: string; envKey: string; baseUrl: string; modelId: string; configured: boolean }
 export type WorkspaceFile = { path: string; size: number }
+export type StoredChatThread = { id: string; workspace: string; title: string; createdAt: number; updatedAt: number; messages: { id: string; role: "user" | "assistant"; logs: { kind: "text" | "thought" | "error"; content: string }[]; createdAt: number }[]; sessionId: string; model?: string; summary?: string; pinned?: boolean; archived?: boolean; sessionStatus?: "new" | "resumable" | "recovered" | "broken" }
 
 export type ElectronAPI = {
   backend: {
@@ -38,6 +39,7 @@ export type ElectronAPI = {
   }
   projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; scratch: () => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
   grokRuns: { list: () => Promise<GrokRunRecord[]> }
+  conversations: { list: (workspace?: string) => Promise<StoredChatThread[]>; get: (id: string) => Promise<StoredChatThread | undefined>; save: (thread: StoredChatThread) => Promise<StoredChatThread>; search: (query: string, workspace?: string) => Promise<StoredChatThread[]>; export: (id: string) => Promise<{ saved: boolean; path?: string }> }
   skills: { list: (workspace?: string) => Promise<GrokSkill[]> }
   schedules: { list: () => Promise<ScheduledGrokTask[]>; add: (input: { name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number }) => Promise<ScheduledGrokTask>; remove: (id: string) => Promise<void>; toggle: (id: string, enabled: boolean) => Promise<void>; runNow: (id: string) => Promise<void> }
   providerSecrets: { list: () => Promise<ProviderSecret[]>; save: (id: string, value: string) => Promise<void>; saveSettings: (id: string, baseUrl: string, modelId: string) => Promise<void>; remove: (id: string) => Promise<void>; test: (id: string) => Promise<{ ok: boolean; models?: number; message: string }> }
@@ -76,6 +78,7 @@ const api: ElectronAPI = {
   },
   projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), scratch: () => ipcRenderer.invoke("projects:scratch"), remove: (id) => ipcRenderer.invoke("projects:remove", id) },
   grokRuns: { list: () => ipcRenderer.invoke("grok-runs:list") },
+  conversations: { list: (workspace) => ipcRenderer.invoke("conversations:list", workspace), get: (id) => ipcRenderer.invoke("conversations:get", id), save: (thread) => ipcRenderer.invoke("conversations:save", thread), search: (query, workspace) => ipcRenderer.invoke("conversations:search", query, workspace), export: (id) => ipcRenderer.invoke("conversations:export", id) },
   skills: { list: (workspace) => ipcRenderer.invoke("grok-skills:list", workspace) },
   schedules: { list: () => ipcRenderer.invoke("schedules:list"), add: (input) => ipcRenderer.invoke("schedules:add", input), remove: (id) => ipcRenderer.invoke("schedules:remove", id), toggle: (id, enabled) => ipcRenderer.invoke("schedules:toggle", id, enabled), runNow: (id) => ipcRenderer.invoke("schedules:run-now", id) },
   providerSecrets: { list: () => ipcRenderer.invoke("provider-secrets:list"), save: (id, value) => ipcRenderer.invoke("provider-secrets:save", id, value), saveSettings: (id, baseUrl, modelId) => ipcRenderer.invoke("provider-secrets:save-settings", id, baseUrl, modelId), remove: (id) => ipcRenderer.invoke("provider-secrets:remove", id), test: (id) => ipcRenderer.invoke("provider-secrets:test", id) },

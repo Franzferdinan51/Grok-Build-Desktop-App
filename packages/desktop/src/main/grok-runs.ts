@@ -3,6 +3,7 @@ import { getStore, type GrokRunRecord } from "./store"
 import { reconcileInterruptedRuns } from "./grok-run-utils"
 
 const MAX_RUNS = 100
+const MAX_STORED_PROMPT = 8_000
 
 export function recoverInterruptedGrokRuns(): void {
   const runs = listGrokRuns()
@@ -17,7 +18,7 @@ export function startGrokRun(input: { cwd: string; prompt: string; model?: strin
   const record: GrokRunRecord = {
     id: randomUUID(),
     cwd: input.cwd,
-    prompt: input.prompt,
+    prompt: input.prompt.length > MAX_STORED_PROMPT ? `${input.prompt.slice(0, MAX_STORED_PROMPT)}\n… [execution context omitted]` : input.prompt,
     model: input.model,
     startedAt: Date.now(),
     status: "running",

@@ -14,6 +14,7 @@ import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSched
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
 import { PreviewServer } from "./preview-server"
+import { exportConversation, getConversation, listConversations, saveConversation, searchConversations, type StoredChatThread } from "./conversation-store"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -81,6 +82,17 @@ export function registerIpcHandlers(deps: Deps): void {
     return { ok: true }
   })
   ipcMain.handle("grok-runs:list", () => listGrokRuns())
+  ipcMain.handle("conversations:list", (_event, workspace?: string) => listConversations(workspace))
+  ipcMain.handle("conversations:get", (_event, id: string) => getConversation(id))
+  ipcMain.handle("conversations:save", (_event, thread: StoredChatThread) => saveConversation(thread))
+  ipcMain.handle("conversations:search", (_event, query: string, workspace?: string) => searchConversations(query, workspace))
+  ipcMain.handle("conversations:export", async (_event, id: string) => {
+    const markdown = await exportConversation(id)
+    const result = await dialog.showSaveDialog({ defaultPath: "conversation.md", filters: [{ name: "Markdown", extensions: ["md"] }] })
+    if (result.canceled || !result.filePath) return { saved: false }
+    await writeFile(result.filePath, markdown)
+    return { saved: true, path: result.filePath }
+  })
   ipcMain.handle("grok-skills:list", (_event, workspace?: string) => listGrokSkills(workspace))
   ipcMain.handle("schedules:list", () => listSchedules())
   ipcMain.handle("schedules:add", (_event, input: NewSchedule) => addSchedule(input))

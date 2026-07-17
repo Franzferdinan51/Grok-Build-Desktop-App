@@ -8,11 +8,11 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 
 ### Agentic coding workspace
 
-- Per-project conversations with sanitized rich Markdown, code blocks, tables, images, streamed output, collapsed reasoning, prompt queues, copy/retry actions, and history recall.
+- Atomic per-conversation storage with sanitized rich Markdown, streamed output, collapsed reasoning, prompt queues, copy/retry actions, global search, rename, pin, archive, export, model/session labels, and cross-workspace history.
 - Start immediately in an isolated Scratch workspace or open an existing project.
 - Workspace file browser/editor, contained terminal, Git status, and per-file diffs.
 - Fixed header and composer with an independently scrolling chat transcript; every non-chat page, including the full Settings catalog, has its own reliable viewport scroll.
-- Grok session IDs persist per workspace and resume across turns, stops, relaunches, and project switches. If a saved native session becomes unavailable, the app automatically recovers from the recent local transcript instead of dropping continuity.
+- Grok session IDs are bound to each conversation and workspace and resume across turns, stops, relaunches, and project switches. Token-aware visible-only context and automatic checkpoints recover long conversations without injecting thoughts, advisor transcripts, preview DOM, action tags, or tool noise.
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
 - Searchable Grok run history, scheduled tasks, project skills, and durable workspace goals.
 - Slash-command palette with keyboard completion and dynamically discovered Grok Build skills.
@@ -116,7 +116,7 @@ Output is written to `packages/desktop/dist`.
 
 ## Chat workflow
 
-Each workspace has its own locally persisted conversation and resumable Grok session. Press **Enter** to send, **Shift+Enter** for a new line, and use Up/Down at the input boundary for prompt history. Messages submitted during a run are queued and drained automatically. Stopping a run preserves partial output and continuity for the next instruction; **New chat** deliberately clears both the transcript and backend session.
+Each conversation is stored atomically outside the settings file and owns its workspace, selected model, transcript, checkpoint, and resumable Grok session. Press **Enter** to send, **Shift+Enter** for a new line, and use Up/Down at the input boundary for prompt history. Messages submitted during a run are queued and drained automatically. Stopping a run preserves partial output and continuity for the next instruction; **New chat** archives the current conversation in History and starts a clean backend session.
 
 Type `/` for local commands. Important commands include:
 

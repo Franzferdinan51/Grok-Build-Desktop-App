@@ -2,17 +2,18 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
+import { checkpointFor, visibleConversationContext } from "./chat-context"
 import "./styles.css"
 import "./preview-layout.css"
 import "./branding.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
-type ChatThread = { id: string; title: string; createdAt: number; updatedAt: number; messages: ChatMessage[]; sessionId: string }
+type ChatThread = StoredChatThread & { messages: ChatMessage[] }
 type QueuedPrompt = { id: string; text: string }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type AdvancedSettings = { agent: string; agents: string; permissionMode: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow: string; deny: string; tools: string; disallowedTools: string; memory: "default" | "experimental" | "disabled"; sandbox: string; rules: string; systemPrompt: string; verbatim: boolean; forkSession: boolean; restoreCode: boolean; worktree: boolean; worktreeName: string; worktreeRef: string; jsonSchema: string; promptFile: string; promptJson: string; sessionId: string; noPlan: boolean }
@@ -54,6 +55,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [chatThreads, setChatThreads] = createSignal<ChatThread[]>([])
   const [activeThreadId, setActiveThreadId] = createSignal("")
   const [historyOpen, setHistoryOpen] = createSignal(false)
+  const [historySearch, setHistorySearch] = createSignal("")
+  const [historyAllWorkspaces, setHistoryAllWorkspaces] = createSignal(false)
+  const [historyResults, setHistoryResults] = createSignal<ChatThread[]>([])
   const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
   const [historyIndex, setHistoryIndex] = createSignal(-1)
   const [historyDraft, setHistoryDraft] = createSignal("")
@@ -143,6 +147,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   let unsubscribeBackend = () => {}
   let unsubscribeMenu = () => {}
   let backendWasAvailable = false
+  let saveChain = Promise.resolve()
+  let userNearBottom = true
 
   const mergeLogs = (target: TaskLog[], incoming: TaskLog[]): TaskLog[] => {
     if (!incoming.length) return target
@@ -173,7 +179,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     messages(); events()
     cancelAnimationFrame(scrollFrame)
     scrollFrame = requestAnimationFrame(() => {
-      if (messagesElement) messagesElement.scrollTop = messagesElement.scrollHeight
+      if (messagesElement && userNearBottom) messagesElement.scrollTop = messagesElement.scrollHeight
     })
   })
 
@@ -195,16 +201,23 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const persistThreads = async (root: string, next: ChatThread[], activeId: string) => {
     setChatThreads(next)
     setActiveThreadId(activeId)
-    await window.api.store.set(threadsKey(root), next)
+    saveChain = saveChain.then(async () => { for (const thread of next) await window.api.conversations.save(thread) })
+    await saveChain
     await window.api.store.set(activeThreadKey(root), activeId)
   }
   const loadConversation = async (root: string) => {
-    let stored = (await window.api.store.get<ChatThread[]>(threadsKey(root))) ?? []
+    let stored = await window.api.conversations.list(root) as ChatThread[]
+    const settingsThreads = (await window.api.store.get<ChatThread[]>(threadsKey(root))) ?? []
+    if (!stored.length && settingsThreads.length) {
+      stored = settingsThreads.map((thread) => ({ ...thread, workspace: root }))
+      for (const thread of stored) await window.api.conversations.save(thread)
+      await window.api.store.delete(threadsKey(root))
+    }
     const legacyMessages = (await window.api.store.get<ChatMessage[]>(conversationKey(root))) ?? []
     const legacySession = (await window.api.store.get<string>(sessionKey(root))) ?? ""
     if (!stored.length && (legacyMessages.length || legacySession)) {
       const now = legacyMessages.at(-1)?.createdAt || Date.now()
-      stored = [{ id: crypto.randomUUID(), title: threadTitle(legacyMessages), createdAt: legacyMessages[0]?.createdAt || now, updatedAt: now, messages: legacyMessages, sessionId: legacySession }]
+      stored = [{ id: crypto.randomUUID(), workspace: root, title: threadTitle(legacyMessages), createdAt: legacyMessages[0]?.createdAt || now, updatedAt: now, messages: legacyMessages, sessionId: legacySession, sessionStatus: legacySession ? "resumable" : "new" }]
     }
     const preferred = await window.api.store.get<string>(activeThreadKey(root))
     const selected = stored.find((thread) => thread.id === preferred) || stored[0]
@@ -222,7 +235,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const now = Date.now()
     const id = activeThreadId() || crypto.randomUUID()
     const current = chatThreads().find((thread) => thread.id === id)
-    const thread: ChatThread = { id, title: threadTitle(next), createdAt: current?.createdAt || now, updatedAt: now, messages: next, sessionId: sessionId() }
+    const thread: ChatThread = { ...current, id, workspace: root, title: current?.title && current.title !== "New chat" ? current.title : threadTitle(next), createdAt: current?.createdAt || now, updatedAt: now, messages: next, sessionId: sessionId(), model: model() || current?.model, sessionStatus: sessionId() ? "resumable" : current?.sessionStatus || "new" }
     const updated = [thread, ...chatThreads().filter((entry) => entry.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt)
     await persistThreads(root, updated, id)
     await window.api.store.set(conversationKey(root), next)
@@ -234,14 +247,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await window.api.store.set(sessionKey(root), nextSessionId)
     const id = activeThreadId()
     if (!id) return
-    const updated = chatThreads().map((thread) => thread.id === id ? { ...thread, sessionId: nextSessionId, updatedAt: Date.now() } : thread)
+    const updated = chatThreads().map((thread) => thread.id === id ? { ...thread, sessionId: nextSessionId, sessionStatus: "resumable" as const, updatedAt: Date.now() } : thread)
     await persistThreads(root, updated, id)
   }
   const newConversation = async () => {
     const root = workspace()
     const id = crypto.randomUUID()
     const now = Date.now()
-    const next = [{ id, title: "New chat", createdAt: now, updatedAt: now, messages: [], sessionId: "" }, ...chatThreads()]
+    const next: ChatThread[] = [{ id, workspace: root, title: "New chat", createdAt: now, updatedAt: now, messages: [], sessionId: "", model: model() || undefined, sessionStatus: "new" }, ...chatThreads()]
     if (root) await persistThreads(root, next, id)
     else { setChatThreads(next); setActiveThreadId(id) }
     setMessages([])
@@ -252,15 +265,37 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
   const openConversation = async (thread: ChatThread) => {
     if (running()) return
+    if (thread.workspace && thread.workspace !== workspace()) {
+      setWorkspace(thread.workspace)
+      setSelectedProject(projects().find((project) => project.path === thread.workspace) || null)
+      await window.api.store.set("workspace.last", thread.workspace)
+    }
     setMessages(thread.messages)
     setSessionId(thread.sessionId)
     setQueuedPrompts([]); setEvents([]); setHistoryOpen(false)
-    const root = workspace()
+    const root = thread.workspace || workspace()
     if (root) {
-      await persistThreads(root, chatThreads(), thread.id)
+      const workspaceThreads = await window.api.conversations.list(root) as ChatThread[]
+      setChatThreads(workspaceThreads)
+      setActiveThreadId(thread.id)
+      await window.api.store.set(activeThreadKey(root), thread.id)
       await window.api.store.set(conversationKey(root), thread.messages)
       if (thread.sessionId) await window.api.store.set(sessionKey(root), thread.sessionId); else await window.api.store.delete(sessionKey(root))
     }
+  }
+  const forkConversation = async (thread: ChatThread) => {
+    const now = Date.now()
+    const fork: ChatThread = { ...thread, id: crypto.randomUUID(), title: `${thread.title} (fork)`, createdAt: now, updatedAt: now, sessionId: "", sessionStatus: "new", pinned: false, archived: false }
+    await window.api.conversations.save(fork)
+    if (fork.workspace === workspace()) setChatThreads((current) => [fork, ...current])
+    await openConversation(fork)
+  }
+  const refreshHistory = async () => setHistoryResults(await window.api.conversations.search(historySearch(), historyAllWorkspaces() ? undefined : workspace()) as ChatThread[])
+  const updateThreadMeta = async (thread: ChatThread, patch: Partial<ChatThread>) => {
+    const updated = { ...thread, ...patch, updatedAt: Date.now() }
+    await window.api.conversations.save(updated)
+    setChatThreads((current) => current.map((entry) => entry.id === updated.id ? updated : entry))
+    await refreshHistory()
   }
   const goalKey = (root = workspace()) => `goal.${encodeURIComponent(root)}`
   const loadGoal = async (root: string) => setGoal((await window.api.store.get<WorkspaceGoal>(goalKey(root))) ?? null)
@@ -450,6 +485,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       }
       if (event.type === "text" && event.data) queueBackendEvent({ kind: "text", content: event.data })
       if (event.type === "thought" && event.data) queueBackendEvent({ kind: "thought", content: event.data })
+      if (event.type === "thought" && event.data?.includes("Recovered the conversation")) {
+        const thread = chatThreads().find((entry) => entry.id === activeThreadId())
+        if (thread) void updateThreadMeta(thread, { sessionStatus: "recovered" })
+      }
       if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
       if (event.type === "cancelled") queueBackendEvent({ kind: "text", content: event.data || "Task cancelled." })
     })
@@ -542,7 +581,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const activeGoal = goal()?.status === "active" ? goal() : null
       let executionPrompt = activeGoal ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.` : submitted
       const resumeSession = sessionId()
-      const recentContext = priorMessages.slice(-12).map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.logs.map((log) => log.content).join("\n")}`).join("\n\n").slice(-40_000)
+      const activeThread = chatThreads().find((thread) => thread.id === activeThreadId())
+      const recentContext = visibleConversationContext(priorMessages, activeThread?.summary)
       const withRecentContext = (instruction: string) => `## Recent conversation context\nContinue this workspace conversation without repeating completed work. Preserve decisions, unfinished tasks, and the user's intent.\n\n${recentContext}\n\n## Current instruction\n${instruction}`
       if (!resumeSession && recentContext) executionPrompt = withRecentContext(executionPrompt)
       if (agentAppControls()) {
@@ -568,6 +608,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
       queueBackendEvent({ kind: "error", content: (error as Error).message })
+      if (sessionId()) {
+        const thread = chatThreads().find((entry) => entry.id === activeThreadId())
+        if (thread) await updateThreadMeta(thread, { sessionStatus: "broken" })
+      }
     } finally {
       flushBackendEvents()
       setRunning(false)
@@ -586,7 +630,13 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           } catch { /* Invalid model actions are ignored instead of gaining app authority. */ }
         }
       }
-      if (completed.length) await saveConversation([...messages(), { id: crypto.randomUUID(), role: "assistant", logs: completed, createdAt: Date.now() }])
+      if (completed.length) {
+        const nextMessages = [...messages(), { id: crypto.randomUUID(), role: "assistant" as const, logs: completed, createdAt: Date.now() }]
+        await saveConversation(nextMessages)
+        const checkpoint = checkpointFor(nextMessages)
+        const thread = chatThreads().find((entry) => entry.id === activeThreadId())
+        if (checkpoint && thread && nextMessages.length % 10 < 2) await updateThreadMeta(thread, { summary: checkpoint })
+      }
       setEvents([])
     }
     setRuns(await window.api.grokRuns.list())
@@ -747,9 +797,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
         <div class={`chat-workbench ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""}`}><div class="chat-column"><section class="chat-thread">
-          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus((error as Error).message) } } setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button class={historyOpen() ? "active" : ""} onClick={() => setHistoryOpen(!historyOpen())}>History {chatThreads().filter((thread) => thread.messages.length).length || ""}</button><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
-          <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Previous chats</strong><span>{selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div><For each={chatThreads().filter((thread) => thread.messages.length)} fallback={<p>No previous chats in this workspace yet.</p>}>{(thread) => <button class={thread.id === activeThreadId() ? "active" : ""} disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages{thread.sessionId ? " · resumable" : ""}</span></button>}</For></div></section></Show>
-          <div class="chat-messages" ref={messagesElement}>
+          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus((error as Error).message) } } setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button class={historyOpen() ? "active" : ""} onClick={async () => { const next = !historyOpen(); setHistoryOpen(next); if (next) await refreshHistory() }}>History {chatThreads().filter((thread) => thread.messages.length).length || ""}</button><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
+          <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Chat history</strong><span>{historyAllWorkspaces() ? "All workspaces" : selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div class="chat-history__tools"><input value={historySearch()} onInput={async (event) => { setHistorySearch(event.currentTarget.value); await refreshHistory() }} placeholder="Search conversations…"/><label><input type="checkbox" checked={historyAllWorkspaces()} onChange={async (event) => { setHistoryAllWorkspaces(event.currentTarget.checked); await refreshHistory() }}/> All workspaces</label></div><div><For each={historyResults().filter((thread) => thread.messages.length && !thread.archived)} fallback={<p>No matching chats.</p>}>{(thread) => <article class={thread.id === activeThreadId() ? "active" : ""}><button disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.pinned ? "📌 " : ""}{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages · {thread.model || "default"} · {thread.sessionStatus || (thread.sessionId ? "resumable" : "new")}</span></button><div><button onClick={() => { const title = window.prompt("Conversation name", thread.title); if (title?.trim()) void updateThreadMeta(thread, { title: title.trim() }) }}>Rename</button><button onClick={() => void updateThreadMeta(thread, { pinned: !thread.pinned })}>{thread.pinned ? "Unpin" : "Pin"}</button><button onClick={() => void window.api.conversations.export(thread.id)}>Export</button><button onClick={() => void updateThreadMeta(thread, { archived: true })}>Archive</button></div></article>}</For></div></section></Show>
+          <div class="chat-messages" ref={messagesElement} onScroll={(event) => { const element = event.currentTarget; userNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 100 }}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
               <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(message.logs.map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) setPrompt(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
               <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={splitThinking(events())}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thinking…</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For></Show></div></article></Show>

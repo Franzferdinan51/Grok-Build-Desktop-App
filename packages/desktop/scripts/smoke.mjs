@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ensurePublicCompletion, splitThinking } from "../src/renderer/chat-utils.ts"
+import { checkpointFor, visibleConversationContext } from "../src/renderer/chat-context.ts"
 import { reconcileInterruptedRuns } from "../src/main/grok-run-utils.ts"
 import { removeLegacyCodexBridgeTables } from "../src/main/model-config-utils.ts"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "../src/main/workspace-tools.ts"
@@ -62,6 +63,10 @@ assert.deepEqual(ensurePublicCompletion([{ kind: "thought", content: "private on
   { kind: "text", content: "Task completed. Grok Build applied the changes but returned no public summary." },
 ])
 assert.deepEqual(ensurePublicCompletion([{ kind: "text", content: "Public answer" }]), [{ kind: "text", content: "Public answer" }])
+const continuation = visibleConversationContext([{ role: "user", logs: [{ kind: "text", content: "keep" }, { kind: "thought", content: "secret" }] }, { role: "assistant", logs: [{ kind: "text", content: "done <app_action>{\"type\":\"preview.open\"}</app_action>" }] }], "checkpoint")
+assert.match(continuation, /checkpoint|keep/)
+assert.doesNotMatch(continuation, /secret|app_action|preview\.open/)
+assert.equal(checkpointFor(Array.from({ length: 12 }, () => ({ role: "user", logs: [{ kind: "text", content: "decision" }] })))?.includes("decision"), true)
 
 const interruptedAt = 1_800_000_000_000
 assert.deepEqual(reconcileInterruptedRuns([{
