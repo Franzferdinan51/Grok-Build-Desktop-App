@@ -7,7 +7,7 @@ import type { Configuration } from "electron-builder"
 const config: Configuration = {
   appId: "ai.grokbuild.desktop",
   productName: "Grok Build Desktop",
-  copyright: "Copyright 2025 Grok Build Desktop",
+  copyright: "Copyright 2026 Grok Build Desktop",
   directories: {
     output: "dist",
     buildResources: "resources",

@@ -1,6 +1,6 @@
 import { app } from "electron"
 import { randomUUID } from "crypto"
-import { mkdir, readFile, readdir, rename, writeFile } from "fs/promises"
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "fs/promises"
 import { join } from "path"
 
 export type StoredChatLog = { kind: "text" | "thought" | "error"; content: string }
@@ -19,13 +19,20 @@ async function atomicWrite(thread: StoredChatThread): Promise<void> {
   await mkdir(directory(), { recursive: true })
   const target = fileFor(thread.id)
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-  await writeFile(temporary, JSON.stringify(thread), { encoding: "utf8", mode: 0o600 })
-  await rename(temporary, target)
+  try {
+    await writeFile(temporary, JSON.stringify(thread), { encoding: "utf8", mode: 0o600 })
+    await rename(temporary, target)
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined)
+    throw error
+  }
 }
 
 export function saveConversation(thread: StoredChatThread): Promise<StoredChatThread> {
   const normalized = { ...thread, workspace: thread.workspace || "", messages: thread.messages || [] }
-  writes = writes.then(() => atomicWrite(normalized))
+  // A transient failed write must not poison the queue and prevent every
+  // later conversation from being saved for the rest of the app session.
+  writes = writes.catch(() => undefined).then(() => atomicWrite(normalized))
   return writes.then(() => normalized)
 }
 

@@ -117,6 +117,17 @@ app.whenReady().then(async () => {
       if (!selected) return "That project is no longer available. Open /projects again."
       getStore().set("workspace.last", selected.path); return `✓ Workspace set to ${selected.name}\n${selected.path}`
     }
+    const projectIdChoice = text.match(/^pick_project_id:([a-f0-9-]+)$/i)
+    if (projectIdChoice) {
+      const selected = getStore().get("projects").find((project) => project.id === projectIdChoice[1])
+      if (!selected) return "That project is no longer available. Open /project again."
+      getStore().set("workspace.last", selected.path); return `✓ Project set to ${selected.name}\n${selected.path}`
+    }
+    if (text === "pick_project_scratch") {
+      const scratch = join(app.getPath("userData"), "Scratch")
+      mkdirSync(scratch, { recursive: true }); getStore().set("workspace.last", scratch)
+      return `✓ Project set to Scratch\n${scratch}`
+    }
     if (text === "menu:models") text = "/models"
     if (text === "menu:projects") text = "/projects"
     if (text === "menu:status") text = "/status"
@@ -158,8 +169,11 @@ app.whenReady().then(async () => {
     if (name === "projects" || name === "project") {
       const projects = getStore().get("projects")
       const current = getStore().get("workspace.last") as string | undefined
-      if (!projects.length) return "No projects yet. Add one in the desktop app, or use Scratch."
-      return { text: "Choose the workspace used by Telegram tasks:", buttons: projects.slice(0, 30).map((project, index) => [{ text: `${project.path === current ? "✓ " : ""}${project.name}`.slice(0, 60), data: `pick_project:${index}` }]) }
+      const scratch = join(app.getPath("userData"), "Scratch")
+      return { text: "Choose the project used by Telegram tasks:", buttons: [
+        [{ text: `${current === scratch ? "✓ " : ""}Scratch`, data: "pick_project_scratch" }],
+        ...projects.slice(0, 30).map((project) => [{ text: `${project.path === current ? "✓ " : ""}${project.name}`.slice(0, 60), data: `pick_project_id:${project.id}` }]),
+      ] }
     }
     if (name && name !== "run") return `Unknown command /${name}.\n\n${help}`
     const taskText = name === "run" ? argument : text

@@ -1,6 +1,6 @@
 import { ipcMain, dialog, shell, app, BrowserWindow } from "electron"
 import { mkdirSync } from "fs"
-import { writeFile } from "fs/promises"
+import { unlink, writeFile } from "fs/promises"
 import { join } from "path"
 import { getStore } from "./store"
 import { write as writeLog } from "./logging"
@@ -23,6 +23,8 @@ type Deps = {
   getMainWindow: () => BrowserWindow | null
   preview: () => PreviewServer
 }
+
+let previousPreviewScreenshot: string | undefined
 
 export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:status", () => deps.backend().status())
@@ -149,6 +151,8 @@ export function registerIpcHandlers(deps: Deps): void {
     const screenshotPath = join(app.getPath("temp"), `grok-build-preview-${Date.now()}.png`)
     const screenshot = await win.webContents.capturePage()
     await writeFile(screenshotPath, screenshot.toPNG())
+    if (previousPreviewScreenshot && previousPreviewScreenshot !== screenshotPath) await unlink(previousPreviewScreenshot).catch(() => undefined)
+    previousPreviewScreenshot = screenshotPath
     return { ...page, screenshotPath }
   })
 
