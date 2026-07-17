@@ -32,9 +32,15 @@ The Agent tab is the desktop control plane for the same persistent agent. Runtim
 - `/queue` — inspect queued work
 - `/steer <instruction>` — prioritize the next turn
 - `/interrupt <instruction>` — cancel the active turn and redirect
+- `/retry` — remove the previous result and retry its instruction
+- `/undo` — rewind the previous completed user/agent turn
+- `/compress` — checkpoint older visible context and keep recent turns active
+- `/reasoning on|off` — override reasoning for this chat session
 - `/history` — show recent public conversation
 - `/schedules` — list enabled scheduled work
 - `/cancel` — stop the active task
+
+The Agent tab can optionally reset remote sessions after a configured number of idle hours. A retry, undo, compaction, or idle reset starts a clean native Grok session and supplies only the retained visible context, preventing removed replies or private reasoning from returning through native session state.
 - `/menu`, `/help` — show controls
 
 ## Reliability

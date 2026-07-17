@@ -45,6 +45,7 @@ const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
 type TelegramAgentSession = {
   sessionId?: string; model?: string; workspace?: string; updatedAt: number
   transcript?: { role: "user" | "assistant"; text: string }[]
+  lastTask?: string; compressedSummary?: string; thinking?: boolean
 }
 const telegramSession = (chatId: string): TelegramAgentSession => getStore().get("telegram").sessions?.[chatId] || { updatedAt: Date.now() }
 const saveTelegramSession = (chatId: string, patch: Partial<TelegramAgentSession>): TelegramAgentSession => {
@@ -129,17 +130,17 @@ app.whenReady().then(async () => {
     if (projectChoice) {
       const selected = getStore().get("projects")[Number(projectChoice[1])]
       if (!selected) return "That project is no longer available. Open /projects again."
-      saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [] }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
+      saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
     }
     const projectIdChoice = text.match(/^pick_project_id:([a-f0-9-]+)$/i)
     if (projectIdChoice) {
       const selected = getStore().get("projects").find((project) => project.id === projectIdChoice[1])
       if (!selected) return "That project is no longer available. Open /project again."
-      saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [] }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
+      saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
     }
     if (text === "pick_project_scratch") {
       const scratch = join(app.getPath("userData"), "Scratch")
-      mkdirSync(scratch, { recursive: true }); saveTelegramSession(chatId, { workspace: scratch, sessionId: "", transcript: [] })
+      mkdirSync(scratch, { recursive: true }); saveTelegramSession(chatId, { workspace: scratch, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
       return `✓ Project set to Scratch\n${scratch}\nStarted a fresh project session.`
     }
     if (text === "menu:models") text = "/models"
@@ -151,11 +152,11 @@ app.whenReady().then(async () => {
     const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
     const name = command?.[1]?.toLowerCase()
     const argument = command?.[2]?.trim() || ""
-    const help = "Grok Build Desktop Agent\n\n/run <task> — run a coding task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose a project\n/queue — show queued work\n/steer <task> — run next with priority\n/interrupt <task> — stop current work and run next\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n\nPlain messages continue the current agent session."
+    const help = "Grok Build Desktop Agent\n\n/run <task> — run a coding task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose a project\n/queue — show queued work\n/steer <task> — run next with priority\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n\nPlain messages continue the current agent session."
     const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "📥 Queue", data: "menu:queue" }], [{ text: "✨ New session", data: "menu:new" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
     if (name === "start" || name === "help" || name === "menu") return menu
     if (name === "new" || name === "reset") {
-      saveTelegramSession(chatId, { sessionId: "", transcript: [] })
+      saveTelegramSession(chatId, { sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
       return "✨ Fresh agent session started. Your selected model and project are unchanged."
     }
     if (name === "queue") {
@@ -167,6 +168,36 @@ app.whenReady().then(async () => {
       const transcript = telegramSession(chatId).transcript || []
       if (!transcript.length) return "This agent session has no visible conversation history yet."
       return transcript.slice(-8).map((entry) => `${entry.role === "user" ? "You" : "Agent"}: ${entry.text.slice(0, 700)}`).join("\n\n")
+    }
+    if (name === "undo") {
+      const agent = telegramSession(chatId)
+      const transcript = agent.transcript || []
+      if (transcript.length < 2) return "There is no completed turn to undo."
+      saveTelegramSession(chatId, { transcript: transcript.slice(0, -2), sessionId: "", lastTask: undefined })
+      return "↩️ Previous turn removed. The next message will continue from the restored visible context."
+    }
+    if (name === "compress") {
+      const agent = telegramSession(chatId)
+      const transcript = agent.transcript || []
+      if (transcript.length < 4) return "The session is already compact."
+      const summary = transcript.slice(0, -4).map((entry) => `${entry.role === "user" ? "User" : "Agent"}: ${entry.text.slice(0, 900)}`).join("\n").slice(-8_000)
+      saveTelegramSession(chatId, { compressedSummary: summary, transcript: transcript.slice(-4), sessionId: "" })
+      return `🗜️ Context checkpointed. Kept the latest ${Math.min(2, transcript.length / 2)} turns active and preserved earlier decisions in a bounded recovery summary.`
+    }
+    if (name === "reasoning") {
+      const normalized = argument.toLowerCase()
+      if (!normalized) return `Session reasoning: ${(telegramSession(chatId).thinking ?? ((getStore().get("defaults.thinking") as boolean | undefined) ?? true)) ? "on" : "off"}\nUse /reasoning on or /reasoning off.`
+      if (!["on", "off", "high", "low"].includes(normalized)) return "Usage: /reasoning on|off"
+      const enabled = normalized === "on" || normalized === "high"
+      saveTelegramSession(chatId, { thinking: enabled })
+      return `🧠 Session reasoning ${enabled ? "enabled" : "disabled"}.`
+    }
+    if (name === "retry") {
+      const agent = telegramSession(chatId)
+      if (!agent.lastTask) return "There is no previous instruction to retry."
+      const transcript = agent.transcript || []
+      saveTelegramSession(chatId, { transcript: transcript.slice(0, -2), sessionId: "" })
+      return handleTelegramAgentMessage(chatId, agent.lastTask)
     }
     if (name === "schedules") {
       const schedules = listSchedules().filter((task) => task.enabled).slice(0, 20)
@@ -225,13 +256,18 @@ app.whenReady().then(async () => {
       telegramQueue.push({ chatId, text: taskText.slice(0, 20_000), queuedAt: Date.now() })
       return `📥 Task queued at position ${telegramQueue.length}. Use /queue to inspect it, /steer to prioritize work, or /interrupt to stop the active turn.`
     }
-    const agent = telegramSession(chatId)
+    let agent = telegramSession(chatId)
+    const idleHours = Math.max(0, Number(getStore().get("agent.sessionIdleHours")) || 0)
+    if (idleHours > 0 && Date.now() - agent.updatedAt > idleHours * 60 * 60_000) {
+      saveTelegramSession(chatId, { sessionId: "", transcript: [], compressedSummary: "" })
+      agent = telegramSession(chatId)
+    }
     const storedWorkspace = agent.workspace || getStore().get("workspace.last") as string | undefined
     const cwd = storedWorkspace || join(app.getPath("userData"), "Scratch")
     mkdirSync(cwd, { recursive: true })
     let response = ""
     const transcript = agent.transcript || []
-    const fallbackContext = transcript.slice(-10).map((entry) => `${entry.role === "user" ? "User" : "Assistant"}: ${entry.text}`).join("\n\n").slice(-20_000)
+    const fallbackContext = [`Earlier checkpoint:\n${agent.compressedSummary || ""}`, ...transcript.slice(-10).map((entry) => `${entry.role === "user" ? "User" : "Assistant"}: ${entry.text}`)].filter((entry) => !entry.endsWith("\n")).join("\n\n").slice(-20_000)
     const appControls = Boolean(getStore().get("agent.appControls"))
     const agentPrompt = appControls
       ? `${taskText.slice(0, 20_000)}\n\n## Safe host actions\nWhen the user explicitly asks to schedule future work, append exactly one validated action tag to your answer:\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nUse an absolute future Unix timestamp in milliseconds. Omit repeatMinutes for one-time work. Never put credentials or shell commands in an action.`
@@ -244,7 +280,7 @@ app.whenReady().then(async () => {
       resume: agent.sessionId || undefined,
       resumeFallbackPrompt: fallbackContext ? `Continue this Telegram agent conversation using the context below. Preserve prior decisions and unfinished work.\n\n${fallbackContext}\n\nCurrent instruction:\n${agentPrompt}` : undefined,
       permissionMode: "auto" as const, noPlan: true,
-      thinking: (getStore().get("defaults.thinking") as boolean | undefined) ?? true,
+      thinking: agent.thinking ?? ((getStore().get("defaults.thinking") as boolean | undefined) ?? true),
       selfVerify: Boolean(getStore().get("defaults.selfVerify")),
       maxTurns: (getStore().get("defaults.maxTurns") as number | undefined) || undefined,
       disableWebSearch: getStore().get("defaults.webSearch") === false,
@@ -318,7 +354,7 @@ app.whenReady().then(async () => {
     }
     const publicResponse = publicTelegramResponse(response) || "Task completed without a public text response."
     const nextTranscript = [...transcript, { role: "user" as const, text: taskText.slice(0, 20_000) }, { role: "assistant" as const, text: publicResponse.slice(0, 20_000) }].slice(-12)
-    saveTelegramSession(chatId, { transcript: nextTranscript, workspace: cwd, model: input.model })
+    saveTelegramSession(chatId, { transcript: nextTranscript, workspace: cwd, model: input.model, lastTask: taskText.slice(0, 20_000) })
     return publicResponse
   }
   const processNextTelegramTask = async (): Promise<void> => {

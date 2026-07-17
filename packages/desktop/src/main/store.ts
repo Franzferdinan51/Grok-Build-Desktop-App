@@ -52,6 +52,7 @@ type StoreSchema = {
     sessions?: Record<string, {
       sessionId?: string; model?: string; workspace?: string; updatedAt: number
       transcript?: { role: "user" | "assistant"; text: string }[]
+      lastTask?: string; compressedSummary?: string; thinking?: boolean
     }>
   }
   projects: { id: string; name: string; path: string; addedAt: number }[]
