@@ -22,7 +22,7 @@ import { TelegramBridge } from "./telegram"
 import { LocalStudioController } from "./local-studio"
 import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
-import { GrokTaskScheduler } from "./scheduled-tasks"
+import { addSchedule, GrokTaskScheduler, listSchedules } from "./scheduled-tasks"
 import { PreviewServer } from "./preview-server"
 import { getStore } from "./store"
 import { finishGrokRun, recoverInterruptedGrokRuns, startGrokRun } from "./grok-runs"
@@ -40,6 +40,7 @@ let logger: ReturnType<typeof initLogging>
 let updateTimer: ReturnType<typeof setInterval> | undefined
 let telegramTaskCancelled = false
 let telegramRunningChat = ""
+const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
 
 type TelegramAgentSession = {
   sessionId?: string; model?: string; workspace?: string; updatedAt: number
@@ -117,7 +118,7 @@ app.whenReady().then(async () => {
     preview: () => preview,
   })
 
-  telegram.setMessageHandler(async (chatId, text) => {
+  const handleTelegramAgentMessage = async (chatId: string, text: string): Promise<string | { text: string; buttons: { text: string; data: string }[][] }> => {
     const modelChoice = text.match(/^pick_model:(\d+)$/)
     if (modelChoice) {
       const catalog = await backend.models(); const selected = catalog.models[Number(modelChoice[1])]
@@ -145,17 +146,41 @@ app.whenReady().then(async () => {
     if (text === "menu:projects") text = "/projects"
     if (text === "menu:status") text = "/status"
     if (text === "menu:cancel") text = "/cancel"
+    if (text === "menu:new") text = "/new"
+    if (text === "menu:queue") text = "/queue"
     const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
     const name = command?.[1]?.toLowerCase()
     const argument = command?.[2]?.trim() || ""
-    const help = "Grok Build Desktop Agent\n\n/run <task> — run a coding task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose a project\n/workspace — active workspace\n/cancel — stop the current task\n\nPlain messages continue the current agent session."
-    const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
+    const help = "Grok Build Desktop Agent\n\n/run <task> — run a coding task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose a project\n/queue — show queued work\n/steer <task> — run next with priority\n/interrupt <task> — stop current work and run next\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n\nPlain messages continue the current agent session."
+    const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "📥 Queue", data: "menu:queue" }], [{ text: "✨ New session", data: "menu:new" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
     if (name === "start" || name === "help" || name === "menu") return menu
     if (name === "new" || name === "reset") {
       saveTelegramSession(chatId, { sessionId: "", transcript: [] })
       return "✨ Fresh agent session started. Your selected model and project are unchanged."
     }
-    if (name === "cancel") {
+    if (name === "queue") {
+      const queued = telegramQueue.filter((entry) => entry.chatId === chatId)
+      if (!queued.length) return backend.isRunning() ? "No additional work queued. One task is currently running." : "The agent queue is empty."
+      return `Queued work (${queued.length}):\n${queued.map((entry, index) => `${index + 1}. ${entry.text.slice(0, 120)}`).join("\n")}`
+    }
+    if (name === "history") {
+      const transcript = telegramSession(chatId).transcript || []
+      if (!transcript.length) return "This agent session has no visible conversation history yet."
+      return transcript.slice(-8).map((entry) => `${entry.role === "user" ? "You" : "Agent"}: ${entry.text.slice(0, 700)}`).join("\n\n")
+    }
+    if (name === "schedules") {
+      const schedules = listSchedules().filter((task) => task.enabled).slice(0, 20)
+      if (!schedules.length) return "No scheduled agent work is enabled."
+      return `Scheduled work:\n${schedules.map((task, index) => `${index + 1}. ${task.name} — ${new Date(task.nextRunAt).toLocaleString()}`).join("\n")}`
+    }
+    if (name === "steer" || name === "interrupt") {
+      if (!argument) return `Usage: /${name} <instruction>`
+      if (name === "interrupt" && backend.isRunning()) { telegramTaskCancelled = true; backend.cancel() }
+      telegramQueue.unshift({ chatId, text: argument.slice(0, 20_000), queuedAt: Date.now() })
+      queueMicrotask(() => void processNextTelegramTask())
+      return name === "interrupt" ? "⏭ Interrupting current work; your instruction is next." : "↪️ Instruction prioritized for the next agent turn."
+    }
+    if (name === "cancel" || name === "stop") {
       const wasRunning = backend.isRunning()
       if (wasRunning) telegramTaskCancelled = true
       backend.cancel()
@@ -196,7 +221,10 @@ app.whenReady().then(async () => {
     if (name && name !== "run") return `Unknown command /${name}.\n\n${help}`
     const taskText = name === "run" ? argument : text
     if (!taskText) return "Usage: /run <task>"
-    if (backend.isRunning()) return "Grok Build is busy with another task. Try again when the current run finishes."
+    if (backend.isRunning()) {
+      telegramQueue.push({ chatId, text: taskText.slice(0, 20_000), queuedAt: Date.now() })
+      return `📥 Task queued at position ${telegramQueue.length}. Use /queue to inspect it, /steer to prioritize work, or /interrupt to stop the active turn.`
+    }
     const agent = telegramSession(chatId)
     const storedWorkspace = agent.workspace || getStore().get("workspace.last") as string | undefined
     const cwd = storedWorkspace || join(app.getPath("userData"), "Scratch")
@@ -204,7 +232,32 @@ app.whenReady().then(async () => {
     let response = ""
     const transcript = agent.transcript || []
     const fallbackContext = transcript.slice(-10).map((entry) => `${entry.role === "user" ? "User" : "Assistant"}: ${entry.text}`).join("\n\n").slice(-20_000)
-    const input = { prompt: taskText.slice(0, 20_000), cwd, model: agent.model || getStore().get("defaults.model") as string | undefined, resume: agent.sessionId || undefined, resumeFallbackPrompt: fallbackContext ? `Continue this Telegram agent conversation using the context below. Preserve prior decisions and unfinished work.\n\n${fallbackContext}\n\nCurrent instruction:\n${taskText.slice(0, 20_000)}` : undefined, permissionMode: "auto" as const, noPlan: true }
+    const appControls = Boolean(getStore().get("agent.appControls"))
+    const agentPrompt = appControls
+      ? `${taskText.slice(0, 20_000)}\n\n## Safe host actions\nWhen the user explicitly asks to schedule future work, append exactly one validated action tag to your answer:\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nUse an absolute future Unix timestamp in milliseconds. Omit repeatMinutes for one-time work. Never put credentials or shell commands in an action.`
+      : taskText.slice(0, 20_000)
+    const moaEnabled = Boolean(getStore().get("moa.enabled"))
+    const moaReferences = ((getStore().get("moa.referenceModels") as string[] | undefined) || []).filter(Boolean).slice(0, 8)
+    const input = {
+      prompt: agentPrompt, cwd,
+      model: agent.model || getStore().get("defaults.model") as string | undefined,
+      resume: agent.sessionId || undefined,
+      resumeFallbackPrompt: fallbackContext ? `Continue this Telegram agent conversation using the context below. Preserve prior decisions and unfinished work.\n\n${fallbackContext}\n\nCurrent instruction:\n${agentPrompt}` : undefined,
+      permissionMode: "auto" as const, noPlan: true,
+      thinking: (getStore().get("defaults.thinking") as boolean | undefined) ?? true,
+      selfVerify: Boolean(getStore().get("defaults.selfVerify")),
+      maxTurns: (getStore().get("defaults.maxTurns") as number | undefined) || undefined,
+      disableWebSearch: getStore().get("defaults.webSearch") === false,
+      subagents: (getStore().get("agent.subagents") as boolean | undefined) ?? true,
+      moa: moaEnabled && moaReferences.length >= 2 ? {
+        referenceModels: moaReferences,
+        aggregatorModel: (getStore().get("moa.aggregatorModel") as string | undefined) || agent.model,
+        referenceReasoningEffort: (getStore().get("moa.referenceEffort") as "low" | "medium" | "high" | undefined) || "medium",
+        aggregatorReasoningEffort: (getStore().get("moa.aggregatorEffort") as "low" | "medium" | "high" | undefined) || "high",
+        referenceTokenBudget: (getStore().get("moa.referenceTokenBudget") as number | undefined) || 600,
+        context: fallbackContext || undefined,
+      } : undefined,
+    }
     telegramTaskCancelled = false
     telegramRunningChat = chatId
     const run = startGrokRun(input)
@@ -251,12 +304,38 @@ app.whenReady().then(async () => {
     } finally {
       clearInterval(activityTimer)
       telegramRunningChat = ""
+      queueMicrotask(() => void processNextTelegramTask())
+    }
+    if (appControls) {
+      for (const match of response.matchAll(/<app_action>(\{[^<]+\})<\/app_action>/g)) {
+        try {
+          const action = JSON.parse(match[1]) as { type?: string; name?: string; prompt?: string; runAt?: number; repeatMinutes?: number }
+          if (action.type === "schedule.create" && action.name?.trim() && action.prompt?.trim() && Number.isFinite(action.runAt) && action.runAt! > Date.now()) {
+            addSchedule({ name: action.name.slice(0, 120), prompt: action.prompt.slice(0, 20_000), cwd, model: input.model, runAt: action.runAt!, repeatMinutes: action.repeatMinutes && action.repeatMinutes >= 1 ? Math.min(action.repeatMinutes, 525_600) : undefined })
+          }
+        } catch { /* Invalid model actions never gain host authority. */ }
+      }
     }
     const publicResponse = publicTelegramResponse(response) || "Task completed without a public text response."
     const nextTranscript = [...transcript, { role: "user" as const, text: taskText.slice(0, 20_000) }, { role: "assistant" as const, text: publicResponse.slice(0, 20_000) }].slice(-12)
     saveTelegramSession(chatId, { transcript: nextTranscript, workspace: cwd, model: input.model })
     return publicResponse
-  })
+  }
+  const processNextTelegramTask = async (): Promise<void> => {
+    if (backend.isRunning()) return
+    const next = telegramQueue.shift()
+    if (!next) return
+    try {
+      const reply = await handleTelegramAgentMessage(next.chatId, next.text)
+      if (typeof reply === "string") await telegram.sendLong(next.chatId, reply)
+      else await telegram.sendReply(next.chatId, reply)
+    } catch (error) {
+      await telegram.sendLong(next.chatId, `Queued task failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      if (telegramQueue.length) queueMicrotask(() => void processNextTelegramTask())
+    }
+  }
+  telegram.setMessageHandler(handleTelegramAgentMessage)
   telegram.start()
 
   mainWindow = await createAndLoadMainWindow()

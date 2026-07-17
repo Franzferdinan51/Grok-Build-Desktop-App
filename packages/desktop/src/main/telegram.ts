@@ -157,6 +157,11 @@ export class TelegramBridge {
           { command: "models", description: "List available models" },
           { command: "model", description: "Select a model" },
           { command: "project", description: "Choose a project" },
+          { command: "queue", description: "Show queued agent work" },
+          { command: "steer", description: "Prioritize the next instruction" },
+          { command: "interrupt", description: "Stop and redirect the active task" },
+          { command: "history", description: "Show recent conversation" },
+          { command: "schedules", description: "Show scheduled agent work" },
           { command: "menu", description: "Open the control menu" },
           { command: "workspace", description: "Show the active workspace" },
           { command: "cancel", description: "Cancel the active task" },
@@ -177,6 +182,8 @@ export class TelegramBridge {
     })
     if (!payload.ok) throw new Error(payload.description || "Telegram send failed")
   }
+
+  async sendReply(chatId: string, reply: TelegramReply): Promise<void> { await this.sendRich(chatId, reply) }
 
   async sendActivity(chatId: string): Promise<void> {
     const token = this.token(); if (!token) return

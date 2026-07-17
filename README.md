@@ -53,9 +53,9 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 
 - BotFather-token validation, OS-encrypted storage, polling, timeouts, limits, and clean network errors.
 - Pairing requests and explicit chat allowlisting before any task can run.
-- Native command registration with `/start`, `/help`, `/menu`, `/run`, rich `/status`, `/models`, `/model`, `/project`, `/workspace`, and `/cancel`. Model and project selection use inline buttons and update the active Telegram task context immediately.
-- Inline menus, clickable model selection, project/workspace selection, current-model indicators, cancellation, and plain-message tasks.
-- Telegram tasks use the current workspace, appear in Grok run history, and send their result back to the originating authorized chat.
+- Persistent per-chat Grok Build agent sessions with model/project affinity, bounded transcript recovery, queues, long-response chunking, and private-reasoning removal.
+- Native commands include `/run`, `/new`, rich `/status`, `/models`, `/project`, `/queue`, `/steer`, `/interrupt`, `/history`, `/schedules`, and `/cancel`; inline buttons update task context immediately.
+- Telegram tasks retain Grok Build tools, web search, verification, subagents, optional MoA, run history, progress updates, and schema-validated scheduling when Agent App Controls are enabled.
 - Use a dedicated BotFather bot. A token already consumed by OpenClaw or another long-polling client cannot simultaneously be polled by this app.
 
 ### Learning and automation
