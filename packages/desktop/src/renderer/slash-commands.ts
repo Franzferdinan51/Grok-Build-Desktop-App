@@ -23,6 +23,7 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommand[] = [
   { name: "scheduled", description: "Open scheduled tasks" },
   { name: "settings", description: "Open settings" },
   { name: "stop", description: "Stop the active Grok task" },
+  { name: "restart", description: "Restart Grok Build Desktop" },
 ]
 
 export function parseSlashCommand(input: string): { name: string; args: string } | null {

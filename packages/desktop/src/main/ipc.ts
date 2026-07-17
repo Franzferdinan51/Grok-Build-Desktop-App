@@ -43,6 +43,13 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:update-check", () => deps.backend().checkUpdate())
   ipcMain.handle("backend:update-install", (_event, channel: "stable" | "alpha") => deps.backend().installUpdate(channel))
   ipcMain.handle("backend:tool", (_event, command: string, cwd?: string) => deps.backend().runTool(command, cwd))
+  ipcMain.handle("app:restart", () => {
+    // Stop the entire Grok child process group before relaunching so Restart
+    // cannot leave MCP/tool children behind consuming CPU or memory.
+    deps.backend().cancel()
+    setTimeout(() => { app.relaunch(); app.exit(0) }, 1_000).unref()
+    return { ok: true }
+  })
   ipcMain.handle("memory:status", () => memory.status())
   ipcMain.handle("memory:recall", (_event, query: string) => memory.context(query))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {

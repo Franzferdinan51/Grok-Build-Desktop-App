@@ -378,6 +378,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       else setSlashNotice(`Unknown model: ${parsed.args}`)
     } else if (command.name === "think") { const next = setToggle(parsed.args, thinking()); setThinking(next); setSlashNotice(`Reasoning ${next ? "enabled" : "disabled"}`) }
     else if (command.name === "approve") { const next = setToggle(parsed.args, autoApprove()); setAutoApprove(next); setSlashNotice(`Automatic approval ${next ? "enabled" : "disabled"}`) }
+    else if (command.name === "restart") { setSlashNotice("Restarting Grok Build Desktop…"); await window.api.app.restart() }
     else if (command.name === "moa") {
       if (parsed.args === "off") { setMoaEnabled(false); await window.api.store.set("moa.enabled", false); setSlashNotice("Mixture of Agents disabled") }
       else {
@@ -575,7 +576,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await window.api.store.set(key, 0)
     const conversation = messages().map((message) => ({ role: message.role, text: message.logs.map((log) => log.content).join("\n") }))
     setAutoLearnStatus("Background review running…")
-    void window.api.backend.autoLearn({ prompt: buildAutoLearnPrompt(conversation), cwd: workspace(), model: autoLearnModel() || model() || undefined })
+    void window.api.backend.autoLearn({ prompt: buildAutoLearnPrompt(conversation, skills().length), cwd: workspace(), model: autoLearnModel() || model() || undefined })
       .then(async () => {
         const status = `Last review completed ${new Date().toLocaleString()}`
         setAutoLearnStatus(status); await window.api.store.set("autoLearn.lastStatus", status)
@@ -612,7 +613,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const priorMessages = messages()
       await saveConversation([...priorMessages, { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
       const activeGoal = goal()?.status === "active" ? goal() : null
-      let executionPrompt = activeGoal ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.` : submitted
+      let executionPrompt = activeGoal
+        ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.\nThis is iteration ${activeGoal.iterations + 1}. ${activeGoal.iterations > 0 ? "Previous iterations have already made progress; do not repeat completed work. Summarize what is left at the end of this turn." : "Start with the highest-leverage sub-task you can fully verify."}`
+        : submitted
       const resumeSession = sessionId()
       const activeThread = chatThreads().find((thread) => thread.id === activeThreadId())
       const recentContext = visibleConversationContext(priorMessages, activeThread?.summary)
@@ -666,23 +669,30 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const completed = ensurePublicCompletion(events())
       if (agentAppControls()) {
         const text = completed.map((entry) => entry.content).join("\n")
+        // Collect every action result so the user sees the outcome of all of
+        // them, not just the last one. The notice was previously overwritten
+        // on each iteration, hiding earlier failures behind later successes.
+        const actionNotices: string[] = []
         for (const match of text.matchAll(/<app_action>(\{[^<]+\})<\/app_action>/g)) {
           try {
             const action = JSON.parse(match[1]) as { type?: string; url?: string; name?: string; prompt?: string; runAt?: number; repeatMinutes?: number }
             if (action.type === "preview.open" && workspace()) {
               const result = await window.api.preview.start(workspace())
               setPreviewEnabled(true); setPreviewOpen(true); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview")
+              actionNotices.push(`Preview opened at ${result.url}`)
             } else if (action.type === "browser.open" && action.url) {
               const result = await window.api.hostControls.browserOpen(action.url)
-              setSlashNotice(result.ok ? `Browser verified by ${result.backend}` : result.permission_required ? `Browser permission required: ${result.error}` : `Browser action failed: ${result.error}`)
+              actionNotices.push(result.ok ? `Browser verified by ${result.backend}` : result.permission_required ? `Browser permission required: ${result.error}` : `Browser action failed: ${result.error}`)
             } else if (action.type === "desktop.status") {
               const result = await window.api.hostControls.desktopStatus()
-              setSlashNotice(result.ok ? `Computer use ready via ${result.backend}` : result.permission_required ? `Computer-use permission required: ${result.error}` : `Computer use unavailable: ${result.error}`)
+              actionNotices.push(result.ok ? `Computer use ready via ${result.backend}` : result.permission_required ? `Computer-use permission required: ${result.error}` : `Computer use unavailable: ${result.error}`)
             } else if (action.type === "schedule.create" && action.name?.trim() && action.prompt?.trim() && Number.isFinite(action.runAt) && action.runAt! > Date.now()) {
               await window.api.schedules.add({ name: action.name.slice(0, 120), prompt: action.prompt.slice(0, 20_000), cwd: workspace(), model: model() || undefined, runAt: action.runAt!, repeatMinutes: action.repeatMinutes && action.repeatMinutes >= 1 ? Math.min(action.repeatMinutes, 525_600) : undefined })
+              actionNotices.push(`Scheduled "${action.name.slice(0, 60)}" for ${new Date(action.runAt!).toLocaleString()}`)
             }
           } catch { /* Invalid model actions are ignored instead of gaining app authority. */ }
         }
+        if (actionNotices.length) setSlashNotice(actionNotices.join("\n"))
       }
       if (completed.length) {
         const nextMessages = [...messages(), { id: crypto.randomUUID(), role: "assistant" as const, logs: completed, createdAt: Date.now() }]
