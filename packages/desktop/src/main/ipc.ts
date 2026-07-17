@@ -41,7 +41,14 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.handle("backend:oauth-login", (_event, provider: "xai" | "openai" | "minimax") => deps.backend().startOAuth(provider))
   ipcMain.handle("backend:update-check", () => deps.backend().checkUpdate())
-  ipcMain.handle("backend:update-install", (_event, channel: "stable" | "alpha") => deps.backend().installUpdate(channel))
+  ipcMain.handle("backend:update-install", async (_event, channel: "stable" | "alpha") => {
+    const result = await deps.backend().installUpdate(channel)
+    // Same rationale as auto-update: the on-disk binary just changed, so the
+    // cached flag discovery and model catalog must not survive it.
+    deps.backend().invalidateModelsCache()
+    deps.backend().invalidateCliFlagsCache()
+    return result
+  })
   ipcMain.handle("backend:tool", (_event, command: string, cwd?: string) => deps.backend().runTool(command, cwd))
   ipcMain.handle("app:restart", () => {
     // Stop the entire Grok child process group before relaunching so Restart

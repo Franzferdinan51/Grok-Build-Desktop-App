@@ -467,6 +467,11 @@ app.whenReady().then(async () => {
         writeLog("info", `Updating Grok Build ${update.currentVersion} → ${update.latestVersion} (${update.channel})`)
         await backend.installUpdate((getStore().get("grok.updateChannel") as "stable" | "alpha" | undefined) || "stable")
         getStore().set("grok.lastAutoUpdateTarget", `${update.channel}:${update.latestVersion}`)
+        // The CLI binary on disk just changed: drop the cached flag/model
+        // snapshots so the next run reflects the new version instead of
+        // serving stale state from before the update.
+        backend.invalidateModelsCache()
+        backend.invalidateCliFlagsCache()
       }
     } catch (error) { writeLog("error", `Automatic Grok Build update failed: ${String(error)}`) }
   }
