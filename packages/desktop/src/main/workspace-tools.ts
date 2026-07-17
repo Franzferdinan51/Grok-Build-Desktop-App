@@ -78,12 +78,25 @@ export async function listWorkspaceFiles(root: string, limit = 1500): Promise<Wo
 }
 export async function readWorkspaceFile(root: string, path: string): Promise<string> { return readFile(await safePath(root, path), "utf8") }
 export async function writeWorkspaceFile(root: string, path: string, content: string): Promise<void> { await writeFile(await safeWritePath(root, path), content, "utf8") }
+// Strip ANSI color/escape sequences from command output so the terminal pane
+// shows clean text instead of raw `\x1b[32m…` artifacts from tools like
+// `ls --color`, `pytest`, or `cargo`. Mirrors the cleanup Hermes performs
+// before displaying captured subprocess output.
+const ANSI_ESCAPE = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g
+function stripAnsi(value: string): string { return value ? value.replace(ANSI_ESCAPE, "") : value }
+
 export async function runWorkspaceCommand(root: string, command: string): Promise<{ stdout: string; stderr: string; code: number }> {
   if (!command.trim()) throw new Error("Command is required")
   const cwd = await realpath(root); const shell = process.env.SHELL || (process.platform === "win32" ? "cmd.exe" : "/bin/sh")
   const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command]
-  try { const { stdout, stderr } = await execFileAsync(shell, args, { cwd, timeout: 120_000, maxBuffer: 5_000_000 }); return { stdout, stderr, code: 0 } }
-  catch (error) { const failure = error as { stdout?: string; stderr?: string; code?: number }; return { stdout: failure.stdout || "", stderr: failure.stderr || String(error), code: typeof failure.code === "number" ? failure.code : 1 } }
+  try {
+    const { stdout, stderr } = await execFileAsync(shell, args, { cwd, timeout: 120_000, maxBuffer: 5_000_000 })
+    return { stdout: stripAnsi(stdout), stderr: stripAnsi(stderr), code: 0 }
+  }
+  catch (error) {
+    const failure = error as { stdout?: string; stderr?: string; code?: number }
+    return { stdout: stripAnsi(failure.stdout || ""), stderr: stripAnsi(failure.stderr || String(error)), code: typeof failure.code === "number" ? failure.code : 1 }
+  }
 }
 
 export async function gitChangedFiles(root: string): Promise<{ status: string; path: string }[]> {

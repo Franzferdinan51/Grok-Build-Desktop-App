@@ -33,6 +33,6 @@ export function initLogging() {
 }
 
 export { log }
-export function write(level: "info" | "error" | "debug", message: string): void {
+export function write(level: "info" | "warn" | "error" | "debug", message: string): void {
   log[level](message)
 }
