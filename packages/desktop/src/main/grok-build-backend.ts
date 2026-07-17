@@ -118,10 +118,12 @@ export class GrokBuildBackend {
           models.push(regularMatch[1])
         }
       }
-      return { defaultModel, models: [...new Set(models)] }
+      const catalog = { defaultModel, models: [...new Set(models)] }
+      getStore().set("grok.lastModelCatalog", catalog)
+      return catalog
     } catch (error) {
       writeLog("error", `Could not read Grok Build model catalog: ${String(error)}`)
-      return { models: [] }
+      return getStore().get("grok.lastModelCatalog", { models: [] }) as GrokBuildModelCatalog
     }
   }
 

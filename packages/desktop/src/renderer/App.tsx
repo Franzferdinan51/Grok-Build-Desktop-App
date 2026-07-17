@@ -12,6 +12,7 @@ import "./branding.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
+type ChatThread = { id: string; title: string; createdAt: number; updatedAt: number; messages: ChatMessage[]; sessionId: string }
 type QueuedPrompt = { id: string; text: string }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type AdvancedSettings = { agent: string; agents: string; permissionMode: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow: string; deny: string; tools: string; disallowedTools: string; memory: "default" | "experimental" | "disabled"; sandbox: string; rules: string; systemPrompt: string; verbatim: boolean; forkSession: boolean; restoreCode: boolean; worktree: boolean; worktreeName: string; worktreeRef: string; jsonSchema: string; promptFile: string; promptJson: string; sessionId: string; noPlan: boolean }
@@ -50,6 +51,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [events, setEvents] = createSignal<TaskLog[]>([])
   const [messages, setMessages] = createSignal<ChatMessage[]>([])
   const [sessionId, setSessionId] = createSignal("")
+  const [chatThreads, setChatThreads] = createSignal<ChatThread[]>([])
+  const [activeThreadId, setActiveThreadId] = createSignal("")
+  const [historyOpen, setHistoryOpen] = createSignal(false)
   const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
   const [historyIndex, setHistoryIndex] = createSignal(-1)
   const [historyDraft, setHistoryDraft] = createSignal("")
@@ -182,20 +186,81 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
   const conversationKey = (root = workspace()) => `chat.${encodeURIComponent(root)}`
   const sessionKey = (root = workspace()) => `chat.session.${encodeURIComponent(root)}`
+  const threadsKey = (root = workspace()) => `chat.threads.${encodeURIComponent(root)}`
+  const activeThreadKey = (root = workspace()) => `chat.active.${encodeURIComponent(root)}`
+  const threadTitle = (next: ChatMessage[]) => {
+    const first = next.find((message) => message.role === "user")?.logs.map((log) => log.content).join(" ").replace(/\s+/g, " ").trim()
+    return first ? first.slice(0, 72) : "New chat"
+  }
+  const persistThreads = async (root: string, next: ChatThread[], activeId: string) => {
+    setChatThreads(next)
+    setActiveThreadId(activeId)
+    await window.api.store.set(threadsKey(root), next)
+    await window.api.store.set(activeThreadKey(root), activeId)
+  }
   const loadConversation = async (root: string) => {
-    setMessages((await window.api.store.get<ChatMessage[]>(conversationKey(root))) ?? [])
-    setSessionId((await window.api.store.get<string>(sessionKey(root))) ?? "")
+    let stored = (await window.api.store.get<ChatThread[]>(threadsKey(root))) ?? []
+    const legacyMessages = (await window.api.store.get<ChatMessage[]>(conversationKey(root))) ?? []
+    const legacySession = (await window.api.store.get<string>(sessionKey(root))) ?? ""
+    if (!stored.length && (legacyMessages.length || legacySession)) {
+      const now = legacyMessages.at(-1)?.createdAt || Date.now()
+      stored = [{ id: crypto.randomUUID(), title: threadTitle(legacyMessages), createdAt: legacyMessages[0]?.createdAt || now, updatedAt: now, messages: legacyMessages, sessionId: legacySession }]
+    }
+    const preferred = await window.api.store.get<string>(activeThreadKey(root))
+    const selected = stored.find((thread) => thread.id === preferred) || stored[0]
+    setChatThreads(stored)
+    setActiveThreadId(selected?.id || "")
+    setMessages(selected?.messages || legacyMessages)
+    setSessionId(selected?.sessionId || legacySession)
+    if (stored.length) await persistThreads(root, stored, selected?.id || stored[0].id)
     setQueuedPrompts([]); setHistoryIndex(-1); setHistoryDraft("")
   }
   const saveConversation = async (next: ChatMessage[]) => {
     setMessages(next)
-    if (workspace()) await window.api.store.set(conversationKey(), next)
+    const root = workspace()
+    if (!root) return
+    const now = Date.now()
+    const id = activeThreadId() || crypto.randomUUID()
+    const current = chatThreads().find((thread) => thread.id === id)
+    const thread: ChatThread = { id, title: threadTitle(next), createdAt: current?.createdAt || now, updatedAt: now, messages: next, sessionId: sessionId() }
+    const updated = [thread, ...chatThreads().filter((entry) => entry.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt)
+    await persistThreads(root, updated, id)
+    await window.api.store.set(conversationKey(root), next)
+  }
+  const persistSessionId = async (nextSessionId: string) => {
+    setSessionId(nextSessionId)
+    const root = workspace()
+    if (!root) return
+    await window.api.store.set(sessionKey(root), nextSessionId)
+    const id = activeThreadId()
+    if (!id) return
+    const updated = chatThreads().map((thread) => thread.id === id ? { ...thread, sessionId: nextSessionId, updatedAt: Date.now() } : thread)
+    await persistThreads(root, updated, id)
   }
   const newConversation = async () => {
-    await saveConversation([])
+    const root = workspace()
+    const id = crypto.randomUUID()
+    const now = Date.now()
+    const next = [{ id, title: "New chat", createdAt: now, updatedAt: now, messages: [], sessionId: "" }, ...chatThreads()]
+    if (root) await persistThreads(root, next, id)
+    else { setChatThreads(next); setActiveThreadId(id) }
+    setMessages([])
     setSessionId("")
-    if (workspace()) await window.api.store.delete(sessionKey())
+    if (root) { await window.api.store.set(conversationKey(root), []); await window.api.store.delete(sessionKey(root)) }
     setEvents([]); setQueuedPrompts([])
+    setHistoryOpen(false)
+  }
+  const openConversation = async (thread: ChatThread) => {
+    if (running()) return
+    setMessages(thread.messages)
+    setSessionId(thread.sessionId)
+    setQueuedPrompts([]); setEvents([]); setHistoryOpen(false)
+    const root = workspace()
+    if (root) {
+      await persistThreads(root, chatThreads(), thread.id)
+      await window.api.store.set(conversationKey(root), thread.messages)
+      if (thread.sessionId) await window.api.store.set(sessionKey(root), thread.sessionId); else await window.api.store.delete(sessionKey(root))
+    }
   }
   const goalKey = (root = workspace()) => `goal.${encodeURIComponent(root)}`
   const loadGoal = async (root: string) => setGoal((await window.api.store.get<WorkspaceGoal>(goalKey(root))) ?? null)
@@ -381,8 +446,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (savedModel && selectableModels().includes(savedModel)) setModel(savedModel)
     unsubscribeBackend = window.api.backend.onEvent((event: BackendEvent) => {
       if (event.sessionId && workspace()) {
-        setSessionId(event.sessionId)
-        void window.api.store.set(sessionKey(), event.sessionId)
+        void persistSessionId(event.sessionId)
       }
       if (event.type === "text" && event.data) queueBackendEvent({ kind: "text", content: event.data })
       if (event.type === "thought" && event.data) queueBackendEvent({ kind: "thought", content: event.data })
@@ -500,7 +564,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const references = moaReferenceModels().slice(0, moaCandidates()).filter(Boolean)
       const advancedRun = advanced()
       const result = await window.api.backend.run({ prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, resumeFallbackPrompt: resumeSession && recentContext ? withRecentContext(executionPrompt) : undefined, bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined, referenceReasoningEffort: moaReferenceEffort(), aggregatorReasoningEffort: moaAggregatorEffort(), referenceTokenBudget: moaReferenceTokenBudget(), context: recentContext || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled(), agent: advancedRun.agent || undefined, agents: advancedRun.agents || undefined, permissionMode: advancedRun.permissionMode, allow: advancedRun.allow.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), deny: advancedRun.deny.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), tools: advancedRun.tools || undefined, disallowedTools: advancedRun.disallowedTools || undefined, memory: advancedRun.memory, sandbox: advancedRun.sandbox || undefined, rules: advancedRun.rules || undefined, systemPrompt: advancedRun.systemPrompt || undefined, verbatim: advancedRun.verbatim, forkSession: advancedRun.forkSession, restoreCode: advancedRun.restoreCode, worktree: advancedRun.worktree, worktreeName: advancedRun.worktreeName || undefined, worktreeRef: advancedRun.worktreeRef || undefined, jsonSchema: advancedRun.jsonSchema || undefined, promptFile: advancedRun.promptFile || undefined, promptJson: advancedRun.promptJson || undefined, sessionId: advancedRun.sessionId || undefined, noPlan: advancedRun.noPlan })
-      if (result.grokSessionId) { setSessionId(result.grokSessionId); await window.api.store.set(sessionKey(runWorkspace), result.grokSessionId) }
+      if (result.grokSessionId) await persistSessionId(result.grokSessionId)
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
       queueBackendEvent({ kind: "error", content: (error as Error).message })
@@ -683,7 +747,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "runs"} fallback={<>
         <div class={`chat-workbench ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""}`}><div class="chat-column"><section class="chat-thread">
-          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus((error as Error).message) } } setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
+          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus((error as Error).message) } } setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button class={historyOpen() ? "active" : ""} onClick={() => setHistoryOpen(!historyOpen())}>History {chatThreads().filter((thread) => thread.messages.length).length || ""}</button><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
+          <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Previous chats</strong><span>{selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div><For each={chatThreads().filter((thread) => thread.messages.length)} fallback={<p>No previous chats in this workspace yet.</p>}>{(thread) => <button class={thread.id === activeThreadId() ? "active" : ""} disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages{thread.sessionId ? " · resumable" : ""}</span></button>}</For></div></section></Show>
           <div class="chat-messages" ref={messagesElement}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
               <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(message.logs.map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) setPrompt(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>

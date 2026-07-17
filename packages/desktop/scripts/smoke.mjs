@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ensurePublicCompletion, splitThinking } from "../src/renderer/chat-utils.ts"
 import { reconcileInterruptedRuns } from "../src/main/grok-run-utils.ts"
+import { removeLegacyCodexBridgeTables } from "../src/main/model-config-utils.ts"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "../src/main/workspace-tools.ts"
 import { inspectProject } from "../src/main/project-inspection.ts"
 import { PreviewServer } from "../src/main/preview-server.ts"
@@ -84,6 +85,12 @@ assert.equal(boundedContext.length < 13_000, true)
 assert.equal(normalizeMoaReferenceBudget(), 600)
 assert.equal(normalizeMoaReferenceBudget(50), 200)
 assert.equal(normalizeMoaReferenceBudget(50_000), 2_000)
+
+const duplicateCodexConfig = `[model.keep]\nmodel = "keep"\n\n[model.codex-old]\nmodel = "gpt-old"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"\n\n# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS\n[model.codex-new]\nmodel = "gpt-new"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"\n# END GROK BUILD DESKTOP MANAGED PROVIDERS\n`
+const repairedCodexConfig = removeLegacyCodexBridgeTables(duplicateCodexConfig)
+assert.doesNotMatch(repairedCodexConfig, /model\.codex-old/)
+assert.match(repairedCodexConfig, /model\.keep/)
+assert.match(repairedCodexConfig, /model\.codex-new/)
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)

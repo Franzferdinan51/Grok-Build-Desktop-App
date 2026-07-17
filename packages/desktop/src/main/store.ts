@@ -36,6 +36,7 @@ type StoreSchema = {
     providerSecrets?: Record<string, { label: string; envKey: string; encrypted: string }>
     providerSettings?: Record<string, { baseUrl: string; modelId: string }>
     customProviders?: { id: string; label: string; envKey: string; baseUrl: string }[]
+    lastModelCatalog?: { defaultModel?: string; models: string[] }
   }
   lmstudio: {
     baseUrl: string

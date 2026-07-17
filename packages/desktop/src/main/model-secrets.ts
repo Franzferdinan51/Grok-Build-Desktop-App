@@ -3,6 +3,7 @@ import { getStore } from "./store"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 import { homedir } from "os"
 import { dirname, join } from "path"
+import { removeLegacyCodexBridgeTables } from "./model-config-utils"
 
 export const PROVIDER_PRESETS = [
   { id: "lm-studio", label: "LM Studio", envKey: "LM_STUDIO_API_KEY", baseUrl: "http://localhost:1234/v1" },
@@ -59,7 +60,7 @@ function writeManagedModels(settings: Record<string, { baseUrl: string; modelId:
   const path = join(homedir(), ".grok", "config.toml")
   const start = "# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS"
   const end = "# END GROK BUILD DESKTOP MANAGED PROVIDERS"
-  const existing = existsSync(path) ? readFileSync(path, "utf8") : ""
+  const existing = removeLegacyCodexBridgeTables(existsSync(path) ? readFileSync(path, "utf8") : "")
   const blocks = providers().flatMap((preset) => {
     const setting = settings[preset.id]
     if (!setting?.modelId) return []
