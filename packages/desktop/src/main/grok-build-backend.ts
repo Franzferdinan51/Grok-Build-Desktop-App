@@ -90,6 +90,17 @@ export class GrokBuildBackend {
   private readonly codexBridge = new CodexOAuthBridge()
   private readonly longTermMemory = new DuckbotMemory()
 
+  // Short in-memory TTL for `models()`. The catalog rarely changes within a
+  // session and is persisted to disk on every successful fetch (see the
+  // `grok.lastModelCatalog` writes below) so cold starts stay fast even
+  // without this cache. The cache purely dedupes rapid repeated calls —
+  // settings/telegram view toggles, save-provider refreshes, the OAuth
+  // polling loop — that would otherwise re-spawn `grok models` and re-sync
+  // the Codex bridge each time. The disk store is still the cold-start
+  // fallback for actual subprocess failures.
+  private modelsCache: { data: GrokBuildModelCatalog; expiresAt: number } | null = null
+  private static readonly MODELS_CACHE_TTL_MS = 30_000
+
   isRunning(): boolean { return this.current !== null || this.moaAbort !== null }
 
   async status(): Promise<GrokBuildStatus> {
@@ -104,6 +115,10 @@ export class GrokBuildBackend {
    * its loaded-model state.
    */
   async models(): Promise<GrokBuildModelCatalog> {
+    const now = Date.now()
+    if (this.modelsCache && this.modelsCache.expiresAt > now) {
+      return this.modelsCache.data
+    }
     const status = await this.status()
     if (!status.available) return { models: [] }
     try {
@@ -124,11 +139,22 @@ export class GrokBuildBackend {
       }
       const catalog = { defaultModel, models: [...new Set(models)] }
       getStore().set("grok.lastModelCatalog", catalog)
+      this.modelsCache = { data: catalog, expiresAt: now + GrokBuildBackend.MODELS_CACHE_TTL_MS }
       return catalog
     } catch (error) {
       writeLog("error", `Could not read Grok Build model catalog: ${String(error)}`)
-      return getStore().get("grok.lastModelCatalog", { models: [] }) as GrokBuildModelCatalog
+      // Short-cache failures so a hot retry doesn't pin the subprocess in a
+      // loop; the disk-stored last-good catalog still surfaces immediately so
+      // the UI never goes empty during a transient backend hiccup.
+      const fallback = getStore().get("grok.lastModelCatalog", { models: [] }) as GrokBuildModelCatalog
+      this.modelsCache = { data: fallback, expiresAt: now + 5_000 }
+      return fallback
     }
+  }
+
+  /** Drop the in-memory `models()` cache. Use after CLI path changes etc. */
+  invalidateModelsCache(): void {
+    this.modelsCache = null
   }
 
   private environment(): NodeJS.ProcessEnv {
