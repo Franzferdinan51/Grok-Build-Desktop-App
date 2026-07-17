@@ -44,6 +44,36 @@ let telegramRunningChat = ""
 let telegramTaskReserved = false
 const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
 
+// Single-instance lock: a second launch would start a second Telegram polling
+// loop on the same bot token (Telegram allows only one getUpdates owner) and
+// race on the same settings file. Focus the existing window instead.
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  writeLog("info", "Another Grok Build Desktop instance is already running. Exiting.")
+  app.quit()
+} else {
+  app.on("second-instance", () => {
+    // Focus the existing window on the second launch.
+    const windows = BrowserWindow.getAllWindows()
+    if (windows.length) {
+      const [win] = windows
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+  })
+}
+
+// Surface any unhandled async failure to the log instead of letting it die
+// silently. Without this a stray rejection in Telegram polling or the scheduler
+// could leave the app in a half-alive state with no diagnostic trail.
+process.on("unhandledRejection", (reason) => {
+  writeLog("error", `Unhandled rejection: ${reason instanceof Error ? `${reason.message}\n${reason.stack ?? ""}` : String(reason)}`)
+})
+process.on("uncaughtException", (error) => {
+  writeLog("error", `Uncaught exception: ${error.message}\n${error.stack ?? ""}`)
+})
+
 type TelegramAgentSession = {
   sessionId?: string; model?: string; workspace?: string; updatedAt: number
   transcript?: { role: "user" | "assistant"; text: string }[]
