@@ -4,7 +4,28 @@ import { readdir, readFile, realpath, stat, writeFile } from "fs/promises"
 import { dirname, relative, resolve, sep } from "path"
 
 const execFileAsync = promisify(execFile)
-const ignored = new Set([".git", "node_modules", "dist", "out", ".next", "target", ".venv"])
+
+// Heavyweight / cache / build directories that never belong in a workspace
+// file browser or review tree. Mirrors the Hermes Desktop ALWAYS_EXCLUDED list
+// so the file browser stays fast and readable across React Native, Flutter,
+// Python, Go, Java, and Elixir projects — not just JS/TS repos.
+const ignored = new Set([
+  // VCS internals
+  ".git", ".hg", ".svn",
+  // JS/TS package + build output
+  "node_modules", "bower_components", "dist", "build", "out", ".turbo", ".parcel-cache",
+  ".next", ".nuxt", ".svelte-kit", ".output",
+  // Python virtualenvs and caches
+  ".venv", "venv", "env", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox",
+  // JVM / mobile / native
+  ".gradle", "target", "vendor", "Pods",
+  // Editor / IDE state
+  ".idea",
+  // Infra / deploy cache
+  ".terraform", ".expo", ".angular", "coverage",
+  // OS noise
+  ".DS_Store", "Thumbs.db",
+])
 
 async function safePath(root: string, candidate: string): Promise<string> {
   const canonicalRoot = await realpath(root)
