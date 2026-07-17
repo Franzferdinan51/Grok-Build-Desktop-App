@@ -40,6 +40,7 @@ let logger: ReturnType<typeof initLogging>
 let updateTimer: ReturnType<typeof setInterval> | undefined
 let telegramTaskCancelled = false
 let telegramRunningChat = ""
+let telegramTaskReserved = false
 const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
 
 type TelegramAgentSession = {
@@ -211,16 +212,16 @@ app.whenReady().then(async () => {
     }
     if (name === "steer" || name === "interrupt") {
       if (!argument) return `Usage: /${name} <instruction>`
-      if (name === "interrupt" && backend.isRunning()) { telegramTaskCancelled = true; backend.cancel() }
+      if (name === "interrupt" && telegramRunningChat === chatId) { telegramTaskCancelled = true; backend.cancel() }
       telegramQueue.unshift({ chatId, text: argument.slice(0, 20_000), queuedAt: Date.now() })
       queueMicrotask(() => void processNextTelegramTask())
       return name === "interrupt" ? "⏭ Interrupting current work; your instruction is next." : "↪️ Instruction prioritized for the next agent turn."
     }
     if (name === "cancel" || name === "stop") {
-      const wasRunning = backend.isRunning()
+      const wasRunning = telegramRunningChat === chatId
       if (wasRunning) telegramTaskCancelled = true
-      backend.cancel()
-      return wasRunning ? "Stopping the active Grok Build task…" : "No Grok Build task is currently running."
+      if (wasRunning) backend.cancel()
+      return wasRunning ? "Stopping this chat’s active Grok Build task…" : "This chat does not own the active task."
     }
     if (name === "workspace") return `Active working directory: ${telegramSession(chatId).workspace || (getStore().get("workspace.last") as string | undefined) || "Scratch"}`
     if (name === "status") {
@@ -259,7 +260,7 @@ app.whenReady().then(async () => {
     if (name && name !== "run") return `Unknown command /${name}.\n\n${help}`
     const taskText = name === "run" ? argument : text
     if (!taskText) return "Usage: /run <task>"
-    if (backend.isRunning()) {
+    if (backend.isRunning() || telegramTaskReserved) {
       telegramQueue.push({ chatId, text: taskText.slice(0, 20_000), queuedAt: Date.now() })
       return `📥 Task queued at position ${telegramQueue.length}. Use /queue to inspect it, /steer to prioritize work, or /interrupt to stop the active turn.`
     }
@@ -301,6 +302,7 @@ app.whenReady().then(async () => {
         context: fallbackContext || undefined,
       } : undefined,
     }
+    telegramTaskReserved = true
     telegramTaskCancelled = false
     telegramRunningChat = chatId
     const run = startGrokRun(input)
@@ -347,6 +349,7 @@ app.whenReady().then(async () => {
     } finally {
       clearInterval(activityTimer)
       telegramRunningChat = ""
+      telegramTaskReserved = false
       queueMicrotask(() => void processNextTelegramTask())
     }
     if (appControls) {
@@ -365,7 +368,7 @@ app.whenReady().then(async () => {
     return publicResponse
   }
   const processNextTelegramTask = async (): Promise<void> => {
-    if (backend.isRunning()) return
+    if (backend.isRunning() || telegramTaskReserved) return
     const next = telegramQueue.shift()
     if (!next) return
     try {

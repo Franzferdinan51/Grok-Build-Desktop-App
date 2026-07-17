@@ -181,9 +181,14 @@ export class TelegramBridge {
 
   private async sendRich(chatId: string, reply: TelegramReply): Promise<void> {
     const token = this.token(); if (!token) return
-    const payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+    let payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(reply.text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: telegramInlineKeyboard(reply) }),
     })
+    if (!payload.ok && /parse|entity|too long/i.test(payload.description || "")) {
+      payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: reply.text.slice(0, 4096), reply_markup: telegramInlineKeyboard(reply) }),
+      })
+    }
     if (!payload.ok) throw new Error(payload.description || "Telegram send failed")
   }
 
@@ -223,9 +228,14 @@ export class TelegramBridge {
     if (!chatId.trim()) return { ok: false, error: "A Telegram chat ID is required" }
     if (!text.trim()) return { ok: false, error: "A message is required" }
     try {
-      const payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+      let payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
       })
+      if (!payload.ok && /parse|entity|too long/i.test(payload.description || "")) {
+        payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: text.slice(0, 4096) }),
+        })
+      }
       return payload.ok ? { ok: true } : { ok: false, error: payload.description || "Telegram send failed" }
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   }
