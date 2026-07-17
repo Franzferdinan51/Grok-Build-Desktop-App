@@ -232,8 +232,11 @@ app.whenReady().then(async () => {
       const model = agent.model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
       const workspacePath = agent.workspace || (getStore().get("workspace.last") as string | undefined) || join(app.getPath("userData"), "Scratch")
       const workspace = workspacePath === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : getStore().get("projects").find((project) => project.path === workspacePath)?.name || "Scratch"
+      const moaOn = Boolean(getStore().get("moa.enabled"))
+      const moaAggregator = (getStore().get("moa.aggregatorModel") as string | undefined) || model
+      const moaLine = moaOn ? `\nMoA: Complex tasks → ${moaAggregator}; simple messages → ${model}` : "\nMoA: Off"
       if (!status.available) return `🔴 Grok Build unavailable\n${status.error}`
-      return `🟢 Grok Build agent ready\n\nStatus: ${backend.isRunning() ? `Task running${telegramRunningChat === chatId ? " in this chat" : ""}` : "Idle"}\nSession: ${agent.sessionId ? "Resumable" : "Fresh"}\nModel: ${model}\nProject: ${workspace}\nBackend: ${status.version || "available"}\nModels: ${catalog.models.length}\n\nUse /new to reset, or /models and /project to change context.`
+      return `🟢 Grok Build agent ready\n\nStatus: ${backend.isRunning() ? `Task running${telegramRunningChat === chatId ? " in this chat" : ""}` : "Idle"}\nSession: ${agent.sessionId ? "Resumable" : "Fresh"}\nDirect model: ${model}${moaLine}\nProject: ${workspace}\nBackend: ${status.version || "available"}\nModels: ${catalog.models.length}\n\nUse /new to reset, or /models and /project to change context.`
     }
     if (name === "models") {
       const catalog = await backend.models()

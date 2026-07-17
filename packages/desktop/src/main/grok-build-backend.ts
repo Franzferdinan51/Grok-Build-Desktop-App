@@ -363,6 +363,15 @@ export class GrokBuildBackend {
       await runChild(args)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      const aggregatorProviderFailed = Boolean(input.moa && input.model && effectiveModel && input.model !== effectiveModel && /no output for 3 minutes|auth|unauthorized|forbidden|rate.?limit|serialization|connection|timed? ?out/i.test(message))
+      if (aggregatorProviderFailed) {
+        onEvent({ type: "thought", data: `The configured MoA aggregator (${effectiveModel}) was unavailable. Retrying once with the session model (${input.model}).\n` })
+        const fallbackArgs = [...args]
+        const modelIndex = fallbackArgs.indexOf("--model")
+        if (modelIndex >= 0) fallbackArgs[modelIndex + 1] = input.model!
+        await runChild(fallbackArgs)
+        return
+      }
       const resumeFailed = Boolean(input.resume && input.resumeFallbackPrompt?.trim() && /session.{0,40}(?:not found|missing|invalid|failed|does not exist)|failed.{0,40}resume/i.test(message))
       if (resumeFailed) {
         onEvent({ type: "thought", data: "The saved Grok session could not be resumed. Recovered the conversation from the desktop transcript and continued in a new session.\n" })
