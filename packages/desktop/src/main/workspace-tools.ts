@@ -52,18 +52,29 @@ async function safeWritePath(root: string, candidate: string): Promise<string> {
 export type WorkspaceFile = { path: string; size: number }
 export async function listWorkspaceFiles(root: string, limit = 1500): Promise<WorkspaceFile[]> {
   const canonicalRoot = await realpath(root); const output: WorkspaceFile[] = []
-  async function walk(directory: string): Promise<void> {
+  async function walk(directory: string, depth: number): Promise<void> {
     if (output.length >= limit) return
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
+    let entries
+    try { entries = await readdir(directory, { withFileTypes: true }) }
+    catch { return } // unreadable / permission denied — skip silently like Hermes does
+    for (const entry of entries) {
       if (ignored.has(entry.name) || entry.name.startsWith(".DS_")) continue
       const path = resolve(directory, entry.name)
       if (entry.isSymbolicLink()) continue
-      if (entry.isDirectory()) await walk(path)
-      else if (entry.isFile()) { const info = await stat(path); if (info.size <= 2_000_000) output.push({ path: relative(canonicalRoot, path), size: info.size }) }
+      if (entry.isDirectory()) {
+        // Bound recursion so a deeply nested vendored tree that slipped past
+        // the ignore list can't make the first browse of a project slow.
+        if (depth < 12) await walk(path, depth + 1)
+      }
+      else if (entry.isFile()) {
+        let info
+        try { info = await stat(path) } catch { continue }
+        if (info.size <= 2_000_000) output.push({ path: relative(canonicalRoot, path), size: info.size })
+      }
       if (output.length >= limit) return
     }
   }
-  await walk(canonicalRoot); return output.sort((a, b) => a.path.localeCompare(b.path))
+  await walk(canonicalRoot, 0); return output.sort((a, b) => a.path.localeCompare(b.path))
 }
 export async function readWorkspaceFile(root: string, path: string): Promise<string> { return readFile(await safePath(root, path), "utf8") }
 export async function writeWorkspaceFile(root: string, path: string, content: string): Promise<void> { await writeFile(await safeWritePath(root, path), content, "utf8") }

@@ -780,7 +780,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setTerminalRunning(true); const command = terminalCommand(); setTerminalOutput((old) => `${old}${old ? "\n" : ""}$ ${command}\n`)
     try {
       const result = await window.api.workspace.command(workspace(), command); const output = result.stdout + result.stderr
-      setTerminalOutput((old) => old + output + `\n[exit ${result.code}]\n`)
+      setTerminalOutput((old) => {
+        const next = `${old}${output}\n[exit ${result.code}]\n`
+        // Keep the most recent 200k chars so a long-running dev session does
+        // not let the terminal signal grow unbounded and stall the renderer.
+        return next.length > 200_000 ? `…[output truncated]\n${next.slice(-200_000)}` : next
+      })
       const detected = output.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(?:\/[^\s]*)?/i)?.[0]
       if (detected && previewEnabled()) {
         const url = detected.replace("0.0.0.0", "127.0.0.1")
