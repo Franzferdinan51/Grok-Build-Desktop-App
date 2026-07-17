@@ -307,6 +307,7 @@ app.whenReady().then(async () => {
       maxTurns: (getStore().get("defaults.maxTurns") as number | undefined) || undefined,
       disableWebSearch: getStore().get("defaults.webSearch") === false,
       subagents: (getStore().get("agent.subagents") as boolean | undefined) ?? true,
+      longTermMemory: Boolean(getStore().get("memory.telegramEnabled")),
       moa: moaEnabled && moaReferences.length >= 2 && telegramTaskNeedsMoa(taskText) ? {
         referenceModels: moaReferences,
         aggregatorModel: (getStore().get("moa.aggregatorModel") as string | undefined) || agent.model,

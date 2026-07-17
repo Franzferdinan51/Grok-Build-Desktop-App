@@ -13,6 +13,7 @@ export type ScheduledGrokTask = { id: string; name: string; prompt: string; cwd:
 export type ProviderSecret = { id: string; label: string; envKey: string; baseUrl: string; modelId: string; configured: boolean }
 export type WorkspaceFile = { path: string; size: number }
 export type StoredChatThread = { id: string; workspace: string; title: string; createdAt: number; updatedAt: number; messages: { id: string; role: "user" | "assistant"; logs: { kind: "text" | "thought" | "error"; content: string }[]; createdAt: number }[]; sessionId: string; model?: string; summary?: string; pinned?: boolean; archived?: boolean; sessionStatus?: "new" | "resumable" | "recovered" | "broken" }
+export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; error?: string }
 
 export type ElectronAPI = {
   backend: {
@@ -37,6 +38,7 @@ export type ElectronAPI = {
     pendingChats: () => Promise<string[]>
     setAllowedChats: (chatIds: string[]) => Promise<string[]>
   }
+  memory: { status: () => Promise<DuckbotMemoryStatus>; recall: (query: string) => Promise<string> }
   projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; scratch: () => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
   grokRuns: { list: () => Promise<GrokRunRecord[]> }
   conversations: { list: (workspace?: string) => Promise<StoredChatThread[]>; get: (id: string) => Promise<StoredChatThread | undefined>; save: (thread: StoredChatThread) => Promise<StoredChatThread>; search: (query: string, workspace?: string) => Promise<StoredChatThread[]>; export: (id: string) => Promise<{ saved: boolean; path?: string }> }
@@ -76,6 +78,7 @@ const api: ElectronAPI = {
     disconnect: () => ipcRenderer.invoke("telegram:disconnect"), send: (chatId, text) => ipcRenderer.invoke("telegram:send", chatId, text),
     allowedChats: () => ipcRenderer.invoke("telegram:allowed-chats"), pendingChats: () => ipcRenderer.invoke("telegram:pending-chats"), setAllowedChats: (chatIds) => ipcRenderer.invoke("telegram:set-allowed-chats", chatIds),
   },
+  memory: { status: () => ipcRenderer.invoke("memory:status"), recall: (query) => ipcRenderer.invoke("memory:recall", query) },
   projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), scratch: () => ipcRenderer.invoke("projects:scratch"), remove: (id) => ipcRenderer.invoke("projects:remove", id) },
   grokRuns: { list: () => ipcRenderer.invoke("grok-runs:list") },
   conversations: { list: (workspace) => ipcRenderer.invoke("conversations:list", workspace), get: (id) => ipcRenderer.invoke("conversations:get", id), save: (thread) => ipcRenderer.invoke("conversations:save", thread), search: (query, workspace) => ipcRenderer.invoke("conversations:search", query, workspace), export: (id) => ipcRenderer.invoke("conversations:export", id) },

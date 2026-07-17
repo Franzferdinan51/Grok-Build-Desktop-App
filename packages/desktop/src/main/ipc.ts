@@ -15,6 +15,7 @@ import { addCustomProvider, listProviderSecrets, removeCustomProvider, removePro
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
 import { PreviewServer } from "./preview-server"
 import { exportConversation, getConversation, listConversations, saveConversation, searchConversations, type StoredChatThread } from "./conversation-store"
+import { DuckbotMemory } from "./duckbot-memory"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -27,6 +28,7 @@ type Deps = {
 let previousPreviewScreenshot: string | undefined
 
 export function registerIpcHandlers(deps: Deps): void {
+  const memory = new DuckbotMemory()
   ipcMain.handle("backend:status", () => deps.backend().status())
   ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
@@ -35,6 +37,8 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:update-check", () => deps.backend().checkUpdate())
   ipcMain.handle("backend:update-install", (_event, channel: "stable" | "alpha") => deps.backend().installUpdate(channel))
   ipcMain.handle("backend:tool", (_event, command: string, cwd?: string) => deps.backend().runTool(command, cwd))
+  ipcMain.handle("memory:status", () => memory.status())
+  ipcMain.handle("memory:recall", (_event, query: string) => memory.context(query))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun(input)
     let grokSessionId: string | undefined

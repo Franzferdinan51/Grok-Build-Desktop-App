@@ -10,6 +10,7 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - **Project or project-free:** use a repository, temporary Scratch space, or a persistent **Agent (no project)** working directory.
 - **Persistent continuity:** conversations, checkpoints, model/workspace affinity, native session IDs, queues, recovery context, and interrupted work survive relaunches.
 - **Remote agent:** Telegram includes pairing, queues, steering, interruption, lifecycle controls, rich formatting, live progress, model/project pickers, and private reasoning.
+- **Hybrid durable memory:** OpenClaw/Hermes-style `SOUL.md`, `USER.md`, `AGENTS.md`, and curated `MEMORY.md` files provide identity and policy, while the optional local [duckbot-rag-memory](https://github.com/Franzferdinan51/duckbot-rag-memory) layer recalls only relevant long-term context and captures successful turns episodically.
 - **Provider choice:** xAI, OpenAI Codex OAuth, MiniMax OAuth/API, NVIDIA Build/NIM, OpenRouter, LM Studio, ODS, and OpenAI-compatible endpoints.
 - **Built and tested cross-platform:** signed local macOS DMG/ZIP artifacts and Windows x64 NSIS installers are produced by the release workflow.
 
@@ -69,6 +70,7 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - Native commands include `/run`, `/new`, rich `/status`, `/models`, `/model`, `/project`, `/workspace`, `/queue`, `/steer`, `/interrupt`, `/history`, `/schedules`, `/menu`, `/cancel`, and `/restart`; inline buttons update task context immediately.
 - Hermes-style lifecycle commands add `/retry`, `/undo`, `/compress`, and per-session `/reasoning`, with optional idle resets and corrected-transcript recovery after rewinds.
 - Telegram tasks retain Grok Build tools, web search, verification, subagents, optional MoA, run history, progress updates, and schema-validated scheduling when Agent App Controls are enabled.
+- DuckBot RAG is auto-detected from common local install locations and enabled by default for desktop/scheduled agent work. It degrades safely to filesystem soul files if the local embedding service is offline. Personal memory access from Telegram is a separate, explicit opt-in because authorized group chats may contain other people.
 - Use a dedicated BotFather bot. A token already consumed by OpenClaw or another long-polling client cannot simultaneously be polled by this app.
 
 ### Learning and automation
