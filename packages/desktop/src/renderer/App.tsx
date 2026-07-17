@@ -554,6 +554,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
   }
 
+  const removeProject = async (project: ProjectSnapshot) => {
+    const confirmed = window.confirm(`Remove “${project.name}” from Grok Build Desktop?\n\nThis only removes it from the app sidebar. Your files at:\n${project.path}\nwill not be deleted.`)
+    if (!confirmed) return
+    await window.api.projects.remove(project.id)
+    const remaining = projects().filter((entry) => entry.id !== project.id)
+    setProjects(remaining)
+    if (selectedProject()?.id === project.id) {
+      setSelectedProject(null); setWorkspace("")
+      await window.api.store.delete("workspace.last")
+      setActive("new-task")
+    }
+  }
+
   const useScratchWorkspace = async () => {
     const scratch = await window.api.projects.scratch()
     setSelectedProject(scratch)
@@ -856,7 +869,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       <div class="sidebar__section">
         <div class="section-heading"><span class="sidebar__section-title">Projects</span><button class="project-add" onClick={chooseWorkspace} title="Add project">+</button></div>
         <Show when={projects().length > 0} fallback={<><button class="sidebar__project" onClick={useScratchWorkspace}>Start agent scratch</button><button class="sidebar__project" onClick={chooseWorkspace}>Add a codebase</button></>}>
-          <For each={projects()}>{(project) => <button class={`sidebar__project ${selectedProject()?.id === project.id ? "sidebar__project--active" : ""}`} onClick={() => void selectProject(project)}><span class="project-name">{project.name}</span><Show when={project.changedFiles > 0}><span class="project-changes">{project.changedFiles}</span></Show></button>}</For>
+          <For each={projects()}>{(project) => <div class={`sidebar__project-row ${selectedProject()?.id === project.id ? "sidebar__project-row--active" : ""}`}><button class="sidebar__project" onClick={() => void selectProject(project)} title={project.path}><span class="project-name">{project.name}</span><Show when={project.changedFiles > 0}><span class="project-changes">{project.changedFiles}</span></Show></button><button class="project-remove" onClick={() => void removeProject(project)} title={`Remove ${project.name} from the sidebar`} aria-label={`Remove ${project.name}`}>×</button></div>}</For>
         </Show>
       </div>
       <div class="sidebar__footer">

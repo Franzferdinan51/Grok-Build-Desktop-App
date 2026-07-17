@@ -530,9 +530,15 @@ export class GrokBuildBackend {
         if (input.longTermMemory !== false) void this.longTermMemory.remember(input.prompt, visibleAssistant, input.cwd)
         return
       }
-      const resumeFailed = Boolean(input.resume && input.resumeFallbackPrompt?.trim() && /session.{0,40}(?:not found|missing|invalid|failed|does not exist)|failed.{0,40}resume/i.test(message))
+      // Some OpenAI-compatible providers (including NVIDIA-hosted models) can
+      // return malformed optional usage metadata during a resumed tool turn
+      // (for example `null` where the CLI expects a u32). That state belongs
+      // to the remote/native session, not the visible conversation. Recover
+      // once from the bounded visible checkpoint rather than surfacing a
+      // retryable provider serialization error to the user.
+      const resumeFailed = Boolean(input.resume && input.resumeFallbackPrompt?.trim() && /session.{0,40}(?:not found|missing|invalid|failed|does not exist)|failed.{0,40}resume|serialization error|invalid type:\s*null.*expected\s*u32/i.test(message))
       if (resumeFailed) {
-        onEvent({ type: "thought", data: "The saved Grok session could not be resumed. Recovered the conversation from the desktop transcript and continued in a new session.\n" })
+        onEvent({ type: "thought", data: "The saved provider session could not be resumed cleanly. Recovered the conversation from the bounded desktop transcript and continued in a new session.\n" })
         const withoutResume: string[] = []
         for (let index = promptArgs.length; index < compatibleArgs.length; index++) {
           if (compatibleArgs[index] === "--resume") { index++; continue }
