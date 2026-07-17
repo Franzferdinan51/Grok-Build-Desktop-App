@@ -110,6 +110,14 @@ assert.deepEqual(telegramInlineKeyboard({ text: "Models", buttons: [[{ text: "âœ
 assert.equal(telegramInlineKeyboard({ text: "No buttons", buttons: [] }), undefined)
 const telegramChunks = telegramTextChunks(`${"word ".repeat(1000)}tail`)
 assert.equal(telegramHtml("**Done** with `code` & <safe>"), "<b>Done</b> with <code>code</code> &amp; &lt;safe&gt;")
+// Defense in depth: Telegram's HTML parser already rejects non-http(s)
+// href values, but telegramHtml also validates each markdown link target
+// with the WHATWG URL parser so future parser regressions or hostile
+// model output cannot regress the safety floor.
+assert.match(telegramHtml("[ok](https://example.com)"), /<a href="https:\/\/example\.com\/">ok<\/a>/)
+assert.equal(telegramHtml("[evil](javascript:alert(1))"), "[evil](javascript:alert(1))")
+assert.equal(telegramHtml("[evil](data:text/html,foo)"), "[evil](data:text/html,foo)")
+assert.equal(telegramHtml("[evil](file:///etc/passwd)"), "[evil](file:///etc/passwd)")
 assert.equal(telegramTaskNeedsMoa("Hello? Just respond"), false)
 assert.equal(telegramTaskNeedsMoa("Please fix the Telegram agent and test everything"), true)
 assert.ok(telegramChunks.length > 1)

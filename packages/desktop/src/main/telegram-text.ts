@@ -25,6 +25,18 @@ export function telegramHtml(text: string): string {
     .replace(/__([^_\n]+)__/g, "<b>$1</b>")
     .replace(/~~([^~\n]+)~~/g, "<s>$1</s>")
     .replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, "$1<i>$2</i>")
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_match, label: string, href: string) => {
+      // Defense in depth: Telegram's HTML parser already strips non-http(s)
+      // href values, but reject them here too so a hostile model output that
+      // builds `javascript:` or `data:` URLs from markdown link syntax never
+      // produces a clickable payload even on a future parser regression.
+      try {
+        const parsed = new URL(href)
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return label
+        return `<a href="${parsed.href}">${label}</a>`
+      } catch {
+        return label
+      }
+    })
     .replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>")
 }
