@@ -4,7 +4,7 @@ Grok Build Desktop can expose a dedicated BotFather bot as a persistent remote c
 
 ## Security and connection
 
-1. Paste a dedicated BotFather token into the Telegram screen.
+1. Open the **Agent** sidebar tab and paste a dedicated BotFather token into its Telegram remote-agent card.
 2. The main process validates it with `getMe`, encrypts it with Electron `safeStorage`, removes stale webhook configuration, and starts long polling.
 3. Unknown chats create pairing requests. They cannot run commands until explicitly approved in the desktop app.
 4. The renderer receives connection metadata but never the bot token.
@@ -12,6 +12,8 @@ Grok Build Desktop can expose a dedicated BotFather bot as a persistent remote c
 Do not reuse a bot token that another OpenClaw, Hermes, or Telegram polling process is actively consuming.
 
 ## Agent behavior
+
+The Agent tab is the desktop control plane for the same persistent agent. Runtime model, reasoning, verification, web search, turn budget, subagents, delegation, MoA, safe app controls, schedules, connection state, pairing, and command help live together there. Advanced provider and Grok CLI controls remain in Settings.
 
 - Every approved chat has an independent persisted session, model, project, and bounded visible transcript.
 - Plain messages continue that chat's Grok Build session. Native resume failures recover from the bounded transcript.

@@ -49,8 +49,9 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - With **Agent App Controls** enabled, the agent can receive the rendered DOM, visible text, interactive elements, viewport details, and a fresh screenshot.
 - Typed, allowlisted agent actions can open Preview and create scheduled tasks; arbitrary UI clicks, hidden commands, credential access, and permission changes are not exposed.
 
-### Telegram
+### Agent control center and Telegram
 
+- A dedicated **Agent** sidebar tab combines Grok Build runtime defaults, model choice, reasoning, verification, delegation, MoA, safe app authority, scheduled autonomy, and the Telegram connection in one control center.
 - BotFather-token validation, OS-encrypted storage, polling, timeouts, limits, and clean network errors.
 - Pairing requests and explicit chat allowlisting before any task can run.
 - Persistent per-chat Grok Build agent sessions with model/project affinity, bounded transcript recovery, queues, long-response chunking, and private-reasoning removal.
@@ -112,7 +113,7 @@ Output is written to `packages/desktop/dist`.
 3. For OpenAI Codex, install Hermes, choose **Sign in with OpenAI**, and finish the browser flow. The usable Codex models are imported automatically.
 4. For MiniMax, install `mmx`, choose **Sign in with MiniMax**, and finish device authorization.
 5. Choose **Agent scratch** for project-free work or **Open project** for an existing codebase.
-6. Enable Preview, Telegram, subagents, MoA, agent controls, or automatic learning only when needed.
+6. Use the Agent tab to configure Telegram, subagents, MoA, safe app controls, and shared desktop/remote runtime defaults; enable Preview or automatic learning only when needed.
 
 ## Chat workflow
 
