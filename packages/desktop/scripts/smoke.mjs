@@ -15,6 +15,7 @@ import { publicTelegramResponse } from "../src/main/telegram-output.ts"
 import { telegramHtml, telegramTextChunks } from "../src/main/telegram-text.ts"
 import { telegramTaskNeedsMoa } from "../src/main/telegram-agent-policy.ts"
 import { boundedMoaContext, cleanMoaAdvisorOutput, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
+import { listGrokSkills } from "../src/main/grok-skills.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -123,6 +124,35 @@ const repairedCodexConfig = removeLegacyCodexBridgeTables(duplicateCodexConfig)
 assert.doesNotMatch(repairedCodexConfig, /model\.codex-old/)
 assert.match(repairedCodexConfig, /model\.keep/)
 assert.match(repairedCodexConfig, /model\.codex-new/)
+
+// Skill discovery: the parser must read both single-line and YAML folded
+// `description: >` frontmatter, otherwise shipped skills render as `>` in
+// the desktop UI and become invisible to the command palette.
+const skillsRoot = await mkdtemp(join(tmpdir(), "grok-build-desktop-skills-"))
+await mkdir(join(skillsRoot, ".grok", "skills", "single-line"), { recursive: true })
+await writeFile(join(skillsRoot, ".grok", "skills", "single-line", "SKILL.md"), `---
+name: single-line
+description: A short one-line description.
+---
+body
+`)
+await mkdir(join(skillsRoot, ".grok", "skills", "folded"), { recursive: true })
+await writeFile(join(skillsRoot, ".grok", "skills", "folded", "SKILL.md"), `---
+name: folded
+description: >
+  A longer multi-line description that spans
+  several indented lines until the next key.
+metadata:
+  short-description: "Folded skill"
+---
+body
+`)
+const discovered = listGrokSkills(skillsRoot)
+const single = discovered.find((skill) => skill.name === "single-line")
+const folded = discovered.find((skill) => skill.name === "folded")
+assert.equal(single?.description, "A short one-line description.")
+assert.match(folded?.description || "", /^A longer multi-line description/)
+assert.match(folded?.description || "", /several indented lines/)
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
