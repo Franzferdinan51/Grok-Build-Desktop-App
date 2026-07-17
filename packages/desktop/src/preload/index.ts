@@ -34,6 +34,7 @@ export type ElectronAPI = {
     status: () => Promise<TelegramStatus>
     connect: (token: string) => Promise<TelegramStatus>
     disconnect: () => Promise<void>
+    forgetToken: () => Promise<{ ok: boolean }>
     send: (chatId: string, text: string) => Promise<{ ok: boolean; error?: string }>
     allowedChats: () => Promise<string[]>
     pendingChats: () => Promise<string[]>
@@ -77,7 +78,8 @@ const api: ElectronAPI = {
   },
   telegram: {
     status: () => ipcRenderer.invoke("telegram:status"), connect: (token) => ipcRenderer.invoke("telegram:connect", token),
-    disconnect: () => ipcRenderer.invoke("telegram:disconnect"), send: (chatId, text) => ipcRenderer.invoke("telegram:send", chatId, text),
+    disconnect: () => ipcRenderer.invoke("telegram:disconnect"), forgetToken: () => ipcRenderer.invoke("telegram:forget-token"),
+    send: (chatId, text) => ipcRenderer.invoke("telegram:send", chatId, text),
     allowedChats: () => ipcRenderer.invoke("telegram:allowed-chats"), pendingChats: () => ipcRenderer.invoke("telegram:pending-chats"), setAllowedChats: (chatIds) => ipcRenderer.invoke("telegram:set-allowed-chats", chatIds),
   },
   memory: { status: () => ipcRenderer.invoke("memory:status"), recall: (query) => ipcRenderer.invoke("memory:recall", query) },

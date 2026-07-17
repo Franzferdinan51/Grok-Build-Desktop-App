@@ -4,6 +4,7 @@ import { getStore } from "./store"
 import { telegramInlineKeyboard, type TelegramReply } from "./telegram-format"
 import { write as writeLog } from "./logging"
 import { telegramHtml, telegramTextChunks } from "./telegram-text"
+import { withDisconnectedState, withForgottenTokenState } from "./telegram-state"
 
 export type TelegramStatus = { connected: boolean; polling?: boolean; username?: string; botId?: number; error?: string }
 
@@ -82,8 +83,23 @@ export class TelegramBridge {
 
   disconnect(): void {
     this.stop()
-    const current = getStore().get("telegram")
-    getStore().set("telegram", { allowedChatIds: this.allowedChats(), pendingChatIds: this.pendingChats(), updateOffset: this.offset, sessions: current.sessions })
+    // Soft disconnect: keep the encrypted token on disk so the user can
+    // reconnect without re-entering the BotFather secret. Use
+    // forgetToken() (or pass `{ forgetToken: true }` via the IPC) when the
+    // user explicitly asks to remove the bot.
+    getStore().set("telegram", withDisconnectedState(getStore().get("telegram")))
+  }
+
+  /**
+   * Hard disconnect: drop the encrypted bot token from disk entirely.
+   * Previously `disconnect()` left the token in place, which silently
+   * contradicted the rest of the file's encryption posture and the user's
+   * expectation when they clicked the Settings → Remove token control.
+   */
+  forgetToken(): void {
+    this.stop()
+    this.unauthorizedNotified.clear()
+    getStore().set("telegram", withForgottenTokenState(getStore().get("telegram")))
   }
 
   start(): void {

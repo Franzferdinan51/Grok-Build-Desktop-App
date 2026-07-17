@@ -18,6 +18,7 @@ import { boundedMoaContext, cleanMoaAdvisorOutput, normalizeMoaReferenceBudget }
 import { listGrokSkills } from "../src/main/grok-skills.ts"
 import { normalizeBackendStderr } from "../src/main/backend-error.ts"
 import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
+import { withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -262,6 +263,41 @@ assert.equal(normalizeBackendStderr("prefix { not json }"), "prefix { not json }
 assert.doesNotThrow(() => telegramTextChunks("hello world", 0))
 assert.equal(telegramTextChunks("hello", 0).join(""), "hello")
 assert.equal(telegramTextChunks("hello", 0).every((chunk) => chunk.length <= 0 || chunk.length === 1), true)
+
+// Telegram bridge state: the soft disconnect keeps the encrypted token so
+// the user can reconnect without re-entering the BotFather secret.
+const persisted = {
+  token: "encrypted-blob",
+  updateOffset: 1234,
+  allowedChatIds: ["100", "200"],
+  pendingChatIds: ["300"],
+  sessions: { "100": { sessionId: "abc" } },
+}
+const afterSoft = withDisconnectedState(persisted)
+assert.equal(afterSoft.token, "encrypted-blob", "soft disconnect must keep the token")
+assert.equal(afterSoft.updateOffset, 0, "soft disconnect must reset the offset")
+assert.deepEqual(afterSoft.allowedChatIds, ["100", "200"])
+assert.deepEqual(afterSoft.pendingChatIds, ["300"])
+assert.deepEqual(afterSoft.sessions, { "100": { sessionId: "abc" } })
+
+// The hard forget (Remove token) MUST drop the encrypted token from disk.
+// Previously disconnect() did not, leaving the bot secret on disk after
+// the user clicked Remove.
+const afterForget = withForgottenTokenState(persisted)
+assert.equal(afterForget.token, undefined, "hard forget must remove the encrypted token")
+assert.equal("token" in afterForget, false, "hard forget must not preserve a token key at all")
+assert.equal(afterForget.updateOffset, 0)
+assert.deepEqual(afterForget.allowedChatIds, ["100", "200"])
+assert.deepEqual(afterForget.pendingChatIds, ["300"])
+assert.deepEqual(afterForget.sessions, { "100": { sessionId: "abc" } })
+
+// Defensive: when previous state has no fields at all, both helpers still
+// produce well-formed defaults (no crashes, no undefined-typed shapes).
+const emptySoft = withDisconnectedState({})
+assert.deepEqual(emptySoft, { allowedChatIds: [], pendingChatIds: [], updateOffset: 0, sessions: {} })
+const emptyForget = withForgottenTokenState({})
+assert.equal(emptyForget.token, undefined)
+assert.deepEqual(emptyForget, { allowedChatIds: [], pendingChatIds: [], updateOffset: 0, sessions: {} })
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)

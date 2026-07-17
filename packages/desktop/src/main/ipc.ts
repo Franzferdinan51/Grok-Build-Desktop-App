@@ -136,6 +136,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("telegram:status", () => deps.telegram().status())
   ipcMain.handle("telegram:connect", async (_event, token: string) => deps.telegram().connect(token))
   ipcMain.handle("telegram:disconnect", () => deps.telegram().disconnect())
+  ipcMain.handle("telegram:forget-token", () => { deps.telegram().forgetToken(); return { ok: true } })
   ipcMain.handle("telegram:send", async (_event, chatId: string, text: string) => deps.telegram().send(chatId, text))
   ipcMain.handle("telegram:allowed-chats", () => deps.telegram().allowedChats())
   ipcMain.handle("telegram:pending-chats", () => deps.telegram().pendingChats())
