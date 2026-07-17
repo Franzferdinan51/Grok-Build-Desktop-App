@@ -127,7 +127,7 @@ export class TelegramBridge {
           { command: "status", description: "Show backend and workspace status" },
           { command: "models", description: "List available models" },
           { command: "model", description: "Select a model" },
-          { command: "projects", description: "Choose a project" },
+          { command: "project", description: "Choose a project" },
           { command: "menu", description: "Open the control menu" },
           { command: "workspace", description: "Show the active workspace" },
           { command: "cancel", description: "Cancel the active task" },

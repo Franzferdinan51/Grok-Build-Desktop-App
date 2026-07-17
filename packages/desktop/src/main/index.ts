@@ -124,7 +124,7 @@ app.whenReady().then(async () => {
     const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
     const name = command?.[1]?.toLowerCase()
     const argument = command?.[2]?.trim() || ""
-    const help = "Grok Build Desktop\n\n/run <task> — run a coding task\n/status — backend status\n/models — choose a model\n/projects — choose a workspace\n/workspace — active workspace\n/cancel — stop the current task\n\nPlain messages also run as tasks."
+    const help = "Grok Build Desktop\n\n/run <task> — run a coding task\n/status — detailed agent status\n/models — choose a model\n/project — choose a project\n/workspace — active workspace\n/cancel — stop the current task\n\nPlain messages also run as tasks."
     const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
     if (name === "start" || name === "help" || name === "menu") return menu
     if (name === "cancel") {
@@ -136,7 +136,12 @@ app.whenReady().then(async () => {
     if (name === "workspace") return `Active workspace: ${(getStore().get("workspace.last") as string | undefined) || "Scratch"}`
     if (name === "status") {
       const status = await backend.status()
-      return status.available ? `Grok Build ready${status.version ? ` · ${status.version}` : ""}${backend.isRunning() ? " · task running" : " · idle"}` : `Grok Build unavailable: ${status.error}`
+      const catalog = await backend.models()
+      const model = (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
+      const workspacePath = (getStore().get("workspace.last") as string | undefined) || join(app.getPath("userData"), "Scratch")
+      const workspace = getStore().get("projects").find((project) => project.path === workspacePath)?.name || "Scratch"
+      if (!status.available) return `🔴 Grok Build unavailable\n${status.error}`
+      return `🟢 Grok Build ready\n\nStatus: ${backend.isRunning() ? "Task running" : "Idle"}\nModel: ${model}\nProject: ${workspace}\nBackend: ${status.version || "available"}\nModels: ${catalog.models.length}\n\nUse /models or /project to change the active task context.`
     }
     if (name === "models") {
       const catalog = await backend.models()
@@ -150,7 +155,7 @@ app.whenReady().then(async () => {
       getStore().set("defaults.model", argument)
       return `Default model set to ${argument}.`
     }
-    if (name === "projects") {
+    if (name === "projects" || name === "project") {
       const projects = getStore().get("projects")
       const current = getStore().get("workspace.last") as string | undefined
       if (!projects.length) return "No projects yet. Add one in the desktop app, or use Scratch."

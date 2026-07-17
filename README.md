@@ -25,7 +25,7 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - OpenAI Codex subscription OAuth is managed by Hermes and connected to Grok Build through a localhost-only, token-isolated Responses API bridge.
 - Available Codex models are discovered after sign-in, written into Grok Build's managed configuration, and refreshed in the desktop and Telegram selectors.
 - MiniMax OAuth uses the official [`mmx`](https://github.com/MiniMax-AI/cli) device authorization flow with PKCE and automatic refresh.
-- LM Studio, ODS, MiniMax API keys, and arbitrary OpenAI-compatible endpoints can be configured as Grok Build model targets.
+- NVIDIA Build/NIM, OpenRouter, LM Studio, ODS, MiniMax API keys, and arbitrary OpenAI-compatible endpoints can be configured as first-class Grok Build model targets. Provider-native model IDs containing slashes are supported.
 - API keys are encrypted with Electron `safeStorage` and injected only into the Grok child process. OAuth tokens remain owned by their respective CLI authentication stores.
 
 ### Mixture of Agents and subagents
@@ -53,7 +53,7 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 
 - BotFather-token validation, OS-encrypted storage, polling, timeouts, limits, and clean network errors.
 - Pairing requests and explicit chat allowlisting before any task can run.
-- Native command registration with `/start`, `/help`, `/menu`, `/run`, `/status`, `/models`, `/model`, `/projects`, `/workspace`, and `/cancel`.
+- Native command registration with `/start`, `/help`, `/menu`, `/run`, rich `/status`, `/models`, `/model`, `/project`, `/workspace`, and `/cancel`. Model and project selection use inline buttons and update the active Telegram task context immediately.
 - Inline menus, clickable model selection, project/workspace selection, current-model indicators, cancellation, and plain-message tasks.
 - Telegram tasks use the current workspace, appear in Grok run history, and send their result back to the originating authorized chat.
 - Use a dedicated BotFather bot. A token already consumed by OpenClaw or another long-polling client cannot simultaneously be polled by this app.

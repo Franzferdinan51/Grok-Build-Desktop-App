@@ -9,6 +9,8 @@ export const PROVIDER_PRESETS = [
   { id: "lm-studio", label: "LM Studio", envKey: "LM_STUDIO_API_KEY", baseUrl: "http://localhost:1234/v1" },
   { id: "ods", label: "ODS", envKey: "ODS_API_KEY", baseUrl: "http://localhost:8080/v1" },
   { id: "minimax", label: "MiniMax", envKey: "MINIMAX_API_KEY", baseUrl: "https://api.minimax.io/v1" },
+  { id: "nvidia-build", label: "NVIDIA Build / NIM", envKey: "NVIDIA_API_KEY", baseUrl: "https://integrate.api.nvidia.com/v1" },
+  { id: "openrouter", label: "OpenRouter", envKey: "OPENROUTER_API_KEY", baseUrl: "https://openrouter.ai/api/v1" },
   { id: "openai-compatible", label: "OpenAI-compatible provider", envKey: "OPENAI_COMPATIBLE_API_KEY", baseUrl: "https://api.example.com/v1" },
 ] as const
 type ProviderDefinition = { id: string; label: string; envKey: string; baseUrl: string }
@@ -49,7 +51,7 @@ export function saveProviderSettings(id: string, baseUrl: string, modelId: strin
   const url = new URL(baseUrl.trim())
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error("Provider URL must use HTTP or HTTPS")
   const cleanModel = modelId.trim()
-  if (cleanModel && !/^[A-Za-z0-9_-]+$/.test(cleanModel)) throw new Error("Model ID may contain letters, numbers, underscores, and hyphens")
+  if (cleanModel && !/^[A-Za-z0-9_./:-]+$/.test(cleanModel)) throw new Error("Model ID contains unsupported characters")
   const settings = getStore().get("grok.providerSettings", {})
   settings[id] = { baseUrl: url.toString().replace(/\/$/, ""), modelId: cleanModel }
   getStore().set("grok.providerSettings", settings)
@@ -64,7 +66,8 @@ function writeManagedModels(settings: Record<string, { baseUrl: string; modelId:
   const blocks = providers().flatMap((preset) => {
     const setting = settings[preset.id]
     if (!setting?.modelId) return []
-    return [`[model.${setting.modelId}]\nbase_url = ${JSON.stringify(setting.baseUrl)}\nmodel_name = ${JSON.stringify(setting.modelId)}\napi_backend = "chat_completions"\nenv_key = ${JSON.stringify(preset.envKey)}`]
+    const alias = `${preset.id}-${setting.modelId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-")
+    return [`[model.${alias}]\nbase_url = ${JSON.stringify(setting.baseUrl)}\nmodel_name = ${JSON.stringify(setting.modelId)}\nname = ${JSON.stringify(`${preset.label} · ${setting.modelId}`)}\napi_backend = "chat_completions"\nenv_key = ${JSON.stringify(preset.envKey)}`]
   })
   const codexBlocks = (codexOAuth?.models || []).map((model) => {
     const alias = `codex-${model.id.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`
