@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, realpath, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ensurePublicCompletion, splitThinking } from "../src/renderer/chat-utils.ts"
@@ -28,7 +28,7 @@ assert.equal(await readWorkspaceFile(root, "hello.txt"), "updated\n")
 await assert.rejects(readWorkspaceFile(root, "../outside"), /escapes the workspace/)
 await assert.rejects(readWorkspaceFile(root, "escape"), /symbolic link/)
 await assert.rejects(writeWorkspaceFile(root, "escape", "blocked"), /symbolic link/)
-assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim(), root)
+assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim(), await realpath(root))
 
 execFileSync("git", ["init", "-q"], { cwd: root })
 execFileSync("git", ["add", "hello.txt"], { cwd: root })
