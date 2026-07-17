@@ -159,7 +159,7 @@ app.whenReady().then(async () => {
     const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
     const name = command?.[1]?.toLowerCase()
     const argument = command?.[2]?.trim() || ""
-    const help = "**Grok Build Desktop Agent**\n\n/run <task> — run an agent task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose Project, Scratch, or Agent mode\n/queue — show queued work\n/steer <task> — prioritize the next instruction\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n\nPlain messages continue the current agent session."
+    const help = "**Grok Build Desktop Agent**\n\n/run <task> — run an agent task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose Project, Scratch, or Agent mode\n/queue — show queued work\n/steer <task> — prioritize the next instruction\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n/restart — restart the desktop agent\n\nPlain messages continue the current agent session."
     const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "📥 Queue", data: "menu:queue" }], [{ text: "✨ New session", data: "menu:new" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
     if (name === "start" || name === "help" || name === "menu") return menu
     if (name === "new" || name === "reset") {
@@ -223,6 +223,16 @@ app.whenReady().then(async () => {
       if (wasRunning) telegramTaskCancelled = true
       if (wasRunning) backend.cancel()
       return wasRunning ? "Stopping this chat’s active Grok Build task…" : "This chat does not own the active task."
+    }
+    if (name === "restart") {
+      if (telegramRunningChat && telegramRunningChat !== chatId) return "Another chat owns the active task. Stop it there before restarting the agent."
+      if (telegramRunningChat === chatId) { telegramTaskCancelled = true; backend.cancel() }
+      setTimeout(() => {
+        writeLog("info", `Telegram-authorized agent restart requested by chat ${chatId}`)
+        app.relaunch()
+        app.exit(0)
+      }, 2_000).unref()
+      return "🔄 Restarting Grok Build Desktop and its Telegram agent. I’ll resume polling automatically when it is back."
     }
     if (name === "workspace") return `Active working directory: ${telegramSession(chatId).workspace || (getStore().get("workspace.last") as string | undefined) || "Scratch"}`
     if (name === "status") {
@@ -345,7 +355,6 @@ app.whenReady().then(async () => {
         return "Task cancelled."
       }
       finishGrokRun(run.id, { status: "completed" })
-      await telegram.editProgress(chatId, progressId, `✅ Task finished\nTime: ${elapsed()}\nModel: ${modelName}`)
     } catch (error) {
       finishGrokRun(run.id, { status: "failed", error: error instanceof Error ? error.message : String(error) })
       await telegram.editProgress(chatId, progressId, `❌ Task failed\nTime: ${elapsed()}\nModel: ${modelName}`)
@@ -367,6 +376,10 @@ app.whenReady().then(async () => {
       }
     }
     const publicResponse = publicTelegramResponse(response) || "Task completed without a public text response."
+    // The handler sends the actual answer immediately after returning. Remove
+    // the transient progress card first so users never get a misleading
+    // "Task finished" card without the model's response.
+    await telegram.deleteProgress(chatId, progressId)
     const nextTranscript = [...transcript, { role: "user" as const, text: taskText.slice(0, 20_000) }, { role: "assistant" as const, text: publicResponse.slice(0, 20_000) }].slice(-12)
     saveTelegramSession(chatId, { transcript: nextTranscript, workspace: cwd, model: input.model, lastTask: taskText.slice(0, 20_000) })
     return publicResponse

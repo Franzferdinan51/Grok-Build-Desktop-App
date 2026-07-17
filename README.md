@@ -66,7 +66,7 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - Persistent per-chat Grok Build agent sessions with model/working-directory affinity, bounded transcript recovery, FIFO queues, long-response chunking, and private-reasoning removal.
 - `/project` offers **Agent (no project)**, temporary Scratch, and saved projects. Agent mode uses a durable general-purpose working directory and does not require a Git repository.
 - Telegram responses support safe rich formatting for headings, emphasis, links, inline code, fenced code blocks, status messages, and inline keyboards. Long output is split at readable boundaries.
-- Native commands include `/run`, `/new`, rich `/status`, `/models`, `/model`, `/project`, `/workspace`, `/queue`, `/steer`, `/interrupt`, `/history`, `/schedules`, `/menu`, and `/cancel`; inline buttons update task context immediately.
+- Native commands include `/run`, `/new`, rich `/status`, `/models`, `/model`, `/project`, `/workspace`, `/queue`, `/steer`, `/interrupt`, `/history`, `/schedules`, `/menu`, `/cancel`, and `/restart`; inline buttons update task context immediately.
 - Hermes-style lifecycle commands add `/retry`, `/undo`, `/compress`, and per-session `/reasoning`, with optional idle resets and corrected-transcript recovery after rewinds.
 - Telegram tasks retain Grok Build tools, web search, verification, subagents, optional MoA, run history, progress updates, and schema-validated scheduling when Agent App Controls are enabled.
 - Use a dedicated BotFather bot. A token already consumed by OpenClaw or another long-polling client cannot simultaneously be polled by this app.
@@ -175,6 +175,7 @@ Connect a dedicated BotFather bot in the **Agent** tab, send `/start`, and appro
 /schedules             enabled scheduled work
 /new                   fresh session, same model and working directory
 /cancel                cancel active work
+/restart               restart the desktop agent and Telegram polling
 ```
 
 Plain messages run as agent instructions. Every authorized chat has independent model, working directory, transcript, checkpoint, and resumable Grok session state.

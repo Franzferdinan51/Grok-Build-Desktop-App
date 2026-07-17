@@ -169,6 +169,7 @@ export class TelegramBridge {
           { command: "menu", description: "Open the control menu" },
           { command: "workspace", description: "Show the active workspace" },
           { command: "cancel", description: "Cancel the active task" },
+          { command: "restart", description: "Restart the desktop agent" },
         ] }),
       })
     } catch { /* Command-menu setup is retried on the next app start. */ }
@@ -220,6 +221,15 @@ export class TelegramBridge {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId, text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
       })
     } catch { /* Progress is best-effort and must never fail a task. */ }
+  }
+
+  async deleteProgress(chatId: string, messageId: number | undefined): Promise<void> {
+    const token = this.token(); if (!token || !messageId) return
+    try {
+      await telegramRequest(`https://api.telegram.org/bot${token}/deleteMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+      })
+    } catch { /* Progress cleanup is best-effort and must never hide a result. */ }
   }
 
   async send(chatId: string, text: string): Promise<{ ok: boolean; error?: string }> {
