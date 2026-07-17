@@ -17,6 +17,7 @@ import { telegramTaskNeedsMoa } from "../src/main/telegram-agent-policy.ts"
 import { boundedMoaContext, cleanMoaAdvisorOutput, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
 import { listGrokSkills } from "../src/main/grok-skills.ts"
 import { normalizeBackendStderr } from "../src/main/backend-error.ts"
+import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -232,6 +233,35 @@ assert.equal(normalizeBackendStderr(""), "")
 assert.equal(normalizeBackendStderr("   \n  "), "")
 // Garbage that looks JSON-ish but isn't must not crash and must pass through.
 assert.equal(normalizeBackendStderr("prefix { not json }"), "prefix { not json }")
+
+// Scheduler: "Run now" on a user-paused schedule must NOT silently flip
+// enabled back to true. Previously runScheduleNow hard-set `enabled: true`,
+// which discarded the user's Pause intent and, after the manual run, caused
+// paused repeat tasks to be re-enabled for one tick before the next user
+// pause kicked in. The shipped withRunNowPatch only touches nextRunAt.
+{
+  const pausedRepeat = {
+    id: "abc", name: "n", prompt: "p", cwd: "/tmp", runAt: 1000,
+    enabled: false, repeatMinutes: 30, nextRunAt: 999_999,
+  }
+  const bumped = withRunNowPatch(pausedRepeat, 5_000)
+  assert.equal(bumped.enabled, false, "Run now must not flip enabled back to true")
+  assert.equal(bumped.nextRunAt, 5_000)
+  assert.equal(bumped.repeatMinutes, 30, "repeatMinutes must be preserved")
+  // Even a one-time task keeps its existing enabled value.
+  const oneTime = { ...pausedRepeat, enabled: true, repeatMinutes: undefined }
+  const bumpedOnce = withRunNowPatch(oneTime, 9_999)
+  assert.equal(bumpedOnce.enabled, true)
+  assert.equal(bumpedOnce.nextRunAt, 9_999)
+}
+
+// telegramTextChunks must not enter an infinite loop on limit <= 0. The
+// shipped code previously hit `Math.min(1000, 0 / 2) = 0` and `split = limit
+// = 0`, leaving `remaining` unchanged and eventually tripping
+// RangeError: Invalid array length inside Array.push.
+assert.doesNotThrow(() => telegramTextChunks("hello world", 0))
+assert.equal(telegramTextChunks("hello", 0).join(""), "hello")
+assert.equal(telegramTextChunks("hello", 0).every((chunk) => chunk.length <= 0 || chunk.length === 1), true)
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)

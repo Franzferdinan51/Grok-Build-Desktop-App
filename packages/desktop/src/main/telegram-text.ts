@@ -1,10 +1,14 @@
 export function telegramTextChunks(text: string, limit = 3000): string[] {
   const chunks: string[] = []
+  // A non-positive limit is nonsensical; surface the input unchanged instead
+  // of looping forever (Array.push can throw RangeError on overflow).
+  const safeLimit = Math.max(1, Math.floor(limit))
   let remaining = text.trim()
-  while (remaining.length > limit) {
-    let split = remaining.lastIndexOf("\n", limit)
-    if (split < Math.min(1000, limit / 2)) split = remaining.lastIndexOf(" ", limit)
-    if (split < Math.min(1000, limit / 2)) split = limit
+  const minSplit = Math.max(1, Math.floor(safeLimit / 2))
+  while (remaining.length > safeLimit) {
+    let split = remaining.lastIndexOf("\n", safeLimit)
+    if (split < Math.min(1000, minSplit)) split = remaining.lastIndexOf(" ", safeLimit)
+    if (split < Math.min(1000, minSplit)) split = safeLimit
     chunks.push(remaining.slice(0, split).trimEnd())
     remaining = remaining.slice(split).trimStart()
   }

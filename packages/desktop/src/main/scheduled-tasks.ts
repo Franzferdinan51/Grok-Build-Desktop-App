@@ -2,9 +2,11 @@ import { randomUUID } from "crypto"
 import { GrokBuildBackend } from "./grok-build-backend"
 import { finishGrokRun, startGrokRun } from "./grok-runs"
 import { getStore, type ScheduledGrokTask } from "./store"
+import { withRunNowPatch } from "./scheduled-tasks-utils"
 
 export type NewSchedule = Omit<ScheduledGrokTask, "id" | "enabled" | "nextRunAt" | "lastRunAt" | "lastStatus">
 export const listSchedules = () => getStore().get("schedules", []).sort((a, b) => a.nextRunAt - b.nextRunAt)
+
 export function addSchedule(input: NewSchedule): ScheduledGrokTask {
   if (!input.name.trim() || !input.prompt.trim() || !input.cwd.trim()) throw new Error("Name, prompt, and workspace are required")
   const task: ScheduledGrokTask = { ...input, id: randomUUID(), enabled: true, nextRunAt: input.runAt }
@@ -12,7 +14,7 @@ export function addSchedule(input: NewSchedule): ScheduledGrokTask {
 }
 export function removeSchedule(id: string) { getStore().set("schedules", listSchedules().filter((task) => task.id !== id)) }
 export function toggleSchedule(id: string, enabled: boolean) { getStore().set("schedules", listSchedules().map((task) => task.id === id ? { ...task, enabled } : task)) }
-export function runScheduleNow(id: string) { getStore().set("schedules", listSchedules().map((task) => task.id === id ? { ...task, enabled: true, nextRunAt: Date.now() } : task)) }
+export function runScheduleNow(id: string, at: number = Date.now()) { getStore().set("schedules", listSchedules().map((task) => task.id === id ? withRunNowPatch(task, at) : task)) }
 
 export class GrokTaskScheduler {
   private timer?: NodeJS.Timeout; private checking = false
