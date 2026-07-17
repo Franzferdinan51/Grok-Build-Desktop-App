@@ -36,7 +36,7 @@ ${SKILL_STANDARD}
 When finished, report the skill name, its saved path, what it learned, and how you verified it.`
 }
 
-export function buildAutoLearnPrompt(conversation: LearnMessage[]): string {
+export function buildAutoLearnPrompt(conversation: LearnMessage[], skillCount = 0): string {
   const transcript = conversation
     .slice(-16)
     .map((message) => `${message.role === "user" ? "User" : "Grok"}: ${message.text}`)
@@ -48,7 +48,12 @@ export function buildAutoLearnPrompt(conversation: LearnMessage[]): string {
 ## Recent conversation
 ${transcript}
 
-Look specifically for a user correction, a non-obvious successful fix, a reusable debugging path, a workflow improvement, or an existing project skill that proved incomplete. First inspect the existing skills under .grok/skills. Prefer a small targeted improvement to an existing relevant skill. Create a new class-level skill only when no existing skill fits and the lesson is genuinely reusable.
+## Existing skills
+${skillCount > 0
+    ? `There ${skillCount === 1 ? "is 1 existing skill" : `are ${skillCount} existing skills`} under .grok/skills. Read them first; a small targeted improvement to a relevant existing skill is strongly preferred over creating a new one.`
+    : "No skills exist yet under .grok/skills. Only create a new skill if the lesson below is genuinely reusable."}
+
+Look specifically for a user correction, a non-obvious successful fix, a reusable debugging path, a workflow improvement, or an existing project skill that proved incomplete. Create a new class-level skill only when no existing skill fits and the lesson is genuinely reusable.
 
 If there is no strong reusable lesson, make no changes. Do not manufacture a skill merely to appear productive. Modify only .grok/skills/** and never touch application source, configuration, Git state, or files outside this workspace.
 
