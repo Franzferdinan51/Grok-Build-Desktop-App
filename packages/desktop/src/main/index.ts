@@ -13,6 +13,7 @@
 
 import { app, BrowserWindow, Menu } from "electron"
 import { mkdirSync } from "fs"
+import { publicTelegramResponse } from "./telegram-output"
 import { join } from "path"
 import windowStateKeeper from "electron-window-state"
 import { registerIpcHandlers } from "./ipc"
@@ -208,7 +209,7 @@ app.whenReady().then(async () => {
     } finally {
       clearInterval(activityTimer)
     }
-    return response.trim().slice(0, 4096) || "Task completed without a text response."
+    return publicTelegramResponse(response).slice(0, 4096) || "Task completed without a public text response."
   })
   telegram.start()
 
