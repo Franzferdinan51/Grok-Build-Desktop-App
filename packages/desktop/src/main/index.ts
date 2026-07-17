@@ -279,7 +279,7 @@ app.whenReady().then(async () => {
       return "🔄 Restarting Grok Build Desktop and its Telegram agent. I’ll resume polling automatically when it is back."
     }
     if (name === "workspace") return `Active working directory: ${telegramSession(chatId).workspace || (getStore().get("workspace.last") as string | undefined) || "Scratch"}`
-    if (name === "status") {
+    if (name === "status" || name === "health") {
       const status = await backend.status()
       const catalog = await backend.models()
       const agent = telegramSession(chatId)

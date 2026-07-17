@@ -5,7 +5,7 @@ import { telegramInlineKeyboard, type TelegramReply } from "./telegram-format"
 import { write as writeLog } from "./logging"
 import { telegramHtml, telegramTextChunks } from "./telegram-text"
 
-export type TelegramStatus = { connected: boolean; username?: string; botId?: number; error?: string }
+export type TelegramStatus = { connected: boolean; polling?: boolean; username?: string; botId?: number; error?: string }
 
 export type TelegramResponse<T> = { status: number; payload: T }
 
@@ -59,7 +59,7 @@ export class TelegramBridge {
       if (authError) return { connected: false, error: authError.message }
       const payload = response.payload
       if (!payload.ok || !payload.result) return { connected: false, error: payload.description || "Telegram rejected the token" }
-      return { connected: true, botId: payload.result.id, username: payload.result.username }
+      return { connected: true, polling: this.polling, botId: payload.result.id, username: payload.result.username }
     } catch (error) { return { connected: false, error: (error as Error).message } }
   }
 
@@ -76,7 +76,7 @@ export class TelegramBridge {
       this.offset = 0
       getStore().set("telegram", { ...getStore().get("telegram"), token: safeStorage.encryptString(clean).toString("base64"), updateOffset: 0 })
       this.start()
-      return { connected: true, botId: payload.result.id, username: payload.result.username }
+      return { connected: true, polling: this.polling, botId: payload.result.id, username: payload.result.username }
     } catch (error) { return { connected: false, error: error instanceof Error ? error.message : String(error) } }
   }
 
@@ -179,6 +179,7 @@ export class TelegramBridge {
           { command: "run", description: "Run a Grok Build task" },
           { command: "new", description: "Start a fresh agent session" },
           { command: "status", description: "Show backend and workspace status" },
+          { command: "health", description: "Quick agent health check" },
           { command: "models", description: "List available models" },
           { command: "model", description: "Select a model" },
           { command: "project", description: "Choose a project" },
