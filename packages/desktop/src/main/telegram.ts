@@ -3,7 +3,7 @@ import { safeStorage } from "electron"
 import { getStore } from "./store"
 import { telegramInlineKeyboard, type TelegramReply } from "./telegram-format"
 import { write as writeLog } from "./logging"
-import { telegramTextChunks } from "./telegram-text"
+import { telegramHtml, telegramTextChunks } from "./telegram-text"
 
 export type TelegramStatus = { connected: boolean; username?: string; botId?: number; error?: string }
 
@@ -182,7 +182,7 @@ export class TelegramBridge {
   private async sendRich(chatId: string, reply: TelegramReply): Promise<void> {
     const token = this.token(); if (!token) return
     const payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: reply.text.slice(0, 4096), reply_markup: telegramInlineKeyboard(reply) }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(reply.text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: telegramInlineKeyboard(reply) }),
     })
     if (!payload.ok) throw new Error(payload.description || "Telegram send failed")
   }
@@ -202,7 +202,7 @@ export class TelegramBridge {
     const token = this.token(); if (!token) return undefined
     try {
       const payload = await telegramRequest<{ ok: boolean; result?: { message_id: number } }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 4096) }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
       })
       return payload.ok ? payload.result?.message_id : undefined
     } catch { return undefined }
@@ -212,7 +212,7 @@ export class TelegramBridge {
     const token = this.token(); if (!token || !messageId) return
     try {
       await telegramRequest(`https://api.telegram.org/bot${token}/editMessageText`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId, text: text.slice(0, 4096) }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId, text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
       })
     } catch { /* Progress is best-effort and must never fail a task. */ }
   }
@@ -224,7 +224,7 @@ export class TelegramBridge {
     if (!text.trim()) return { ok: false, error: "A message is required" }
     try {
       const payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: text.slice(0, 4096) }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
       })
       return payload.ok ? { ok: true } : { ok: false, error: payload.description || "Telegram send failed" }
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }

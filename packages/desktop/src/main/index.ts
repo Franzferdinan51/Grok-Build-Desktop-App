@@ -143,6 +143,11 @@ app.whenReady().then(async () => {
       mkdirSync(scratch, { recursive: true }); saveTelegramSession(chatId, { workspace: scratch, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
       return `✓ Project set to Scratch\n${scratch}\nStarted a fresh project session.`
     }
+    if (text === "pick_project_agent") {
+      const workspace = join(app.getPath("userData"), "Agent Workspace")
+      mkdirSync(workspace, { recursive: true }); saveTelegramSession(chatId, { workspace, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
+      return `✓ Agent mode enabled\nWorking directory: ${workspace}\nThis is a persistent general-purpose workspace and is not tied to any project.`
+    }
     if (text === "menu:models") text = "/models"
     if (text === "menu:projects") text = "/projects"
     if (text === "menu:status") text = "/status"
@@ -152,7 +157,7 @@ app.whenReady().then(async () => {
     const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
     const name = command?.[1]?.toLowerCase()
     const argument = command?.[2]?.trim() || ""
-    const help = "Grok Build Desktop Agent\n\n/run <task> — run a coding task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose a project\n/queue — show queued work\n/steer <task> — run next with priority\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n\nPlain messages continue the current agent session."
+    const help = "**Grok Build Desktop Agent**\n\n/run <task> — run an agent task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose Project, Scratch, or Agent mode\n/queue — show queued work\n/steer <task> — prioritize the next instruction\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n\nPlain messages continue the current agent session."
     const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "📥 Queue", data: "menu:queue" }], [{ text: "✨ New session", data: "menu:new" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
     if (name === "start" || name === "help" || name === "menu") return menu
     if (name === "new" || name === "reset") {
@@ -244,7 +249,9 @@ app.whenReady().then(async () => {
       const projects = getStore().get("projects")
       const current = telegramSession(chatId).workspace || getStore().get("workspace.last") as string | undefined
       const scratch = join(app.getPath("userData"), "Scratch")
-      return { text: "Choose the project used by Telegram tasks:", buttons: [
+      const agentWorkspace = join(app.getPath("userData"), "Agent Workspace")
+      return { text: "Choose where the agent works. Agent mode is persistent and does not require a project:", buttons: [
+        [{ text: `${current === agentWorkspace ? "✓ " : ""}🤖 Agent (no project)`, data: "pick_project_agent" }],
         [{ text: `${current === scratch ? "✓ " : ""}Scratch`, data: "pick_project_scratch" }],
         ...projects.slice(0, 30).map((project) => [{ text: `${project.path === current ? "✓ " : ""}${project.name}`.slice(0, 60), data: `pick_project_id:${project.id}` }]),
       ] }
