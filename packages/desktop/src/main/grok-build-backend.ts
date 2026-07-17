@@ -78,6 +78,7 @@ export type RunTaskInput = {
     referenceReasoningEffort?: "low" | "medium" | "high"
     aggregatorReasoningEffort?: "low" | "medium" | "high"
     referenceTokenBudget?: number
+    referenceTimeoutMs?: number
     context?: string
   }
 }
@@ -234,6 +235,7 @@ export class GrokBuildBackend {
         const candidates = await Promise.allSettled(references.map(async (referenceModel, index) => {
           const boundedContext = boundedMoaContext(input.moa?.context)
           const referenceTokenBudget = normalizeMoaReferenceBudget(input.moa?.referenceTokenBudget)
+          const referenceTimeoutMs = Math.min(180_000, Math.max(10_000, input.moa?.referenceTimeoutMs || 90_000))
           const conversationContext = boundedContext
             ? `\n\nConversation context available to the acting agent:\n${boundedContext}`
             : ""
@@ -241,9 +243,9 @@ export class GrokBuildBackend {
           // Some providers spend an initial turn attempting workspace inspection
           // even in plan mode. A small bounded budget lets them recover and
           // produce advice without granting edit permissions.
-          const candidateArgs = ["-p", candidatePrompt, "--cwd", input.cwd, "--output-format", "plain", "--permission-mode", "plan", "--no-subagents", "--max-turns", "4", "--model", referenceModel]
+          const candidateArgs = ["-p", candidatePrompt, "--cwd", input.cwd, "--output-format", "plain", "--permission-mode", "plan", "--no-subagents", "--max-turns", referenceTimeoutMs <= 30_000 ? "2" : "4", "--model", referenceModel]
           if (input.moa?.referenceReasoningEffort) candidateArgs.push("--reasoning-effort", input.moa.referenceReasoningEffort)
-          const { stdout } = await execFileAsync(command, candidateArgs, { timeout: 900_000, maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: this.environment() })
+          const { stdout } = await execFileAsync(command, candidateArgs, { timeout: referenceTimeoutMs, killSignal: "SIGTERM", maxBuffer: 8 * 1024 * 1024, signal: this.moaAbort!.signal, env: this.environment() })
           const advice = cleanMoaAdvisorOutput(stdout)
           onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed. Advice was passed privately to the acting aggregator.` })
           return { source: `Reference ${index + 1} — ${referenceModel}`, advice }

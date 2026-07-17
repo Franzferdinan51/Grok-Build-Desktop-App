@@ -47,7 +47,7 @@ const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
 type TelegramAgentSession = {
   sessionId?: string; model?: string; workspace?: string; updatedAt: number
   transcript?: { role: "user" | "assistant"; text: string }[]
-  lastTask?: string; compressedSummary?: string; thinking?: boolean
+  lastTask?: string; compressedSummary?: string; thinking?: boolean; mode?: "fast" | "balanced" | "deep"
 }
 const telegramSession = (chatId: string): TelegramAgentSession => getStore().get("telegram").sessions?.[chatId] || { updatedAt: Date.now() }
 const saveTelegramSession = (chatId: string, patch: Partial<TelegramAgentSession>): TelegramAgentSession => {
@@ -150,6 +150,12 @@ app.whenReady().then(async () => {
       mkdirSync(workspace, { recursive: true }); saveTelegramSession(chatId, { workspace, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
       return `✓ Agent mode enabled\nWorking directory: ${workspace}\nThis is a persistent general-purpose workspace and is not tied to any project.`
     }
+    const modeChoice = text.match(/^pick_mode:(fast|balanced|deep)$/)
+    if (modeChoice) {
+      const mode = modeChoice[1] as "fast" | "balanced" | "deep"
+      saveTelegramSession(chatId, { mode })
+      return `⚡ Response mode set to ${mode}.`
+    }
     if (text === "menu:models") text = "/models"
     if (text === "menu:projects") text = "/projects"
     if (text === "menu:status") text = "/status"
@@ -159,8 +165,8 @@ app.whenReady().then(async () => {
     const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
     const name = command?.[1]?.toLowerCase()
     const argument = command?.[2]?.trim() || ""
-    const help = "**Grok Build Desktop Agent**\n\n/run <task> — run an agent task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose Project, Scratch, or Agent mode\n/queue — show queued work\n/steer <task> — prioritize the next instruction\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n/restart — restart the desktop agent\n\nPlain messages continue the current agent session."
-    const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "📥 Queue", data: "menu:queue" }], [{ text: "✨ New session", data: "menu:new" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
+    const help = "**Grok Build Desktop Agent**\n\n/run <task> — run an agent task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose Project, Scratch, or Agent mode\n/mode [fast|balanced|deep] — response-speed profile\n/queue — show queued work\n/steer <task> — prioritize the next instruction\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n/restart — restart the desktop agent\n\nPlain messages continue the current agent session."
+    const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "⚡ Fast", data: "pick_mode:fast" }, { text: "⚖️ Balanced", data: "pick_mode:balanced" }, { text: "🧠 Deep", data: "pick_mode:deep" }], [{ text: "📊 Status", data: "menu:status" }, { text: "📥 Queue", data: "menu:queue" }], [{ text: "✨ New session", data: "menu:new" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
     if (name === "start" || name === "help" || name === "menu") return menu
     if (name === "new" || name === "reset") {
       saveTelegramSession(chatId, { sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
@@ -198,6 +204,14 @@ app.whenReady().then(async () => {
       const enabled = normalized === "on" || normalized === "high"
       saveTelegramSession(chatId, { thinking: enabled })
       return `🧠 Session reasoning ${enabled ? "enabled" : "disabled"}.`
+    }
+    if (name === "mode") {
+      const normalized = argument.toLowerCase() as "fast" | "balanced" | "deep"
+      const current = telegramSession(chatId).mode || "balanced"
+      if (!argument) return `Response mode: ${current}\nFast uses the direct model, balanced uses a short advisor deadline for substantial work, and deep runs the full configured MoA.\nUse /mode fast, /mode balanced, or /mode deep.`
+      if (!["fast", "balanced", "deep"].includes(normalized)) return "Usage: /mode fast|balanced|deep"
+      saveTelegramSession(chatId, { mode: normalized })
+      return `⚡ Response mode set to ${normalized}.`
     }
     if (name === "retry") {
       const agent = telegramSession(chatId)
@@ -244,7 +258,8 @@ app.whenReady().then(async () => {
       const workspace = workspacePath === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : getStore().get("projects").find((project) => project.path === workspacePath)?.name || "Scratch"
       const moaOn = Boolean(getStore().get("moa.enabled"))
       const moaAggregator = (getStore().get("moa.aggregatorModel") as string | undefined) || model
-      const moaLine = moaOn ? `\nMoA: Complex tasks → ${moaAggregator}; simple messages → ${model}` : "\nMoA: Off"
+      const mode = agent.mode || "balanced"
+      const moaLine = moaOn ? `\nMode: ${mode}\nMoA: ${mode === "fast" ? "Bypassed for fastest replies" : mode === "deep" ? `Full configured advisors → ${moaAggregator}` : `Adaptive, short advisor deadline → ${moaAggregator}`}` : "\nMoA: Off"
       if (!status.available) return `🔴 Grok Build unavailable\n${status.error}`
       return `🟢 Grok Build agent ready\n\nStatus: ${backend.isRunning() ? `Task running${telegramRunningChat === chatId ? " in this chat" : ""}` : "Idle"}\nSession: ${agent.sessionId ? "Resumable" : "Fresh"}\nDirect model: ${model}${moaLine}\nProject: ${workspace}\nBackend: ${status.version || "available"}\nModels: ${catalog.models.length}\n\nUse /new to reset, or /models and /project to change context.`
     }
@@ -296,6 +311,9 @@ app.whenReady().then(async () => {
       : taskText.slice(0, 20_000)
     const moaEnabled = Boolean(getStore().get("moa.enabled"))
     const moaReferences = ((getStore().get("moa.referenceModels") as string[] | undefined) || []).filter(Boolean).slice(0, 8)
+    const responseMode = agent.mode || "balanced"
+    const useMoa = moaEnabled && responseMode !== "fast" && moaReferences.length >= 2 && telegramTaskNeedsMoa(taskText)
+    const activeReferences = responseMode === "deep" ? moaReferences : moaReferences.slice(0, 2)
     const input = {
       prompt: agentPrompt, cwd,
       model: agent.model || getStore().get("defaults.model") as string | undefined,
@@ -308,12 +326,13 @@ app.whenReady().then(async () => {
       disableWebSearch: getStore().get("defaults.webSearch") === false,
       subagents: (getStore().get("agent.subagents") as boolean | undefined) ?? true,
       longTermMemory: Boolean(getStore().get("memory.telegramEnabled")),
-      moa: moaEnabled && moaReferences.length >= 2 && telegramTaskNeedsMoa(taskText) ? {
-        referenceModels: moaReferences,
+      moa: useMoa ? {
+        referenceModels: activeReferences,
         aggregatorModel: (getStore().get("moa.aggregatorModel") as string | undefined) || agent.model,
-        referenceReasoningEffort: (getStore().get("moa.referenceEffort") as "low" | "medium" | "high" | undefined) || "medium",
+        referenceReasoningEffort: responseMode === "deep" ? ((getStore().get("moa.referenceEffort") as "low" | "medium" | "high" | undefined) || "medium") : "low",
         aggregatorReasoningEffort: (getStore().get("moa.aggregatorEffort") as "low" | "medium" | "high" | undefined) || "high",
-        referenceTokenBudget: (getStore().get("moa.referenceTokenBudget") as number | undefined) || 600,
+        referenceTokenBudget: responseMode === "deep" ? ((getStore().get("moa.referenceTokenBudget") as number | undefined) || 600) : Math.min(400, (getStore().get("moa.referenceTokenBudget") as number | undefined) || 600),
+        referenceTimeoutMs: responseMode === "deep" ? 90_000 : 25_000,
         context: fallbackContext || undefined,
       } : undefined,
     }

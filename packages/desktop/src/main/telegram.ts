@@ -157,6 +157,7 @@ export class TelegramBridge {
           { command: "models", description: "List available models" },
           { command: "model", description: "Select a model" },
           { command: "project", description: "Choose a project" },
+          { command: "mode", description: "Choose fast, balanced, or deep responses" },
           { command: "queue", description: "Show queued agent work" },
           { command: "steer", description: "Prioritize the next instruction" },
           { command: "interrupt", description: "Stop and redirect the active task" },

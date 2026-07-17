@@ -1,4 +1,4 @@
-import { spawn } from "child_process"
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 import { homedir } from "os"
 import { join, resolve } from "path"
@@ -43,24 +43,71 @@ function identityContext(): string {
   }).join("\n\n")
 }
 
-async function callTool(name: string, args: Record<string, unknown>, timeoutMs = 20_000): Promise<unknown> {
+type PendingMemoryCall = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+let memoryProcess: ChildProcessWithoutNullStreams | null = null
+let memoryBuffer = ""
+let memoryRequestId = 0
+const pendingMemoryCalls = new Map<number, PendingMemoryCall>()
+
+function stopMemoryProcess(error: Error): void {
+  const child = memoryProcess
+  memoryProcess = null
+  memoryBuffer = ""
+  for (const pending of pendingMemoryCalls.values()) { clearTimeout(pending.timer); pending.reject(error) }
+  pendingMemoryCalls.clear()
+  if (child && !child.killed) child.kill("SIGTERM")
+}
+
+function ensureMemoryProcess(): ChildProcessWithoutNullStreams {
   const repo = repository()
   if (!repo) throw new Error("DuckBot RAG repository or Python environment was not found")
+  if (memoryProcess && !memoryProcess.killed) return memoryProcess
+  const child = spawn(join(repo, ".venv", "bin", "python"), ["-m", "src.mcp_server"], { cwd: repo, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PYTHONPATH: repo } })
+  memoryProcess = child
+  let stderr = ""
+  child.stdout.on("data", (chunk) => {
+    memoryBuffer += chunk.toString()
+    const lines = memoryBuffer.split(/\r?\n/)
+    memoryBuffer = lines.pop() || ""
+    for (const line of lines) {
+      if (!line.trim().startsWith("{")) continue
+      try {
+        const response = JSON.parse(line) as { id?: number; error?: { message?: string }; result?: { content?: { text?: string }[] } }
+        if (typeof response.id !== "number") continue
+        const pending = pendingMemoryCalls.get(response.id)
+        if (!pending) continue
+        pendingMemoryCalls.delete(response.id); clearTimeout(pending.timer)
+        if (response.error) pending.reject(new Error(response.error.message || "DuckBot memory error"))
+        else {
+          const block = response.result?.content?.[0]?.text
+          try { pending.resolve(typeof block === "string" ? JSON.parse(block) : response.result) }
+          catch { pending.resolve(block ?? response.result) }
+        }
+      } catch { /* Ignore non-protocol output from Python dependencies. */ }
+    }
+  })
+  child.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString()).slice(-4_000) })
+  child.on("error", (error) => stopMemoryProcess(error))
+  child.on("exit", (code) => { if (memoryProcess === child) stopMemoryProcess(new Error(stderr.trim() || `DuckBot memory exited ${code}`)) })
+  return child
+}
+
+async function callTool(name: string, args: Record<string, unknown>, timeoutMs = 20_000): Promise<unknown> {
+  const child = ensureMemoryProcess()
+  const id = ++memoryRequestId
   return new Promise((resolveCall, reject) => {
-    const child = spawn(join(repo, ".venv", "bin", "python"), ["-m", "src.mcp_server"], { cwd: repo, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PYTHONPATH: repo } })
-    let stdout = ""; let stderr = ""; let settled = false
-    const finish = (error?: Error, value?: unknown) => { if (settled) return; settled = true; clearTimeout(timer); child.kill("SIGTERM"); if (error) reject(error); else resolveCall(value) }
-    const timer = setTimeout(() => finish(new Error("DuckBot memory timed out")), timeoutMs)
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString()
-      const line = stdout.split(/\r?\n/).find((entry) => entry.trim().startsWith("{"))
-      if (!line) return
-      try { const response = JSON.parse(line); if (response.error) finish(new Error(response.error.message || "DuckBot memory error")); else { const block = response.result?.content?.[0]?.text; finish(undefined, typeof block === "string" ? JSON.parse(block) : response.result) } } catch { /* incomplete line */ }
+    const timer = setTimeout(() => {
+      pendingMemoryCalls.delete(id)
+      reject(new Error("DuckBot memory timed out"))
+      // A wedged server would make every later call slow; restart it lazily.
+      stopMemoryProcess(new Error("DuckBot memory server was restarted after a timeout"))
+    }, timeoutMs)
+    pendingMemoryCalls.set(id, { resolve: resolveCall, reject, timer })
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })}\n`, (error) => {
+      if (!error) return
+      const pending = pendingMemoryCalls.get(id)
+      if (pending) { pendingMemoryCalls.delete(id); clearTimeout(pending.timer); pending.reject(error) }
     })
-    child.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString()).slice(-4_000) })
-    child.on("error", (error) => finish(error))
-    child.on("exit", (code) => { if (!settled) finish(new Error(stderr.trim() || `DuckBot memory exited ${code}`)) })
-    child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })}\n`)
   })
 }
 
