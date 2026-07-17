@@ -2,6 +2,7 @@
 import { safeStorage } from "electron"
 import { getStore } from "./store"
 import { telegramInlineKeyboard, type TelegramReply } from "./telegram-format"
+import { write as writeLog } from "./logging"
 
 export type TelegramStatus = { connected: boolean; username?: string; botId?: number; error?: string }
 
@@ -66,10 +67,30 @@ export class TelegramBridge {
     this.offset = Number(getStore().get("telegram").updateOffset) || 0
     this.polling = true
     const generation = ++this.pollGeneration
-    void this.configureCommands()
-    void this.poll(generation)
+    void this.bootstrap(generation)
   }
   stop(): void { this.polling = false; this.pollGeneration++ }
+
+  private async bootstrap(generation: number): Promise<void> {
+    const token = this.token()
+    if (!token || !this.polling || generation !== this.pollGeneration) return
+    try {
+      // Telegram rejects getUpdates while a webhook is configured. A token
+      // connected to this desktop app explicitly opts into local long polling,
+      // so remove stale webhook configuration without dropping queued updates.
+      const payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/deleteWebhook`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drop_pending_updates: false }),
+      })
+      if (!payload.ok) throw new Error(payload.description || "Could not clear Telegram webhook")
+      await this.configureCommands()
+      writeLog("info", `Telegram polling started at update ${this.offset}`)
+      await this.poll(generation)
+    } catch (error) {
+      if (!this.polling || generation !== this.pollGeneration) return
+      writeLog("error", `Telegram bootstrap failed: ${error instanceof Error ? error.message : String(error)}`)
+      this.polling = false
+    }
+  }
 
   private async poll(generation: number): Promise<void> {
     while (this.polling && generation === this.pollGeneration) {
@@ -100,6 +121,7 @@ export class TelegramBridge {
         if (payload.result?.length) getStore().set("telegram", { ...getStore().get("telegram"), updateOffset: this.offset })
       } catch (error) {
         if (!this.polling || generation !== this.pollGeneration) return
+        writeLog("error", `Telegram polling failed: ${error instanceof Error ? error.message : String(error)}`)
         await new Promise((resolve) => setTimeout(resolve, 2_000))
       }
     }
@@ -107,6 +129,7 @@ export class TelegramBridge {
 
   private async handleMessage(chatId: string, text: string): Promise<void> {
     try {
+      writeLog("info", `Telegram command received from authorized chat ${chatId}: ${text.startsWith("/") ? text.split(/\s/, 1)[0] : "message"}`)
       const reply = await this.handler!(chatId, text)
       if (typeof reply === "string") await this.send(chatId, reply)
       else await this.sendRich(chatId, reply)
