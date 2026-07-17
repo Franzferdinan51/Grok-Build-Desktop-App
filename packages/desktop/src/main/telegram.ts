@@ -3,6 +3,7 @@ import { safeStorage } from "electron"
 import { getStore } from "./store"
 import { telegramInlineKeyboard, type TelegramReply } from "./telegram-format"
 import { write as writeLog } from "./logging"
+import { telegramTextChunks } from "./telegram-text"
 
 export type TelegramStatus = { connected: boolean; username?: string; botId?: number; error?: string }
 
@@ -60,7 +61,11 @@ export class TelegramBridge {
     } catch (error) { return { connected: false, error: error instanceof Error ? error.message : String(error) } }
   }
 
-  disconnect(): void { this.stop(); getStore().set("telegram", { allowedChatIds: this.allowedChats(), pendingChatIds: this.pendingChats(), updateOffset: this.offset }) }
+  disconnect(): void {
+    this.stop()
+    const current = getStore().get("telegram")
+    getStore().set("telegram", { allowedChatIds: this.allowedChats(), pendingChatIds: this.pendingChats(), updateOffset: this.offset, sessions: current.sessions })
+  }
 
   start(): void {
     if (this.polling || !this.token()) return
@@ -131,7 +136,7 @@ export class TelegramBridge {
     try {
       writeLog("info", `Telegram command received from authorized chat ${chatId}: ${text.startsWith("/") ? text.split(/\s/, 1)[0] : "message"}`)
       const reply = await this.handler!(chatId, text)
-      if (typeof reply === "string") await this.send(chatId, reply)
+      if (typeof reply === "string") await this.sendLong(chatId, reply)
       else await this.sendRich(chatId, reply)
     } catch (error) {
       await this.send(chatId, `Task failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -147,6 +152,7 @@ export class TelegramBridge {
           { command: "start", description: "Show setup and available commands" },
           { command: "help", description: "Show command help" },
           { command: "run", description: "Run a Grok Build task" },
+          { command: "new", description: "Start a fresh agent session" },
           { command: "status", description: "Show backend and workspace status" },
           { command: "models", description: "List available models" },
           { command: "model", description: "Select a model" },
@@ -211,5 +217,12 @@ export class TelegramBridge {
       })
       return payload.ok ? { ok: true } : { ok: false, error: payload.description || "Telegram send failed" }
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+  }
+
+  async sendLong(chatId: string, text: string): Promise<void> {
+    for (const chunk of telegramTextChunks(text)) {
+      const result = await this.send(chatId, chunk)
+      if (!result.ok) throw new Error(result.error || "Telegram send failed")
+    }
   }
 }

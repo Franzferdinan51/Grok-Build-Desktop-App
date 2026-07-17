@@ -39,6 +39,19 @@ const preview = new PreviewServer()
 let logger: ReturnType<typeof initLogging>
 let updateTimer: ReturnType<typeof setInterval> | undefined
 let telegramTaskCancelled = false
+let telegramRunningChat = ""
+
+type TelegramAgentSession = {
+  sessionId?: string; model?: string; workspace?: string; updatedAt: number
+  transcript?: { role: "user" | "assistant"; text: string }[]
+}
+const telegramSession = (chatId: string): TelegramAgentSession => getStore().get("telegram").sessions?.[chatId] || { updatedAt: Date.now() }
+const saveTelegramSession = (chatId: string, patch: Partial<TelegramAgentSession>): TelegramAgentSession => {
+  const telegramSettings = getStore().get("telegram")
+  const next = { ...telegramSession(chatId), ...patch, updatedAt: Date.now() }
+  getStore().set("telegram", { ...telegramSettings, sessions: { ...telegramSettings.sessions, [chatId]: next } })
+  return next
+}
 
 // ── Window factory ────────────────────────────────────────────────────────────
 
@@ -109,24 +122,24 @@ app.whenReady().then(async () => {
     if (modelChoice) {
       const catalog = await backend.models(); const selected = catalog.models[Number(modelChoice[1])]
       if (!selected) return "That model is no longer available. Open /models again."
-      getStore().set("defaults.model", selected); return `✓ Model set to ${selected}`
+      saveTelegramSession(chatId, { model: selected }); return `✓ Model set to ${selected}`
     }
     const projectChoice = text.match(/^pick_project:(\d+)$/)
     if (projectChoice) {
       const selected = getStore().get("projects")[Number(projectChoice[1])]
       if (!selected) return "That project is no longer available. Open /projects again."
-      getStore().set("workspace.last", selected.path); return `✓ Workspace set to ${selected.name}\n${selected.path}`
+      saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [] }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
     }
     const projectIdChoice = text.match(/^pick_project_id:([a-f0-9-]+)$/i)
     if (projectIdChoice) {
       const selected = getStore().get("projects").find((project) => project.id === projectIdChoice[1])
       if (!selected) return "That project is no longer available. Open /project again."
-      getStore().set("workspace.last", selected.path); return `✓ Project set to ${selected.name}\n${selected.path}`
+      saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [] }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
     }
     if (text === "pick_project_scratch") {
       const scratch = join(app.getPath("userData"), "Scratch")
-      mkdirSync(scratch, { recursive: true }); getStore().set("workspace.last", scratch)
-      return `✓ Project set to Scratch\n${scratch}`
+      mkdirSync(scratch, { recursive: true }); saveTelegramSession(chatId, { workspace: scratch, sessionId: "", transcript: [] })
+      return `✓ Project set to Scratch\n${scratch}\nStarted a fresh project session.`
     }
     if (text === "menu:models") text = "/models"
     if (text === "menu:projects") text = "/projects"
@@ -135,40 +148,45 @@ app.whenReady().then(async () => {
     const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
     const name = command?.[1]?.toLowerCase()
     const argument = command?.[2]?.trim() || ""
-    const help = "Grok Build Desktop\n\n/run <task> — run a coding task\n/status — detailed agent status\n/models — choose a model\n/project — choose a project\n/workspace — active workspace\n/cancel — stop the current task\n\nPlain messages also run as tasks."
+    const help = "Grok Build Desktop Agent\n\n/run <task> — run a coding task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose a project\n/workspace — active workspace\n/cancel — stop the current task\n\nPlain messages continue the current agent session."
     const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "📊 Status", data: "menu:status" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
     if (name === "start" || name === "help" || name === "menu") return menu
+    if (name === "new" || name === "reset") {
+      saveTelegramSession(chatId, { sessionId: "", transcript: [] })
+      return "✨ Fresh agent session started. Your selected model and project are unchanged."
+    }
     if (name === "cancel") {
       const wasRunning = backend.isRunning()
       if (wasRunning) telegramTaskCancelled = true
       backend.cancel()
       return wasRunning ? "Stopping the active Grok Build task…" : "No Grok Build task is currently running."
     }
-    if (name === "workspace") return `Active workspace: ${(getStore().get("workspace.last") as string | undefined) || "Scratch"}`
+    if (name === "workspace") return `Active project: ${telegramSession(chatId).workspace || (getStore().get("workspace.last") as string | undefined) || "Scratch"}`
     if (name === "status") {
       const status = await backend.status()
       const catalog = await backend.models()
-      const model = (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
-      const workspacePath = (getStore().get("workspace.last") as string | undefined) || join(app.getPath("userData"), "Scratch")
+      const agent = telegramSession(chatId)
+      const model = agent.model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
+      const workspacePath = agent.workspace || (getStore().get("workspace.last") as string | undefined) || join(app.getPath("userData"), "Scratch")
       const workspace = getStore().get("projects").find((project) => project.path === workspacePath)?.name || "Scratch"
       if (!status.available) return `🔴 Grok Build unavailable\n${status.error}`
-      return `🟢 Grok Build ready\n\nStatus: ${backend.isRunning() ? "Task running" : "Idle"}\nModel: ${model}\nProject: ${workspace}\nBackend: ${status.version || "available"}\nModels: ${catalog.models.length}\n\nUse /models or /project to change the active task context.`
+      return `🟢 Grok Build agent ready\n\nStatus: ${backend.isRunning() ? `Task running${telegramRunningChat === chatId ? " in this chat" : ""}` : "Idle"}\nSession: ${agent.sessionId ? "Resumable" : "Fresh"}\nModel: ${model}\nProject: ${workspace}\nBackend: ${status.version || "available"}\nModels: ${catalog.models.length}\n\nUse /new to reset, or /models and /project to change context.`
     }
     if (name === "models") {
       const catalog = await backend.models()
-      const current = (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
+      const current = telegramSession(chatId).model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
       return { text: `Choose a model\nCurrent: ${current}`, buttons: catalog.models.slice(0, 30).map((entry, index) => [{ text: `${entry === current ? "✓ " : ""}${entry}`.slice(0, 60), data: `pick_model:${index}` }]) }
     }
     if (name === "model") {
       if (!argument) return "Usage: /model <name>\nUse /models to see available models."
       const catalog = await backend.models()
       if (!catalog.models.includes(argument)) return `Unknown model: ${argument}\nUse /models to see available models.`
-      getStore().set("defaults.model", argument)
+      saveTelegramSession(chatId, { model: argument })
       return `Default model set to ${argument}.`
     }
     if (name === "projects" || name === "project") {
       const projects = getStore().get("projects")
-      const current = getStore().get("workspace.last") as string | undefined
+      const current = telegramSession(chatId).workspace || getStore().get("workspace.last") as string | undefined
       const scratch = join(app.getPath("userData"), "Scratch")
       return { text: "Choose the project used by Telegram tasks:", buttons: [
         [{ text: `${current === scratch ? "✓ " : ""}Scratch`, data: "pick_project_scratch" }],
@@ -179,12 +197,16 @@ app.whenReady().then(async () => {
     const taskText = name === "run" ? argument : text
     if (!taskText) return "Usage: /run <task>"
     if (backend.isRunning()) return "Grok Build is busy with another task. Try again when the current run finishes."
-    const storedWorkspace = getStore().get("workspace.last") as string | undefined
+    const agent = telegramSession(chatId)
+    const storedWorkspace = agent.workspace || getStore().get("workspace.last") as string | undefined
     const cwd = storedWorkspace || join(app.getPath("userData"), "Scratch")
     mkdirSync(cwd, { recursive: true })
     let response = ""
-    const input = { prompt: taskText.slice(0, 20_000), cwd, model: getStore().get("defaults.model") as string | undefined, permissionMode: "auto" as const, noPlan: true }
+    const transcript = agent.transcript || []
+    const fallbackContext = transcript.slice(-10).map((entry) => `${entry.role === "user" ? "User" : "Assistant"}: ${entry.text}`).join("\n\n").slice(-20_000)
+    const input = { prompt: taskText.slice(0, 20_000), cwd, model: agent.model || getStore().get("defaults.model") as string | undefined, resume: agent.sessionId || undefined, resumeFallbackPrompt: fallbackContext ? `Continue this Telegram agent conversation using the context below. Preserve prior decisions and unfinished work.\n\n${fallbackContext}\n\nCurrent instruction:\n${taskText.slice(0, 20_000)}` : undefined, permissionMode: "auto" as const, noPlan: true }
     telegramTaskCancelled = false
+    telegramRunningChat = chatId
     const run = startGrokRun(input)
     const startedAt = Date.now()
     const workspaceName = getStore().get("projects").find((project) => project.path === cwd)?.name || "Scratch"
@@ -211,6 +233,7 @@ app.whenReady().then(async () => {
     try {
       await backend.run(input, (event) => {
         if (event.type === "text" && typeof event.data === "string") { response += event.data; updateProgress("✍️ Grok Build is preparing the response") }
+        else if (event.type === "end" && typeof event.sessionId === "string") saveTelegramSession(chatId, { sessionId: event.sessionId })
         else if (event.type === "thought") updateProgress("🧠 Grok Build is reasoning")
         else if (event.type.toLowerCase().includes("tool")) updateProgress("🔧 Grok Build is using workspace tools")
       })
@@ -227,8 +250,12 @@ app.whenReady().then(async () => {
       throw error
     } finally {
       clearInterval(activityTimer)
+      telegramRunningChat = ""
     }
-    return publicTelegramResponse(response).slice(0, 4096) || "Task completed without a public text response."
+    const publicResponse = publicTelegramResponse(response) || "Task completed without a public text response."
+    const nextTranscript = [...transcript, { role: "user" as const, text: taskText.slice(0, 20_000) }, { role: "assistant" as const, text: publicResponse.slice(0, 20_000) }].slice(-12)
+    saveTelegramSession(chatId, { transcript: nextTranscript, workspace: cwd, model: input.model })
+    return publicResponse
   })
   telegram.start()
 

@@ -12,6 +12,7 @@ import { inspectProject } from "../src/main/project-inspection.ts"
 import { PreviewServer } from "../src/main/preview-server.ts"
 import { telegramInlineKeyboard } from "../src/main/telegram-format.ts"
 import { publicTelegramResponse } from "../src/main/telegram-output.ts"
+import { telegramTextChunks } from "../src/main/telegram-text.ts"
 import { boundedMoaContext, cleanMoaAdvisorOutput, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
@@ -81,6 +82,10 @@ assert.deepEqual(telegramInlineKeyboard({ text: "Models", buttons: [[{ text: "âœ
   inline_keyboard: [[{ text: "âœ“ grok-4.5", callback_data: "pick_model:0" }]],
 })
 assert.equal(telegramInlineKeyboard({ text: "No buttons", buttons: [] }), undefined)
+const telegramChunks = telegramTextChunks(`${"word ".repeat(1000)}tail`)
+assert.ok(telegramChunks.length > 1)
+assert.ok(telegramChunks.every((chunk) => chunk.length <= 3900))
+assert.equal(telegramChunks.join(" ").replace(/\s+/g, " ").trim(), `${"word ".repeat(1000)}tail`.replace(/\s+/g, " ").trim())
 assert.equal(publicTelegramResponse("<think>private reasoning</think>\nPublic answer"), "Public answer")
 assert.equal(publicTelegramResponse("<analysis>private\nunfinished"), "")
 assert.equal(publicTelegramResponse("Public\n<app_action>{\"type\":\"preview.open\"}</app_action>"), "Public")

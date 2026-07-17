@@ -49,6 +49,10 @@ type StoreSchema = {
     updateOffset?: number
     allowedChatIds?: string[]
     pendingChatIds?: string[]
+    sessions?: Record<string, {
+      sessionId?: string; model?: string; workspace?: string; updatedAt: number
+      transcript?: { role: "user" | "assistant"; text: string }[]
+    }>
   }
   projects: { id: string; name: string; path: string; addedAt: number }[]
   schedules: ScheduledGrokTask[]
