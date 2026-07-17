@@ -15,7 +15,7 @@ Electron renderer
 
 ## Backend maintenance
 
-The app targets `Franzferdinan51/grok-build`, a fork of `xai-org/grok-build`. App-required connectors and CLI contracts belong on reviewed feature branches in that fork. `pnpm sync:grok-upstream` pulls official xAI updates while keeping the fork relationship intact.
+The app targets the upstream [`xai-org/grok-build`](https://github.com/xai-org/grok-build) CLI as its sole coding-agent backend. No desktop-side fork is shipped; users install Grok Build from xAI and the desktop shell resolves whatever `grok` binary is on `PATH` (or the absolute path set via `GROK_BUILD_PATH`).
 
 The desktop resolver probes a configured binary or `PATH` candidate with `grok --version`. Tasks use the documented command/stream contract; no fake JSON-RPC layer is introduced.
 

@@ -202,7 +202,7 @@ export function registerIpcHandlers(deps: Deps): void {
     return shell.openExternal(target.toString())
   })
   ipcMain.handle("app:get-version", () => app.getVersion())
-  ipcMain.handle("app:backend-repository", () => "https://github.com/Franzferdinan51/grok-build")
+  ipcMain.handle("app:backend-repository", () => "https://github.com/xai-org/grok-build")
   ipcMain.handle("dialog:open-file", async (_event, options?: { filters?: { name: string; extensions: string[] }[] }) =>
     dialog.showOpenDialog({ properties: ["openFile"], filters: options?.filters }))
   ipcMain.handle("dialog:open-directory", async () => dialog.showOpenDialog({ properties: ["openDirectory"] }))

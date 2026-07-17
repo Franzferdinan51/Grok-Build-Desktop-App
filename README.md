@@ -2,7 +2,7 @@
 
 An open-source, local-first desktop agent built on [Grok Build CLI](https://github.com/xai-org/grok-build). It combines autonomous coding, general-purpose agent work, persistent conversations, project tools, live preview, multi-model routing, schedules, skills, MoA, subagents, and a full Telegram agent in one native application for macOS and Windows.
 
-The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzferdinan51/grok-build), with a clean upstream-sync path from xAI. Grok Build remains the sole coding-agent runtime: the desktop app handles presentation, secure provider configuration, and orchestration without adding a competing agent backend.
+Grok Build remains the sole coding-agent runtime: the desktop app handles presentation, secure provider configuration, and orchestration without adding a competing agent backend.
 
 ## Current highlights
 
