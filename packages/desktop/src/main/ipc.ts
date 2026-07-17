@@ -35,6 +35,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun(input)
     let grokSessionId: string | undefined
+    let cancelled = false
     let eventTimer: ReturnType<typeof setTimeout> | undefined
     let pendingEvents: GrokBuildEvent[] = []
     const flushEvents = () => {
@@ -46,13 +47,14 @@ export function registerIpcHandlers(deps: Deps): void {
       for (const update of updates) event.sender.send("backend:event", update)
     }
     const queueEvent = (update: GrokBuildEvent) => {
+      if (update.type === "cancelled") cancelled = true
       const previous = pendingEvents[pendingEvents.length - 1]
       if ((update.type === "text" || update.type === "thought") && previous?.type === update.type && typeof previous.data === "string" && typeof update.data === "string") {
         previous.data += update.data
       } else {
         pendingEvents.push(update)
       }
-      if (update.type === "end" || update.type === "error") flushEvents()
+      if (update.type === "end" || update.type === "error" || update.type === "cancelled") flushEvents()
       else if (!eventTimer) eventTimer = setTimeout(flushEvents, 16)
     }
     try {
@@ -61,7 +63,7 @@ export function registerIpcHandlers(deps: Deps): void {
         queueEvent(update)
       })
       flushEvents()
-      finishGrokRun(run.id, { status: "completed", grokSessionId })
+      finishGrokRun(run.id, { status: cancelled ? "cancelled" : "completed", grokSessionId })
     } catch (error) {
       flushEvents()
       const message = error instanceof Error ? error.message : String(error)

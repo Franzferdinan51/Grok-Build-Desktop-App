@@ -3,7 +3,7 @@ import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
 import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile } from "../preload"
-import { splitThinking, type TaskLog } from "./chat-utils"
+import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
 import "./styles.css"
@@ -387,6 +387,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (event.type === "text" && event.data) queueBackendEvent({ kind: "text", content: event.data })
       if (event.type === "thought" && event.data) queueBackendEvent({ kind: "thought", content: event.data })
       if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
+      if (event.type === "cancelled") queueBackendEvent({ kind: "text", content: event.data || "Task cancelled." })
     })
     unsubscribeMenu = window.api.onMenuCommand((command) => {
       if (command === "new-task") {
@@ -506,7 +507,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     } finally {
       flushBackendEvents()
       setRunning(false)
-      const completed = splitThinking(events())
+      const completed = ensurePublicCompletion(events())
       if (agentAppControls()) {
         const text = completed.map((entry) => entry.content).join("\n")
         for (const match of text.matchAll(/<app_action>(\{[^<]+\})<\/app_action>/g)) {

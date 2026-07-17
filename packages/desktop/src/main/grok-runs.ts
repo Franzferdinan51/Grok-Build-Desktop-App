@@ -1,7 +1,13 @@
 import { randomUUID } from "crypto"
 import { getStore, type GrokRunRecord } from "./store"
+import { reconcileInterruptedRuns } from "./grok-run-utils"
 
 const MAX_RUNS = 100
+
+export function recoverInterruptedGrokRuns(): void {
+  const runs = listGrokRuns()
+  if (runs.some((record) => record.status === "running")) getStore().set("runs", reconcileInterruptedRuns(runs))
+}
 
 export function listGrokRuns(): GrokRunRecord[] {
   return getStore().get("runs")

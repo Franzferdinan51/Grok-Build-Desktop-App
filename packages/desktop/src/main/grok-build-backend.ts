@@ -228,7 +228,11 @@ export class GrokBuildBackend {
           onEvent({ type: "thought", data: `Reference ${index + 1} (${referenceModel}) completed.\n${stdout.trim()}` })
           return `## Reference ${index + 1} — ${referenceModel}\n${stdout.trim()}`
         }))
-        if (this.cancelRequested) { this.cancelRequested = false; return }
+        if (this.cancelRequested) {
+          this.cancelRequested = false
+          onEvent({ type: "cancelled", data: "Task cancelled." })
+          return
+        }
         const answers = candidates.flatMap((candidate, index) => {
           if (candidate.status === "fulfilled") return [candidate.value]
           const reason = candidate.reason instanceof Error ? candidate.reason.message : String(candidate.reason)
@@ -323,7 +327,10 @@ export class GrokBuildBackend {
         if (buffer.trim()) emitLines(Buffer.from("\n"))
         const cancelled = this.cancelRequested && (signal === "SIGTERM" || signal === "SIGKILL" || code === null)
         this.cancelRequested = false
-        if (code === 0 || cancelled) finish(() => resolve(stderr))
+        if (cancelled) {
+          onEvent({ type: "cancelled", data: "Task cancelled." })
+          finish(() => resolve(stderr))
+        } else if (code === 0) finish(() => resolve(stderr))
         else finish(() => reject(new Error(stderr.trim() || `Grok Build exited ${code ?? `from ${signal || "an unknown signal"}`}`)))
       })
     })

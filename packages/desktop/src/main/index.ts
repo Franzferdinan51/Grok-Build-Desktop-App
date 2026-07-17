@@ -24,7 +24,7 @@ import { createMenu } from "./menu"
 import { GrokTaskScheduler } from "./scheduled-tasks"
 import { PreviewServer } from "./preview-server"
 import { getStore } from "./store"
-import { finishGrokRun, startGrokRun } from "./grok-runs"
+import { finishGrokRun, recoverInterruptedGrokRuns, startGrokRun } from "./grok-runs"
 
 const APP_NAME = "Grok Build Desktop"
 const APP_ID = "ai.grokbuild.desktop"
@@ -92,6 +92,7 @@ async function createAndLoadMainWindow(): Promise<BrowserWindow> {
 app.whenReady().then(async () => {
   logger = initLogging()
   writeLog("info", `${APP_NAME} starting — pid=${process.pid}`)
+  recoverInterruptedGrokRuns()
 
   // Register all IPC handlers before window creation
   registerIpcHandlers({

@@ -27,3 +27,13 @@ export function splitThinking(logs: TaskLog[]): TaskLog[] {
     return parts
   })
 }
+
+/** Always leave a visible completion message when a model only streams private reasoning. */
+export function ensurePublicCompletion(logs: TaskLog[]): TaskLog[] {
+  const normalized = splitThinking(logs)
+  if (normalized.some((log) => log.kind === "text" || log.kind === "error")) return normalized
+  return [...normalized, {
+    kind: "text",
+    content: "Task completed. Grok Build applied the changes but returned no public summary.",
+  }]
+}

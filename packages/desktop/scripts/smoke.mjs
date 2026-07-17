@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process"
 import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { splitThinking } from "../src/renderer/chat-utils.ts"
+import { ensurePublicCompletion, splitThinking } from "../src/renderer/chat-utils.ts"
+import { reconcileInterruptedRuns } from "../src/main/grok-run-utils.ts"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "../src/main/workspace-tools.ts"
 import { inspectProject } from "../src/main/project-inspection.ts"
 import { PreviewServer } from "../src/main/preview-server.ts"
@@ -54,6 +55,20 @@ assert.deepEqual(splitThinking([
   { kind: "thought", content: "private reasoning" },
   { kind: "text", content: "Public answer" },
 ])
+
+assert.deepEqual(ensurePublicCompletion([{ kind: "thought", content: "private only" }]), [
+  { kind: "thought", content: "private only" },
+  { kind: "text", content: "Task completed. Grok Build applied the changes but returned no public summary." },
+])
+assert.deepEqual(ensurePublicCompletion([{ kind: "text", content: "Public answer" }]), [{ kind: "text", content: "Public answer" }])
+
+const interruptedAt = 1_800_000_000_000
+assert.deepEqual(reconcileInterruptedRuns([{
+  id: "run-1", cwd: root, prompt: "test", startedAt: interruptedAt - 1_000, status: "running",
+}], interruptedAt), [{
+  id: "run-1", cwd: root, prompt: "test", startedAt: interruptedAt - 1_000, status: "cancelled",
+  finishedAt: interruptedAt, error: "Interrupted because the app closed before this run finished.",
+}])
 
 assert.deepEqual(telegramInlineKeyboard({ text: "Models", buttons: [[{ text: "✓ grok-4.5", data: "pick_model:0" }]] }), {
   inline_keyboard: [[{ text: "✓ grok-4.5", callback_data: "pick_model:0" }]],
