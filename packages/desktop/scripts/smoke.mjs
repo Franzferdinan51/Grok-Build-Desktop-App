@@ -29,6 +29,17 @@ await assert.rejects(readWorkspaceFile(root, "../outside"), /escapes the workspa
 await assert.rejects(readWorkspaceFile(root, "escape"), /symbolic link/)
 await assert.rejects(writeWorkspaceFile(root, "escape", "blocked"), /symbolic link/)
 assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim(), await realpath(root))
+// Editors and skill workflows routinely need to write files into brand-new
+// subdirectories. Without mkdir-after-validate, writeWorkspaceFile would
+// reject those paths even though they are inside the workspace.
+await writeWorkspaceFile(root, "newdir/nested/file.txt", "created\n")
+assert.equal(await readWorkspaceFile(root, "newdir/nested/file.txt"), "created\n")
+// Symlink escape must still be rejected even when the symlinked target path
+// does not yet exist as a real file. The error class depends on whether the
+// symlink resolves to a directory (symbolic link) or to a non-directory
+// target (ENOTDIR) — both correctly block the write.
+await assert.rejects(writeWorkspaceFile(root, "escape/new.txt", "blocked"), /symbolic link|ENOTDIR/)
+assert.equal((await listWorkspaceFiles(root)).some((file) => file.path.startsWith("newdir/")), true)
 
 execFileSync("git", ["init", "-q"], { cwd: root })
 execFileSync("git", ["add", "hello.txt"], { cwd: root })

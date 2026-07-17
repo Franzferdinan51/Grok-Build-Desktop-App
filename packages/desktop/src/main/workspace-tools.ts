@@ -1,6 +1,6 @@
 import { execFile } from "child_process"
 import { promisify } from "util"
-import { readdir, readFile, realpath, stat, writeFile } from "fs/promises"
+import { readdir, readFile, realpath, mkdir, stat, writeFile } from "fs/promises"
 import { dirname, relative, resolve, sep } from "path"
 
 const execFileAsync = promisify(execFile)
@@ -42,10 +42,27 @@ async function safeWritePath(root: string, candidate: string): Promise<string> {
   if (target !== canonicalRoot && !target.startsWith(canonicalRoot + sep)) throw new Error("Path escapes the workspace")
   try { return await safePath(canonicalRoot, candidate) }
   catch (error) {
-    const parent = await realpath(dirname(target))
-    if (parent !== canonicalRoot && !parent.startsWith(canonicalRoot + sep)) throw new Error("Path escapes the workspace through a symbolic link")
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return target
-    throw error
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    // Walk up the parent chain until we find an existing directory, then
+    // confirm that ancestor is inside the workspace. Without this, the file
+    // editor and any future "new file" workflow cannot create files in a
+    // subdirectory that does not yet exist.
+    let parent = dirname(target)
+    while (parent !== canonicalRoot && parent !== dirname(parent)) {
+      try {
+        const canonicalParent = await realpath(parent)
+        if (canonicalParent !== canonicalRoot && !canonicalParent.startsWith(canonicalRoot + sep)) throw new Error("Path escapes the workspace through a symbolic link")
+        break
+      } catch (walkError) {
+        if ((walkError as NodeJS.ErrnoException).code !== "ENOENT") throw walkError
+        parent = dirname(parent)
+      }
+    }
+    if (parent !== canonicalRoot && parent !== dirname(target)) throw new Error("Path escapes the workspace")
+    // Create any missing parent directories between the validated ancestor
+    // and the target so the editor can save into brand-new folders.
+    await mkdir(dirname(target), { recursive: true })
+    return target
   }
 }
 
