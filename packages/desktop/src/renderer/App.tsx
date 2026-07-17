@@ -18,6 +18,8 @@ type QueuedPrompt = { id: string; text: string }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type AdvancedSettings = { agent: string; agents: string; permissionMode: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow: string; deny: string; tools: string; disallowedTools: string; memory: "default" | "experimental" | "disabled"; sandbox: string; rules: string; systemPrompt: string; verbatim: boolean; forkSession: boolean; restoreCode: boolean; worktree: boolean; worktreeName: string; worktreeRef: string; jsonSchema: string; promptFile: string; promptJson: string; sessionId: string; noPlan: boolean }
 const ADVANCED_DEFAULTS: AdvancedSettings = { agent: "", agents: "", permissionMode: "auto", allow: "", deny: "", tools: "", disallowedTools: "", memory: "default", sandbox: "", rules: "", systemPrompt: "", verbatim: false, forkSession: false, restoreCode: false, worktree: false, worktreeName: "", worktreeRef: "", jsonSchema: "", promptFile: "", promptJson: "", sessionId: "", noPlan: true }
+const MAX_LIVE_LOG_CHARS = 2 * 1024 * 1024
+const MAX_LIVE_LOG_ENTRIES = 500
 
 function RichText(props: { content: string }) {
   const html = () => DOMPurify.sanitize(marked.parse(props.content, { async: false }) as string)
@@ -161,7 +163,16 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (previous?.kind === log.kind) next[next.length - 1] = { ...previous, content: previous.content + log.content }
       else next.push(log)
     }
-    return next
+    let chars = 0
+    const bounded: TaskLog[] = []
+    for (let index = next.length - 1; index >= 0 && bounded.length < MAX_LIVE_LOG_ENTRIES; index--) {
+      const log = next[index]
+      const remaining = MAX_LIVE_LOG_CHARS - chars
+      if (remaining <= 0) break
+      bounded.push(log.content.length > remaining ? { ...log, content: log.content.slice(-remaining) } : log)
+      chars += Math.min(log.content.length, remaining)
+    }
+    return bounded.reverse()
   }
 
   const flushBackendEvents = () => {
@@ -473,6 +484,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setAgentAppControls((await window.api.store.get<boolean>("agent.appControls")) ?? false)
     setSubagentsEnabled((await window.api.store.get<boolean>("agent.subagents")) ?? true)
     setDelegationMode((await window.api.store.get<"balanced" | "aggressive">("agent.delegationMode")) ?? "balanced")
+    // Older builds enabled high reasoning, self-verification, and subagents at
+    // the same time. That made an ordinary desktop prompt substantially slower
+    // than the equivalent direct CLI command. Migrate once to CLI-like defaults;
+    // each capability remains available as an explicit toggle for deep runs.
+    if (!((await window.api.store.get<boolean>("defaults.cliSpeedMigrated")) ?? false)) {
+      setThinking(false)
+      setSelfVerify(false)
+      setSubagentsEnabled(false)
+      await window.api.store.set("defaults.thinking", false)
+      await window.api.store.set("defaults.selfVerify", false)
+      await window.api.store.set("agent.subagents", false)
+      await window.api.store.set("defaults.cliSpeedMigrated", true)
+    }
     const savedAdvanced = (await window.api.store.get<Partial<AdvancedSettings>>("defaults.advanced")) || {}
     const executionDefaultsMigrated = (await window.api.store.get<boolean>("defaults.executionV2")) ?? false
     const nextAdvanced = { ...ADVANCED_DEFAULTS, ...savedAdvanced }
@@ -504,6 +528,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         void newConversation()
       } else if (command === "open-project") void chooseWorkspace()
       else if (command === "grok-status") {
+        // Stale streamed output from a previously-running task must not surface
+        // in the chat view just because the user invoked a menu shortcut.
+        if (!running()) setEvents([])
         setActive("new-task")
         setSlashNotice(props.backendStatus().available ? `Grok Build ready · ${props.backendStatus().version || props.backendStatus().command}` : props.backendStatus().error || "Grok Build unavailable")
       } else if (command === "lmstudio-settings") void navigate("runtime")
@@ -592,7 +619,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const withRecentContext = (instruction: string) => `## Recent conversation context\nContinue this workspace conversation without repeating completed work. Preserve decisions, unfinished tasks, and the user's intent.\n\n${recentContext}\n\n## Current instruction\n${instruction}`
       if (!resumeSession && recentContext) executionPrompt = withRecentContext(executionPrompt)
       if (agentAppControls()) {
-        executionPrompt += `\n\n## Desktop host controls\nYou may control safe app features by ending your response with one or more exact action tags. Use only when useful:\n<app_action>{"type":"preview.open"}</app_action>\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nThese actions are schema-validated by the host. Never place shell commands or secrets in an action.`
+        executionPrompt += `\n\n## Desktop host controls\nYou may control safe app features by ending your response with one or more exact action tags. Use only when useful:\n<app_action>{"type":"preview.open"}</app_action>\n<app_action>{"type":"browser.open","url":"https://example.com"}</app_action>\n<app_action>{"type":"desktop.status"}</app_action>\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nThese actions are schema-validated by the host. Browser and desktop actions only count as successful when the host returns ok:true with observed state. Never place shell commands or secrets in an action.`
         if (previewOpen()) {
           try {
             const inspection = await window.api.preview.inspect()
@@ -608,8 +635,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           : `\n\n## Subagent delegation\nUse Grok Build subagents when two or more independent workstreams would materially improve speed or quality (for example code inspection plus tests, or implementation plus rendered-preview review). Keep one primary integrator, avoid overlapping edits, and verify delegated results.`
       }
       const references = moaReferenceModels().slice(0, moaCandidates()).filter(Boolean)
+      // Prefer Grok Build's own --best-of-n when candidates use one model.
+      // The desktop-only advisor fan-out remains for the mixed-model case the
+      // CLI cannot represent with a single native command.
+      const mixedModelMoA = references.length >= 2 && new Set(references).size > 1
       const advancedRun = advanced()
-      const result = await window.api.backend.run({ prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, resumeFallbackPrompt: resumeSession && recentContext ? withRecentContext(executionPrompt) : undefined, bestOfN: moaEnabled() && references.length < 2 ? moaCandidates() : undefined, moa: moaEnabled() && references.length >= 2 ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined, referenceReasoningEffort: moaReferenceEffort(), aggregatorReasoningEffort: moaAggregatorEffort(), referenceTokenBudget: moaReferenceTokenBudget(), context: recentContext || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled(), agent: advancedRun.agent || undefined, agents: advancedRun.agents || undefined, permissionMode: advancedRun.permissionMode, allow: advancedRun.allow.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), deny: advancedRun.deny.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), tools: advancedRun.tools || undefined, disallowedTools: advancedRun.disallowedTools || undefined, memory: advancedRun.memory, sandbox: advancedRun.sandbox || undefined, rules: advancedRun.rules || undefined, systemPrompt: advancedRun.systemPrompt || undefined, verbatim: advancedRun.verbatim, forkSession: advancedRun.forkSession, restoreCode: advancedRun.restoreCode, worktree: advancedRun.worktree, worktreeName: advancedRun.worktreeName || undefined, worktreeRef: advancedRun.worktreeRef || undefined, jsonSchema: advancedRun.jsonSchema || undefined, promptFile: advancedRun.promptFile || undefined, promptJson: advancedRun.promptJson || undefined, sessionId: advancedRun.sessionId || undefined, noPlan: advancedRun.noPlan })
+      const result = await window.api.backend.run({ prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, resumeFallbackPrompt: resumeSession && recentContext ? withRecentContext(executionPrompt) : undefined, bestOfN: moaEnabled() && !mixedModelMoA ? moaCandidates() : undefined, moa: moaEnabled() && mixedModelMoA ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined, referenceReasoningEffort: moaReferenceEffort(), aggregatorReasoningEffort: moaAggregatorEffort(), referenceTokenBudget: moaReferenceTokenBudget(), context: recentContext || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled(), agent: advancedRun.agent || undefined, agents: advancedRun.agents || undefined, permissionMode: advancedRun.permissionMode, allow: advancedRun.allow.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), deny: advancedRun.deny.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), tools: advancedRun.tools || undefined, disallowedTools: advancedRun.disallowedTools || undefined, memory: advancedRun.memory, sandbox: advancedRun.sandbox || undefined, rules: advancedRun.rules || undefined, systemPrompt: advancedRun.systemPrompt || undefined, verbatim: advancedRun.verbatim, forkSession: advancedRun.forkSession, restoreCode: advancedRun.restoreCode, worktree: advancedRun.worktree, worktreeName: advancedRun.worktreeName || undefined, worktreeRef: advancedRun.worktreeRef || undefined, jsonSchema: advancedRun.jsonSchema || undefined, promptFile: advancedRun.promptFile || undefined, promptJson: advancedRun.promptJson || undefined, sessionId: advancedRun.sessionId || undefined, noPlan: advancedRun.noPlan })
       if (result.grokSessionId) await persistSessionId(result.grokSessionId)
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
@@ -617,6 +648,17 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (sessionId()) {
         const thread = chatThreads().find((entry) => entry.id === activeThreadId())
         if (thread) await updateThreadMeta(thread, { sessionStatus: "broken" })
+        // A timed-out/failed native session is frequently the reason Retry is
+        // slow again. Drop the poisoned backend session so the next turn starts
+        // fresh; the visible transcript is already preserved and will seed the
+        // run via the recent-context block.
+        const message = error instanceof Error ? error.message : String(error)
+        const poisoned = /no output for \d+ minutes|timed? ?out|session.{0,40}(?:failed|invalid|missing|not found|expired)|serialization|connection|exited from an unknown signal|exited 1\b/i.test(message)
+        if (poisoned) {
+          setSessionId("")
+          if (workspace()) await window.api.store.delete(sessionKey())
+          if (thread) await updateThreadMeta(thread, { sessionId: "" })
+        }
       }
     } finally {
       flushBackendEvents()
@@ -626,10 +668,16 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         const text = completed.map((entry) => entry.content).join("\n")
         for (const match of text.matchAll(/<app_action>(\{[^<]+\})<\/app_action>/g)) {
           try {
-            const action = JSON.parse(match[1]) as { type?: string; name?: string; prompt?: string; runAt?: number; repeatMinutes?: number }
+            const action = JSON.parse(match[1]) as { type?: string; url?: string; name?: string; prompt?: string; runAt?: number; repeatMinutes?: number }
             if (action.type === "preview.open" && workspace()) {
               const result = await window.api.preview.start(workspace())
               setPreviewEnabled(true); setPreviewOpen(true); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview")
+            } else if (action.type === "browser.open" && action.url) {
+              const result = await window.api.hostControls.browserOpen(action.url)
+              setSlashNotice(result.ok ? `Browser verified by ${result.backend}` : result.permission_required ? `Browser permission required: ${result.error}` : `Browser action failed: ${result.error}`)
+            } else if (action.type === "desktop.status") {
+              const result = await window.api.hostControls.desktopStatus()
+              setSlashNotice(result.ok ? `Computer use ready via ${result.backend}` : result.permission_required ? `Computer-use permission required: ${result.error}` : `Computer use unavailable: ${result.error}`)
             } else if (action.type === "schedule.create" && action.name?.trim() && action.prompt?.trim() && Number.isFinite(action.runAt) && action.runAt! > Date.now()) {
               await window.api.schedules.add({ name: action.name.slice(0, 120), prompt: action.prompt.slice(0, 20_000), cwd: workspace(), model: model() || undefined, runAt: action.runAt!, repeatMinutes: action.repeatMinutes && action.repeatMinutes >= 1 ? Math.min(action.repeatMinutes, 525_600) : undefined })
             }
@@ -747,6 +795,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
   const loadProject = async (project: ProjectSnapshot) => {
     setOpenFile(""); setFileContent(""); setFileNotice(""); setSelectedDiff(""); setDiffContent("")
+    // Switching workspaces must never leak in-flight event buffers, queued
+    // prompts, or a half-finished typing indicator from the previous one.
+    if (project.path !== workspace()) { setEvents([]); setQueuedPrompts([]) }
     if (active() === "workspace") await refreshFiles(project.path)
     if (active() === "review") await refreshDiff(project.path)
     if (active() === "skills") setSkills(await window.api.skills.list(project.path))
@@ -813,7 +864,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Chat history</strong><span>{historyAllWorkspaces() ? "All workspaces" : selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div class="chat-history__tools"><input value={historySearch()} onInput={async (event) => { setHistorySearch(event.currentTarget.value); await refreshHistory() }} placeholder="Search conversations…"/><label><input type="checkbox" checked={historyAllWorkspaces()} onChange={async (event) => { setHistoryAllWorkspaces(event.currentTarget.checked); await refreshHistory() }}/> All workspaces</label></div><div><For each={historyResults().filter((thread) => thread.messages.length && !thread.archived)} fallback={<p>No matching chats.</p>}>{(thread) => <article class={thread.id === activeThreadId() ? "active" : ""}><button disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.pinned ? "📌 " : ""}{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages · {thread.model || "default"} · {thread.sessionStatus || (thread.sessionId ? "resumable" : "new")}</span></button><div><button onClick={() => { const title = window.prompt("Conversation name", thread.title); if (title?.trim()) void updateThreadMeta(thread, { title: title.trim() }) }}>Rename</button><button onClick={() => void updateThreadMeta(thread, { pinned: !thread.pinned })}>{thread.pinned ? "Unpin" : "Pin"}</button><button onClick={() => void window.api.conversations.export(thread.id)}>Export</button><button onClick={() => void updateThreadMeta(thread, { archived: true })}>Archive</button></div></article>}</For></div></section></Show>
           <div class="chat-messages" ref={messagesElement} onScroll={(event) => { const element = event.currentTarget; userNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 100 }}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
-              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(message.logs.map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) setPrompt(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
+              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(splitThinking(message.logs).filter((log) => log.kind !== "thought").map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) void run(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
               <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={splitThinking(events())}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thinking…</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For></Show></div></article></Show>
             </Show>
           </div>

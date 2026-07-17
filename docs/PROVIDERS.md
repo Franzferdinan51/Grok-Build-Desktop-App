@@ -12,7 +12,7 @@ The app may add documented flags only:
 
 - `--model <model>` when a configured model is selected.
 - `--reasoning-effort high` when reasoning is enabled.
-- `--yolo` only after the user enables auto-approve tools.
+- `--always-approve` only after the user enables auto-approve tools.
 - `--resume <session-id>` when session continuation is implemented.
 
 Reference: [Grok Build headless mode](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md).

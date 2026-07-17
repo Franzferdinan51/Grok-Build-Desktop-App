@@ -7,11 +7,24 @@ import { telegramHtml, telegramTextChunks } from "./telegram-text"
 
 export type TelegramStatus = { connected: boolean; username?: string; botId?: number; error?: string }
 
-async function telegramRequest<T>(url: string, init?: RequestInit): Promise<T> {
+export type TelegramResponse<T> = { status: number; payload: T }
+
+async function telegramRequest<T>(url: string, init?: RequestInit): Promise<TelegramResponse<T>> {
   const response = await fetch(url, { signal: AbortSignal.timeout(10_000), ...init })
   const payload = await response.json().catch(() => undefined) as T | undefined
   if (!payload) throw new Error(`Telegram returned an invalid response (${response.status})`)
-  return payload
+  return { status: response.status, payload }
+}
+
+function telegramAuthError(status: number, description?: string): Error | undefined {
+  if (status === 401 || status === 403) return new Error(`Telegram rejected the bot token (HTTP ${status}): ${description || "unauthorized"}. Polling paused — reconnect in Settings → Agent → Telegram.`)
+  if (status === 429) return new Error(`Telegram rate-limited polling (HTTP 429): ${description || "too many requests"}. Polling paused — try again in a few minutes.`)
+  return undefined
+}
+
+/** Wrap telegramRequest so legacy callers still receive the raw payload. */
+async function telegramPayload<T>(url: string, init?: RequestInit): Promise<T> {
+  return (await telegramRequest<T>(url, init)).payload
 }
 
 export class TelegramBridge {
@@ -41,7 +54,10 @@ export class TelegramBridge {
     const token = this.token()
     if (!token) return { connected: false }
     try {
-      const payload = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string }; description?: string }>(`https://api.telegram.org/bot${token}/getMe`)
+      const response = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string }; description?: string }>(`https://api.telegram.org/bot${token}/getMe`)
+      const authError = telegramAuthError(response.status, response.payload.description)
+      if (authError) return { connected: false, error: authError.message }
+      const payload = response.payload
       if (!payload.ok || !payload.result) return { connected: false, error: payload.description || "Telegram rejected the token" }
       return { connected: true, botId: payload.result.id, username: payload.result.username }
     } catch (error) { return { connected: false, error: (error as Error).message } }
@@ -52,7 +68,10 @@ export class TelegramBridge {
     const clean = token.trim()
     if (!/^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(clean)) return { connected: false, error: "That does not look like a Telegram BotFather token" }
     try {
-      const payload = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string }; description?: string }>(`https://api.telegram.org/bot${clean}/getMe`)
+      const response = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string }; description?: string }>(`https://api.telegram.org/bot${clean}/getMe`)
+      const authError = telegramAuthError(response.status, response.payload.description)
+      if (authError) return { connected: false, error: authError.message }
+      const payload = response.payload
       if (!payload.ok || !payload.result) return { connected: false, error: payload.description || "Telegram rejected the token" }
       this.offset = 0
       getStore().set("telegram", { ...getStore().get("telegram"), token: safeStorage.encryptString(clean).toString("base64"), updateOffset: 0 })
@@ -83,7 +102,7 @@ export class TelegramBridge {
       // Telegram rejects getUpdates while a webhook is configured. A token
       // connected to this desktop app explicitly opts into local long polling,
       // so remove stale webhook configuration without dropping queued updates.
-      const payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/deleteWebhook`, {
+      const payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/deleteWebhook`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drop_pending_updates: false }),
       })
       if (!payload.ok) throw new Error(payload.description || "Could not clear Telegram webhook")
@@ -102,7 +121,13 @@ export class TelegramBridge {
       try {
         const token = this.token()
         if (!token) return
-        const payload = await telegramRequest<{ ok: boolean; result?: { update_id: number; message?: { text?: string; chat: { id: number } }; callback_query?: { id: string; data?: string; message?: { chat: { id: number } } } }[]; description?: string }>(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${this.offset}`, { signal: AbortSignal.timeout(30_000) })
+        const response = await telegramRequest<{ ok: boolean; result?: { update_id: number; message?: { text?: string; chat: { id: number } }; callback_query?: { id: string; data?: string; message?: { chat: { id: number } } } }[]; description?: string }>(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${this.offset}`, { signal: AbortSignal.timeout(30_000) })
+        // An invalid bot token returns HTTP 401/403; rate limiting returns 429.
+        // Busily retrying every 2s hammers Telegram and never recovers on its
+        // own. Pause polling and surface the error so the user can re-connect.
+        const authError = telegramAuthError(response.status, response.payload.description)
+        if (authError) { writeLog("error", `Telegram polling paused: ${authError.message}`); this.polling = false; return }
+        const payload = response.payload
         if (!payload.ok) throw new Error(payload.description || "Telegram polling failed")
         for (const update of payload.result || []) {
           this.offset = Math.max(this.offset, update.update_id + 1)
@@ -147,7 +172,7 @@ export class TelegramBridge {
     const token = this.token()
     if (!token) return
     try {
-      await telegramRequest(`https://api.telegram.org/bot${token}/setMyCommands`, {
+      await telegramPayload(`https://api.telegram.org/bot${token}/setMyCommands`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commands: [
           { command: "start", description: "Show setup and available commands" },
           { command: "help", description: "Show command help" },
@@ -178,16 +203,16 @@ export class TelegramBridge {
 
   private async answerCallback(id: string): Promise<void> {
     const token = this.token(); if (!token) return
-    try { await telegramRequest(`https://api.telegram.org/bot${token}/answerCallbackQuery`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ callback_query_id: id }) }) } catch { /* best effort */ }
+    try { await telegramPayload(`https://api.telegram.org/bot${token}/answerCallbackQuery`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ callback_query_id: id }) }) } catch { /* best effort */ }
   }
 
   private async sendRich(chatId: string, reply: TelegramReply): Promise<void> {
     const token = this.token(); if (!token) return
-    let payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+    let payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(reply.text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: telegramInlineKeyboard(reply) }),
     })
     if (!payload.ok && /parse|entity|too long/i.test(payload.description || "")) {
-      payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+      payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: reply.text.slice(0, 4096), reply_markup: telegramInlineKeyboard(reply) }),
       })
     }
@@ -199,7 +224,7 @@ export class TelegramBridge {
   async sendActivity(chatId: string): Promise<void> {
     const token = this.token(); if (!token) return
     try {
-      await telegramRequest(`https://api.telegram.org/bot${token}/sendChatAction`, {
+      await telegramPayload(`https://api.telegram.org/bot${token}/sendChatAction`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, action: "typing" }),
       })
     } catch { /* Activity is best-effort and must never fail a task. */ }
@@ -208,7 +233,7 @@ export class TelegramBridge {
   async sendProgress(chatId: string, text: string): Promise<number | undefined> {
     const token = this.token(); if (!token) return undefined
     try {
-      const payload = await telegramRequest<{ ok: boolean; result?: { message_id: number } }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+      const payload = await telegramPayload<{ ok: boolean; result?: { message_id: number } }>(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
       })
       return payload.ok ? payload.result?.message_id : undefined
@@ -218,7 +243,7 @@ export class TelegramBridge {
   async editProgress(chatId: string, messageId: number | undefined, text: string): Promise<void> {
     const token = this.token(); if (!token || !messageId) return
     try {
-      await telegramRequest(`https://api.telegram.org/bot${token}/editMessageText`, {
+      await telegramPayload(`https://api.telegram.org/bot${token}/editMessageText`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId, text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
       })
     } catch { /* Progress is best-effort and must never fail a task. */ }
@@ -227,7 +252,7 @@ export class TelegramBridge {
   async deleteProgress(chatId: string, messageId: number | undefined): Promise<void> {
     const token = this.token(); if (!token || !messageId) return
     try {
-      await telegramRequest(`https://api.telegram.org/bot${token}/deleteMessage`, {
+      await telegramPayload(`https://api.telegram.org/bot${token}/deleteMessage`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
       })
     } catch { /* Progress cleanup is best-effort and must never hide a result. */ }
@@ -239,11 +264,11 @@ export class TelegramBridge {
     if (!chatId.trim()) return { ok: false, error: "A Telegram chat ID is required" }
     if (!text.trim()) return { ok: false, error: "A message is required" }
     try {
-      let payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+      let payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
       })
       if (!payload.ok && /parse|entity|too long/i.test(payload.description || "")) {
-        payload = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
+        payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: text.slice(0, 4096) }),
         })
       }

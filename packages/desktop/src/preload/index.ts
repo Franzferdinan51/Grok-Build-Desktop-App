@@ -8,6 +8,7 @@ export type TelegramStatus = { connected: boolean; username?: string; botId?: nu
 export type ProjectSnapshot = { id: string; name: string; path: string; addedAt: number; isGit: boolean; branch?: string; changedFiles: number; diffStat?: string }
 export type GrokRunRecord = { id: string; cwd: string; prompt: string; model?: string; startedAt: number; finishedAt?: number; status: "running" | "completed" | "failed" | "cancelled"; grokSessionId?: string; error?: string }
 export type LocalStudioSnapshot = { configured: boolean; reachable: boolean; baseUrl: string; health?: unknown; status?: unknown; gpus?: unknown; error?: string }
+export type HostControlResult = { ok: boolean; backend: string; action: string; observed?: unknown; error?: string | null; permission_required?: boolean; missing_permissions?: unknown[] }
 export type GrokSkill = { name: string; description: string; path: string; scope: "project" | "user" | "compatible" }
 export type ScheduledGrokTask = { id: string; name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number; enabled: boolean; lastRunAt?: number; nextRunAt: number; lastStatus?: "completed" | "failed" }
 export type ProviderSecret = { id: string; label: string; envKey: string; baseUrl: string; modelId: string; configured: boolean }
@@ -49,6 +50,7 @@ export type ElectronAPI = {
   workspace: { files: (root: string) => Promise<WorkspaceFile[]>; read: (root: string, path: string) => Promise<string>; write: (root: string, path: string, content: string) => Promise<void>; command: (root: string, command: string) => Promise<{ stdout: string; stderr: string; code: number }>; gitChanges: (root: string) => Promise<{ status: string; path: string }[]>; gitDiff: (root: string, path: string) => Promise<string> }
   preview: { start: (root: string) => Promise<{ url: string }>; stop: () => Promise<void>; inspect: () => Promise<{ url: string; title: string; text: string; html: string; viewport: { width: number; height: number }; links: { text: string; href: string }[]; controls: { tag: string; type: string | null; label: string; disabled: boolean }[]; screenshotPath: string }> }
   localStudio: { status: () => Promise<LocalStudioSnapshot>; setURL: (baseUrl: string) => Promise<string> }
+  hostControls: { browserStatus: () => Promise<HostControlResult>; browserOpen: (url: string) => Promise<HostControlResult>; desktopStatus: () => Promise<HostControlResult> }
   store: { get: <T = unknown>(key: string) => Promise<T>; set: <T = unknown>(key: string, value: T) => Promise<void>; delete: (key: string) => Promise<void> }
   window: { minimize: () => void; maximize: () => void; close: () => void }
   app: { openExternal: (url: string) => Promise<void>; getVersion: () => Promise<string>; backendRepository: () => Promise<string> }
@@ -89,6 +91,7 @@ const api: ElectronAPI = {
   workspace: { files: (root) => ipcRenderer.invoke("workspace:files", root), read: (root, path) => ipcRenderer.invoke("workspace:read", root, path), write: (root, path, content) => ipcRenderer.invoke("workspace:write", root, path, content), command: (root, command) => ipcRenderer.invoke("workspace:command", root, command), gitChanges: (root) => ipcRenderer.invoke("workspace:git-changes", root), gitDiff: (root, path) => ipcRenderer.invoke("workspace:git-diff", root, path) },
   preview: { start: (root) => ipcRenderer.invoke("preview:start", root), stop: () => ipcRenderer.invoke("preview:stop"), inspect: () => ipcRenderer.invoke("preview:inspect") },
   localStudio: { status: () => ipcRenderer.invoke("local-studio:status"), setURL: (baseUrl) => ipcRenderer.invoke("local-studio:set-url", baseUrl) },
+  hostControls: { browserStatus: () => ipcRenderer.invoke("host-controls:browser-status"), browserOpen: (url) => ipcRenderer.invoke("host-controls:browser-open", url), desktopStatus: () => ipcRenderer.invoke("host-controls:desktop-status") },
   store: { get: <T = unknown>(key: string) => ipcRenderer.invoke("store:get", key) as Promise<T>, set: <T = unknown>(key: string, value: T) => ipcRenderer.invoke("store:set", key, value), delete: (key) => ipcRenderer.invoke("store:delete", key) },
   window: { minimize: () => ipcRenderer.invoke("window:minimize"), maximize: () => ipcRenderer.invoke("window:maximize"), close: () => ipcRenderer.invoke("window:close") },
   app: { openExternal: (url) => ipcRenderer.invoke("app:open-external", url), getVersion: () => ipcRenderer.invoke("app:get-version"), backendRepository: () => ipcRenderer.invoke("app:backend-repository") },

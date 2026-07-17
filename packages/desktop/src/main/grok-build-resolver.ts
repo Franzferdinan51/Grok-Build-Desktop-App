@@ -26,11 +26,21 @@ export type ResolvedGrokBuild =
 
 export function grokBuildCandidates(environment: NodeJS.ProcessEnv = process.env): GrokBuildCandidate[] {
   const explicit = environment.GROK_BUILD_PATH?.trim()
-  if (explicit) return [{ command: explicit, source: "GROK_BUILD_PATH" }]
-  const candidates: GrokBuildCandidate[] = [{ command: "grok", source: "PATH" }]
-  for (const command of [join(homedir(), ".local", "bin", "grok"), "/opt/homebrew/bin/grok", "/usr/local/bin/grok"]) {
-    if (existsSync(command)) candidates.push({ command, source: "COMMON_LOCATION" })
+  // A GUI-launched Electron app does not inherit the shell's PATH.  A plain
+  // `grok` is the historical default, not an explicit location, so prefer
+  // xAI's managed install before probing PATH. This makes updates deterministic
+  // and still respects a real absolute/custom GROK_BUILD_PATH override.
+  const candidates: GrokBuildCandidate[] = []
+  if (explicit && explicit !== "grok") candidates.push({ command: explicit, source: "GROK_BUILD_PATH" })
+  for (const command of [
+    join(homedir(), ".grok", "bin", "grok"),
+    join(homedir(), ".local", "bin", "grok"),
+    "/opt/homebrew/bin/grok",
+    "/usr/local/bin/grok",
+  ]) {
+    if (existsSync(command) && !candidates.some((candidate) => candidate.command === command)) candidates.push({ command, source: "COMMON_LOCATION" })
   }
+  candidates.push({ command: "grok", source: "PATH" })
   return candidates
 }
 

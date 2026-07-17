@@ -16,6 +16,7 @@ import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, ru
 import { PreviewServer } from "./preview-server"
 import { exportConversation, getConversation, listConversations, saveConversation, searchConversations, type StoredChatThread } from "./conversation-store"
 import { DuckbotMemory } from "./duckbot-memory"
+import { hostBrowserOpen, hostBrowserStatus, hostDesktopStatus } from "./host-controls"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -32,7 +33,12 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:status", () => deps.backend().status())
   ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
-  ipcMain.handle("backend:set-path", (_event, path: string) => { getStore().set("grok.cliPath", path.trim() || undefined); return deps.backend().status() })
+  ipcMain.handle("backend:set-path", (_event, path: string) => {
+    getStore().set("grok.cliPath", path.trim() || undefined)
+    deps.backend().invalidateModelsCache()
+    deps.backend().invalidateCliFlagsCache()
+    return deps.backend().status()
+  })
   ipcMain.handle("backend:oauth-login", (_event, provider: "xai" | "openai" | "minimax") => deps.backend().startOAuth(provider))
   ipcMain.handle("backend:update-check", () => deps.backend().checkUpdate())
   ipcMain.handle("backend:update-install", (_event, channel: "stable" | "alpha") => deps.backend().installUpdate(channel))
@@ -122,12 +128,19 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("telegram:set-allowed-chats", (_event, chatIds: string[]) => deps.telegram().setAllowedChats(chatIds))
   ipcMain.handle("local-studio:status", () => deps.localStudio().snapshot())
   ipcMain.handle("local-studio:set-url", (_event, baseUrl: string) => deps.localStudio().setBaseURL(baseUrl))
+  ipcMain.handle("host-controls:browser-status", () => hostBrowserStatus())
+  ipcMain.handle("host-controls:browser-open", (_event, url: string) => hostBrowserOpen(url))
+  ipcMain.handle("host-controls:desktop-status", () => hostDesktopStatus())
   ipcMain.handle("projects:list", async () => Promise.all(listProjects().map(inspectProject)))
   ipcMain.handle("projects:add", async (_event, path: string) => addProject(path))
   ipcMain.handle("projects:remove", (_event, id: string) => removeProject(id))
   ipcMain.handle("projects:scratch", async () => {
     const path = join(app.getPath("userData"), "Scratch")
     mkdirSync(path, { recursive: true })
+    // Idempotent: if the Scratch project is already registered, return its
+    // snapshot so the renderer can select it without duplicating the entry.
+    const existing = listProjects().find((project) => project.path === path)
+    if (existing) return inspectProject(existing)
     return addProject(path)
   })
   ipcMain.handle("workspace:files", (_event, root: string) => listWorkspaceFiles(root))

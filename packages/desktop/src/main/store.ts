@@ -58,6 +58,7 @@ type StoreSchema = {
   projects: { id: string; name: string; path: string; addedAt: number }[]
   schedules: ScheduledGrokTask[]
   memory?: { enabled?: boolean; telegramEnabled?: boolean; duckbotPath?: string; soulPath?: string }
+  host?: { browserScript?: string; desktopScript?: string; disabled?: boolean }
 }
 
 let _store: Store<StoreSchema> | null = null
