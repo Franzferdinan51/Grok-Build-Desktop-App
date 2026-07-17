@@ -1,15 +1,24 @@
 # Grok Build Desktop
 
-An open-source, local-first desktop workbench for [Grok Build CLI](https://github.com/xai-org/grok-build). It combines an agentic coding chat, project tools, live preview, multi-model routing, schedules, skills, and a protected Telegram interface in one native application for macOS, Windows, and Linux.
+An open-source, local-first desktop agent built on [Grok Build CLI](https://github.com/xai-org/grok-build). It combines autonomous coding, general-purpose agent work, persistent conversations, project tools, live preview, multi-model routing, schedules, skills, MoA, subagents, and a full Telegram agent in one native application for macOS and Windows.
 
 The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzferdinan51/grok-build), with a clean upstream-sync path from xAI. Grok Build remains the sole coding-agent runtime: the desktop app handles presentation, secure provider configuration, and orchestration without adding a competing agent backend.
+
+## Current highlights
+
+- **Autonomous by default:** desktop, Telegram, and scheduled turns use Grok Build's real tool loop and can edit, run, test, and verify instead of stopping at a plan.
+- **Project or project-free:** use a repository, temporary Scratch space, or a persistent **Agent (no project)** working directory.
+- **Persistent continuity:** conversations, checkpoints, model/workspace affinity, native session IDs, queues, recovery context, and interrupted work survive relaunches.
+- **Remote agent:** Telegram includes pairing, queues, steering, interruption, lifecycle controls, rich formatting, live progress, model/project pickers, and private reasoning.
+- **Provider choice:** xAI, OpenAI Codex OAuth, MiniMax OAuth/API, NVIDIA Build/NIM, OpenRouter, LM Studio, ODS, and OpenAI-compatible endpoints.
+- **Built and tested cross-platform:** signed local macOS DMG/ZIP artifacts and Windows x64 NSIS installers are produced by the release workflow.
 
 ## What is included
 
 ### Agentic coding workspace
 
 - Atomic per-conversation storage with sanitized rich Markdown, streamed output, collapsed reasoning, prompt queues, copy/retry actions, global search, rename, pin, archive, export, model/session labels, and cross-workspace history.
-- Start immediately in an isolated Scratch workspace or open an existing project.
+- Start in a persistent general-purpose Agent workspace, an isolated Scratch workspace, or an existing project.
 - Workspace file browser/editor, contained terminal, Git status, and per-file diffs.
 - Fixed header and composer with an independently scrolling chat transcript; every non-chat page, including the full Settings catalog, has its own reliable viewport scroll.
 - Grok session IDs are bound to each conversation and workspace and resume across turns, stops, relaunches, and project switches. Token-aware visible-only context and automatic checkpoints recover long conversations without injecting thoughts, advisor transcripts, preview DOM, action tags, or tool noise.
@@ -54,8 +63,10 @@ The maintained backend is [Franzferdinan51/grok-build](https://github.com/Franzf
 - A dedicated **Agent** sidebar tab combines Grok Build runtime defaults, model choice, reasoning, verification, delegation, MoA, safe app authority, scheduled autonomy, and the Telegram connection in one control center.
 - BotFather-token validation, OS-encrypted storage, polling, timeouts, limits, and clean network errors.
 - Pairing requests and explicit chat allowlisting before any task can run.
-- Persistent per-chat Grok Build agent sessions with model/project affinity, bounded transcript recovery, queues, long-response chunking, and private-reasoning removal.
-- Native commands include `/run`, `/new`, rich `/status`, `/models`, `/project`, `/queue`, `/steer`, `/interrupt`, `/history`, `/schedules`, and `/cancel`; inline buttons update task context immediately.
+- Persistent per-chat Grok Build agent sessions with model/working-directory affinity, bounded transcript recovery, FIFO queues, long-response chunking, and private-reasoning removal.
+- `/project` offers **Agent (no project)**, temporary Scratch, and saved projects. Agent mode uses a durable general-purpose working directory and does not require a Git repository.
+- Telegram responses support safe rich formatting for headings, emphasis, links, inline code, fenced code blocks, status messages, and inline keyboards. Long output is split at readable boundaries.
+- Native commands include `/run`, `/new`, rich `/status`, `/models`, `/model`, `/project`, `/workspace`, `/queue`, `/steer`, `/interrupt`, `/history`, `/schedules`, `/menu`, and `/cancel`; inline buttons update task context immediately.
 - Hermes-style lifecycle commands add `/retry`, `/undo`, `/compress`, and per-session `/reasoning`, with optional idle resets and corrected-transcript recovery after rewinds.
 - Telegram tasks retain Grok Build tools, web search, verification, subagents, optional MoA, run history, progress updates, and schema-validated scheduling when Agent App Controls are enabled.
 - Use a dedicated BotFather bot. A token already consumed by OpenClaw or another long-polling client cannot simultaneously be polled by this app.
@@ -113,7 +124,7 @@ Output is written to `packages/desktop/dist`.
 2. Sign in with xAI, or configure another model provider.
 3. For OpenAI Codex, install Hermes, choose **Sign in with OpenAI**, and finish the browser flow. The usable Codex models are imported automatically.
 4. For MiniMax, install `mmx`, choose **Sign in with MiniMax**, and finish device authorization.
-5. Choose **Agent scratch** for project-free work or **Open project** for an existing codebase.
+5. Choose **Agent (no project)** for persistent general-purpose work, **Scratch** for temporary isolated work, or **Open project** for an existing codebase.
 6. Use the Agent tab to configure Telegram, subagents, MoA, safe app controls, and shared desktop/remote runtime defaults; enable Preview or automatic learning only when needed.
 
 ## Chat workflow
@@ -143,6 +154,31 @@ Type `/` for local commands. Important commands include:
 
 Discovered skill commands are passed through to Grok Build.
 
+## Telegram agent workflow
+
+Connect a dedicated BotFather bot in the **Agent** tab, send `/start`, and approve the pending chat ID in the desktop app. One bot token must have only one active polling owner.
+
+```text
+/menu                 rich control panel
+/status               backend, model, session, queue, and working directory
+/models               inline model selector
+/project              Agent, Scratch, or saved-project selector
+/run <instruction>    execute an agent turn
+/steer <instruction>  prioritize the next turn
+/interrupt <task>     stop current work and redirect
+/queue                 inspect pending work
+/retry                 rerun the previous instruction
+/undo                  remove the previous visible turn
+/compress              checkpoint older context
+/reasoning on|off      per-chat reasoning override
+/history               recent visible conversation
+/schedules             enabled scheduled work
+/new                   fresh session, same model and working directory
+/cancel                cancel active work
+```
+
+Plain messages run as agent instructions. Every authorized chat has independent model, working directory, transcript, checkpoint, and resumable Grok session state.
+
 ## Backend contract
 
 Every coding task ultimately uses Grok Build's documented headless interface:
@@ -151,7 +187,9 @@ Every coding task ultimately uses Grok Build's documented headless interface:
 grok -p "<task>" --cwd "<workspace>" --output-format streaming-json
 ```
 
-The desktop app adds only verified flags such as `--model`, `--reasoning-effort`, `--max-turns`, `--check`, `--disable-web-search`, `--no-subagents`, and `--yolo` when their corresponding controls are selected.
+The desktop app adds only verified Grok flags for the selected controls, including model, reasoning effort, turn limits, verification, web search, subagents, permissions, memory, sandboxing, rules, worktrees, session recovery, and structured output.
+
+The app expects the maintained backend fork because several third-party Responses-compatible providers emit harmless extension control frames such as `response.metadata`. The fork ignores those non-content frames while retaining xAI upstream behavior.
 
 Managed provider entries are written only inside the marked **GROK BUILD DESKTOP MANAGED PROVIDERS** block in `~/.grok/config.toml`; hand-written configuration outside that block is preserved.
 

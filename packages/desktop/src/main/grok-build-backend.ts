@@ -161,6 +161,12 @@ export class GrokBuildBackend {
   async checkUpdate(): Promise<GrokBuildUpdateStatus> {
     const status = await this.status()
     if (!status.available) throw new Error(status.error)
+    // The maintained fork accepts provider extension frames (notably
+    // `response.metadata`). Replacing it with the stock updater would
+    // reintroduce fatal Telegram/provider serialization failures.
+    if (status.version?.includes("1f75182")) {
+      return { currentVersion: status.version, latestVersion: status.version, updateAvailable: false, channel: "stable" }
+    }
     const { stdout } = await execFileAsync(status.command, ["update", "--check", "--json"], { timeout: 30_000, maxBuffer: 1_000_000 })
     return JSON.parse(stdout) as GrokBuildUpdateStatus
   }
@@ -169,6 +175,7 @@ export class GrokBuildBackend {
     if (this.isRunning()) throw new Error("Finish or cancel the current Grok Build task before updating")
     const status = await this.status()
     if (!status.available) throw new Error(status.error)
+    if (status.version?.includes("1f75182")) throw new Error("The maintained Grok Build backend is already installed. Update it through the desktop release so provider-compatibility patches are preserved.")
     await execFileAsync(status.command, ["update", channel === "alpha" ? "--alpha" : "--stable"], { timeout: 10 * 60_000, maxBuffer: 5_000_000 })
     return this.checkUpdate()
   }
