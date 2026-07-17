@@ -19,6 +19,7 @@ import { listGrokSkills } from "../src/main/grok-skills.ts"
 import { normalizeBackendStderr } from "../src/main/backend-error.ts"
 import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
 import { withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
+import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -298,6 +299,31 @@ assert.deepEqual(emptySoft, { allowedChatIds: [], pendingChatIds: [], updateOffs
 const emptyForget = withForgottenTokenState({})
 assert.equal(emptyForget.token, undefined)
 assert.deepEqual(emptyForget, { allowedChatIds: [], pendingChatIds: [], updateOffset: 0, sessions: {} })
+
+// Shell tokenizer for GrokBuildBackend.runTool: the prior regex split
+// command lines incorrectly on embedded escapes, empty quoted strings,
+// and unmatched quotes. The shipped tokenizer handles each of these.
+assert.deepEqual(tokenizeCommandLine("inspect --json"), ["inspect", "--json"])
+assert.deepEqual(tokenizeCommandLine("inspect --tag 'v1.0'"), ["inspect", "--tag", "v1.0"])
+assert.deepEqual(tokenizeCommandLine('inspect --message "hello world"'), ["inspect", "--message", "hello world"])
+// Embedded escapes inside a double-quoted segment — previously the regex
+// stopped at the embedded `\"` literal and dropped the rest.
+assert.deepEqual(tokenizeCommandLine('inspect --tag "v1.0 \\"beta\\""'), ["inspect", "--tag", 'v1.0 "beta"'])
+// Empty quoted strings.
+assert.deepEqual(tokenizeCommandLine('inspect --message ""'), ["inspect", "--message", ""])
+assert.deepEqual(tokenizeCommandLine("inspect --message ''"), ["inspect", "--message", ""])
+// Adjacent quoted segments collapse.
+assert.deepEqual(tokenizeCommandLine(`inspect --x 'a'"b"'c'`), ["inspect", "--x", "abc"])
+// Backslash escape outside quotes (escapes the next char).
+assert.deepEqual(tokenizeCommandLine("inspect --path /tmp/foo\\ bar"), ["inspect", "--path", "/tmp/foo bar"])
+// Trailing whitespace, empty input.
+assert.deepEqual(tokenizeCommandLine("inspect --json   "), ["inspect", "--json"])
+assert.deepEqual(tokenizeCommandLine(""), [])
+assert.deepEqual(tokenizeCommandLine("   "), [])
+// Errors: each must throw the typed ShellQuoteError with a useful offset.
+assert.throws(() => tokenizeCommandLine('inspect --message "unterminated'), ShellQuoteError)
+assert.throws(() => tokenizeCommandLine("inspect --message 'unterminated"), ShellQuoteError)
+assert.throws(() => tokenizeCommandLine("inspect foo\\"), ShellQuoteError)
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)

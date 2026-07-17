@@ -14,6 +14,7 @@ import { existsSync } from "fs"
 import { write as writeLog } from "./logging"
 import { resolveGrokBuild } from "./grok-build-resolver"
 import { normalizeBackendStderr } from "./backend-error"
+import { tokenizeCommandLine, ShellQuoteError } from "./shell-quote"
 import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
 import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
@@ -267,7 +268,12 @@ export class GrokBuildBackend {
 
   async runTool(commandLine: string, cwd?: string): Promise<{ stdout: string; stderr: string }> {
     if (this.isRunning()) throw new Error("Finish or cancel the active coding task first")
-    const args = commandLine.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((part) => part.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2")) || []
+    let args: string[]
+    try { args = tokenizeCommandLine(commandLine) }
+    catch (error) {
+      if (error instanceof ShellQuoteError) throw new Error(`Could not parse command line: ${error.message}`)
+      throw error
+    }
     const command = args.shift()?.toLowerCase()
     const allowed = new Set(["mcp", "plugin", "memory", "sessions", "worktree", "export", "inspect", "setup", "trace", "completions", "login", "logout", "dashboard"])
     if (!command || !allowed.has(command)) throw new Error(`Unsupported Grok tool command: ${command || "empty"}`)
