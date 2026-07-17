@@ -35,12 +35,20 @@ assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim(), await realp
 // reject those paths even though they are inside the workspace.
 await writeWorkspaceFile(root, "newdir/nested/file.txt", "created\n")
 assert.equal(await readWorkspaceFile(root, "newdir/nested/file.txt"), "created\n")
+// Writing under an *existing* subdirectory into a missing nested path is
+// the common React/Vite/Next case (src exists, src/components/Button.tsx
+// does not). The walk-up-the-parent-chain fix must accept any realpath'd
+// ancestor inside the workspace, not only the workspace root itself.
+await mkdir(join(root, "src"))
+await writeWorkspaceFile(root, "src/components/Button.tsx", "export const Button = () => null;\n")
+assert.equal(await readWorkspaceFile(root, "src/components/Button.tsx"), "export const Button = () => null;\n")
 // Symlink escape must still be rejected even when the symlinked target path
 // does not yet exist as a real file. The error class depends on whether the
 // symlink resolves to a directory (symbolic link) or to a non-directory
 // target (ENOTDIR) — both correctly block the write.
 await assert.rejects(writeWorkspaceFile(root, "escape/new.txt", "blocked"), /symbolic link|ENOTDIR/)
 assert.equal((await listWorkspaceFiles(root)).some((file) => file.path.startsWith("newdir/")), true)
+assert.equal((await listWorkspaceFiles(root)).some((file) => file.path.startsWith("src/")), true)
 
 execFileSync("git", ["init", "-q"], { cwd: root })
 execFileSync("git", ["add", "hello.txt"], { cwd: root })
@@ -84,6 +92,17 @@ assert.deepEqual(splitThinking([
   { kind: "text", content: "Public answer</think>" },
 ]), [
   { kind: "text", content: "Public answer" },
+])
+// A closing tag flushed before the matching opening reasoning tag — common
+// when a provider closes a previous thinking block mid-flush and then opens
+// a new one — must also be stripped from the public slice that precedes
+// the opening tag.
+assert.deepEqual(splitThinking([
+  { kind: "text", content: "Public</think><think>private</think>answer" },
+]), [
+  { kind: "text", content: "Public" },
+  { kind: "thought", content: "private" },
+  { kind: "text", content: "answer" },
 ])
 
 assert.deepEqual(ensurePublicCompletion([{ kind: "thought", content: "private only" }]), [

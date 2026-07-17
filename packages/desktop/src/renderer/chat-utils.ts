@@ -27,7 +27,10 @@ export function splitThinking(logs: TaskLog[]): TaskLog[] {
     let cursor = 0
     for (const match of log.content.matchAll(reasoningBlock)) {
       const index = match.index ?? 0
-      const before = log.content.slice(cursor, index).trim()
+      // Strip orphan closing tags from the slice before the opening reasoning
+      // tag too, so a flushed trailing `</think>` (or one emitted before a
+      // late opening `<think>`) cannot leak into the public chat pane.
+      const before = log.content.slice(cursor, index).replace(closingReasoningTag, "").trim()
       if (before) parts.push({ kind: "text", content: before })
       const thought = match[2]?.trim()
       if (thought) parts.push({ kind: "thought", content: thought })

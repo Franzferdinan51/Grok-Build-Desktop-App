@@ -46,7 +46,11 @@ async function safeWritePath(root: string, candidate: string): Promise<string> {
     // Walk up the parent chain until we find an existing directory, then
     // confirm that ancestor is inside the workspace. Without this, the file
     // editor and any future "new file" workflow cannot create files in a
-    // subdirectory that does not yet exist.
+    // subdirectory that does not yet exist. The walk's canonical-prefix check
+    // already guarantees every visited ancestor lives inside the workspace;
+    // a `break` therefore means the write is safe — even when the ancestor
+    // is an intermediate directory like `src` (writing `src/components/Button.tsx`
+    // into an existing `src`) rather than the workspace root itself.
     let parent = dirname(target)
     while (parent !== canonicalRoot && parent !== dirname(parent)) {
       try {
@@ -58,7 +62,7 @@ async function safeWritePath(root: string, candidate: string): Promise<string> {
         parent = dirname(parent)
       }
     }
-    if (parent !== canonicalRoot && parent !== dirname(target)) throw new Error("Path escapes the workspace")
+    if (parent === dirname(parent)) throw new Error("Path escapes the workspace")
     // Create any missing parent directories between the validated ancestor
     // and the target so the editor can save into brand-new folders.
     await mkdir(dirname(target), { recursive: true })
