@@ -13,6 +13,7 @@ import { promisify } from "util"
 import { existsSync } from "fs"
 import { write as writeLog } from "./logging"
 import { resolveGrokBuild } from "./grok-build-resolver"
+import { normalizeBackendStderr } from "./backend-error"
 import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
 import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
@@ -507,7 +508,7 @@ export class GrokBuildBackend {
           onEvent({ type: "cancelled", data: "Task cancelled." })
           finish(() => resolve(stderr))
         } else if (code === 0 || protocolEnded) finish(() => resolve(stderr))
-        else finish(() => reject(new Error(inactivityTimeout || stderr.trim() || `Grok Build exited ${code ?? `from ${signal || "an unknown signal"}`}`)))
+        else finish(() => reject(new Error(inactivityTimeout || normalizeBackendStderr(stderr) || `Grok Build exited ${code ?? `from ${signal || "an unknown signal"}`}`)))
       })
     })
 

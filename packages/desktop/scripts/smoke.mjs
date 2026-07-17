@@ -16,6 +16,7 @@ import { telegramHtml, telegramTextChunks } from "../src/main/telegram-text.ts"
 import { telegramTaskNeedsMoa } from "../src/main/telegram-agent-policy.ts"
 import { boundedMoaContext, cleanMoaAdvisorOutput, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
 import { listGrokSkills } from "../src/main/grok-skills.ts"
+import { normalizeBackendStderr } from "../src/main/backend-error.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -193,6 +194,44 @@ const folded = discovered.find((skill) => skill.name === "folded")
 assert.equal(single?.description, "A short one-line description.")
 assert.match(folded?.description || "", /^A longer multi-line description/)
 assert.match(folded?.description || "", /several indented lines/)
+
+// Backend stderr normalization: when Grok Build prints a JSON "Internal
+// error: { ... }" dump on stderr (for example a provider returning null
+// token counts that the CLI cannot serialize), the user-visible error
+// must be the human-readable `message` rather than the full dump with
+// prompt-usage metadata attached.
+const stderrDump = `Internal error: {
+  "message": "serialization error: invalid type: null, expected u32 at line 1 column 331",
+  "promptUsage": {
+    "inputTokens": 17493,
+    "outputTokens": 127,
+    "totalTokens": 17620,
+    "cachedReadTokens": 0,
+    "reasoningTokens": 0,
+    "modelCalls": 1,
+    "apiDurationMs": 3493,
+    "modelUsage": {
+      "nvidia/nemotron-3-ultra-550b-a55b": { "inputTokens": 17493, "outputTokens": 127, "totalTokens": 17620, "cachedReadTokens": 0, "reasoningTokens": 0, "modelCalls": 1, "apiDurationMs": 3493 }
+    },
+    "numTurns": 1
+  }
+}`
+const normalizedMessage = normalizeBackendStderr(stderrDump)
+assert.equal(normalizedMessage, "serialization error: invalid type: null, expected u32 at line 1 column 331")
+// The dump must be invisible — prompt-usage keys cannot leak into the chat pane.
+assert.doesNotMatch(normalizedMessage, /promptUsage/)
+assert.doesNotMatch(normalizedMessage, /numTurns/)
+assert.doesNotMatch(normalizedMessage, /modelUsage/)
+// Bare JSON `{ "message": ... }` and JSON with an `error` field are both handled.
+assert.equal(normalizeBackendStderr("{\"message\":\"hi\"}"), "hi")
+assert.equal(normalizeBackendStderr("prefix {\"error\":\"something broke\"}"), "something broke")
+// Non-JSON stderr must pass through unchanged so existing error UX is preserved.
+assert.equal(normalizeBackendStderr("permission denied for /usr/local/bin/grok"), "permission denied for /usr/local/bin/grok")
+// Empty / whitespace-only stderr stays empty.
+assert.equal(normalizeBackendStderr(""), "")
+assert.equal(normalizeBackendStderr("   \n  "), "")
+// Garbage that looks JSON-ish but isn't must not crash and must pass through.
+assert.equal(normalizeBackendStderr("prefix { not json }"), "prefix { not json }")
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
