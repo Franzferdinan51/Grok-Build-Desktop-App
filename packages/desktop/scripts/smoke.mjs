@@ -73,6 +73,19 @@ assert.deepEqual(splitThinking([
   { kind: "text", content: "Public answer" },
 ])
 
+// A model that streams an orphan closing reasoning tag without ever sending
+// the matching opener must not leak `</think>` into the public chat pane.
+assert.deepEqual(splitThinking([
+  { kind: "text", content: "Public answer</think>trailing" },
+]), [
+  { kind: "text", content: "Public answertrailing" },
+])
+assert.deepEqual(splitThinking([
+  { kind: "text", content: "Public answer</think>" },
+]), [
+  { kind: "text", content: "Public answer" },
+])
+
 assert.deepEqual(ensurePublicCompletion([{ kind: "thought", content: "private only" }]), [
   { kind: "thought", content: "private only" },
   { kind: "text", content: "Task completed. Grok Build applied the changes but returned no public summary." },

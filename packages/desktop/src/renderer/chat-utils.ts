@@ -14,7 +14,15 @@ export function splitThinking(logs: TaskLog[]): TaskLog[] {
   }, [])
 
   return merged.flatMap((log) => {
-    if (log.kind !== "text" || !reasoningTag.test(log.content)) return [log]
+    if (log.kind !== "text") return [log]
+    // Always strip orphan closing reasoning tags so a model that streams a
+    // closing delimiter without ever sending the opening tag cannot leak
+    // the literal `</think>` into the user-visible chat pane. This mirrors
+    // publicTelegramResponse in the Telegram bridge.
+    if (!reasoningTag.test(log.content)) {
+      const stripped = log.content.replace(closingReasoningTag, "").trim()
+      return stripped ? [{ ...log, content: stripped }] : []
+    }
     const parts: TaskLog[] = []
     let cursor = 0
     for (const match of log.content.matchAll(reasoningBlock)) {
