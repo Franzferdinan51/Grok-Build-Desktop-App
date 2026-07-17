@@ -222,14 +222,14 @@ app.whenReady().then(async () => {
       backend.cancel()
       return wasRunning ? "Stopping the active Grok Build task…" : "No Grok Build task is currently running."
     }
-    if (name === "workspace") return `Active project: ${telegramSession(chatId).workspace || (getStore().get("workspace.last") as string | undefined) || "Scratch"}`
+    if (name === "workspace") return `Active working directory: ${telegramSession(chatId).workspace || (getStore().get("workspace.last") as string | undefined) || "Scratch"}`
     if (name === "status") {
       const status = await backend.status()
       const catalog = await backend.models()
       const agent = telegramSession(chatId)
       const model = agent.model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
       const workspacePath = agent.workspace || (getStore().get("workspace.last") as string | undefined) || join(app.getPath("userData"), "Scratch")
-      const workspace = getStore().get("projects").find((project) => project.path === workspacePath)?.name || "Scratch"
+      const workspace = workspacePath === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : getStore().get("projects").find((project) => project.path === workspacePath)?.name || "Scratch"
       if (!status.available) return `🔴 Grok Build unavailable\n${status.error}`
       return `🟢 Grok Build agent ready\n\nStatus: ${backend.isRunning() ? `Task running${telegramRunningChat === chatId ? " in this chat" : ""}` : "Idle"}\nSession: ${agent.sessionId ? "Resumable" : "Fresh"}\nModel: ${model}\nProject: ${workspace}\nBackend: ${status.version || "available"}\nModels: ${catalog.models.length}\n\nUse /new to reset, or /models and /project to change context.`
     }
@@ -305,7 +305,7 @@ app.whenReady().then(async () => {
     telegramRunningChat = chatId
     const run = startGrokRun(input)
     const startedAt = Date.now()
-    const workspaceName = getStore().get("projects").find((project) => project.path === cwd)?.name || "Scratch"
+    const workspaceName = cwd === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : getStore().get("projects").find((project) => project.path === cwd)?.name || "Scratch"
     const modelName = input.model || "Grok Build default"
     await telegram.sendActivity(chatId)
     const progressId = await telegram.sendProgress(chatId, `🚀 Task started\nModel: ${modelName}\nWorkspace: ${workspaceName}`)

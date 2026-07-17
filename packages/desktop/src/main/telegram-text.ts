@@ -1,4 +1,4 @@
-export function telegramTextChunks(text: string, limit = 3900): string[] {
+export function telegramTextChunks(text: string, limit = 3000): string[] {
   const chunks: string[] = []
   let remaining = text.trim()
   while (remaining.length > limit) {
