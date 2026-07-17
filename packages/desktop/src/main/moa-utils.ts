@@ -10,3 +10,12 @@ export function normalizeMoaReferenceBudget(value?: number): number {
   if (!Number.isFinite(value)) return 600
   return Math.min(2_000, Math.max(200, Math.floor(value!)))
 }
+
+/** Remove provider-private reasoning before advice reaches the acting aggregator. */
+export function cleanMoaAdvisorOutput(value: string): string {
+  return value
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/gi, "")
+    .replace(/<\/think>/gi, "")
+    .trim()
+}

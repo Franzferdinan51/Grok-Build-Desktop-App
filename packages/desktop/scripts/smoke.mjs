@@ -10,7 +10,7 @@ import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, ru
 import { inspectProject } from "../src/main/project-inspection.ts"
 import { PreviewServer } from "../src/main/preview-server.ts"
 import { telegramInlineKeyboard } from "../src/main/telegram-format.ts"
-import { boundedMoaContext, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
+import { boundedMoaContext, cleanMoaAdvisorOutput, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -85,6 +85,8 @@ assert.equal(boundedContext.length < 13_000, true)
 assert.equal(normalizeMoaReferenceBudget(), 600)
 assert.equal(normalizeMoaReferenceBudget(50), 200)
 assert.equal(normalizeMoaReferenceBudget(50_000), 2_000)
+assert.equal(cleanMoaAdvisorOutput("<think>private chain of thought</think>\nConcrete advice"), "Concrete advice")
+assert.equal(cleanMoaAdvisorOutput("Useful advice</think>"), "Useful advice")
 
 const duplicateCodexConfig = `[model.keep]\nmodel = "keep"\n\n[model.codex-old]\nmodel = "gpt-old"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"\n\n# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS\n[model.codex-new]\nmodel = "gpt-new"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"\n# END GROK BUILD DESKTOP MANAGED PROVIDERS\n`
 const repairedCodexConfig = removeLegacyCodexBridgeTables(duplicateCodexConfig)
