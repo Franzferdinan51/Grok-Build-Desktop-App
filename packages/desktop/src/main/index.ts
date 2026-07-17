@@ -26,6 +26,7 @@ import { addSchedule, GrokTaskScheduler, listSchedules } from "./scheduled-tasks
 import { PreviewServer } from "./preview-server"
 import { getStore } from "./store"
 import { finishGrokRun, recoverInterruptedGrokRuns, startGrokRun } from "./grok-runs"
+import { telegramTaskNeedsMoa } from "./telegram-agent-policy"
 
 const APP_NAME = "Grok Build Desktop"
 const APP_ID = "ai.grokbuild.desktop"
@@ -293,7 +294,7 @@ app.whenReady().then(async () => {
       maxTurns: (getStore().get("defaults.maxTurns") as number | undefined) || undefined,
       disableWebSearch: getStore().get("defaults.webSearch") === false,
       subagents: (getStore().get("agent.subagents") as boolean | undefined) ?? true,
-      moa: moaEnabled && moaReferences.length >= 2 ? {
+      moa: moaEnabled && moaReferences.length >= 2 && telegramTaskNeedsMoa(taskText) ? {
         referenceModels: moaReferences,
         aggregatorModel: (getStore().get("moa.aggregatorModel") as string | undefined) || agent.model,
         referenceReasoningEffort: (getStore().get("moa.referenceEffort") as "low" | "medium" | "high" | undefined) || "medium",

@@ -13,6 +13,7 @@ import { PreviewServer } from "../src/main/preview-server.ts"
 import { telegramInlineKeyboard } from "../src/main/telegram-format.ts"
 import { publicTelegramResponse } from "../src/main/telegram-output.ts"
 import { telegramHtml, telegramTextChunks } from "../src/main/telegram-text.ts"
+import { telegramTaskNeedsMoa } from "../src/main/telegram-agent-policy.ts"
 import { boundedMoaContext, cleanMoaAdvisorOutput, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
@@ -84,6 +85,8 @@ assert.deepEqual(telegramInlineKeyboard({ text: "Models", buttons: [[{ text: "âœ
 assert.equal(telegramInlineKeyboard({ text: "No buttons", buttons: [] }), undefined)
 const telegramChunks = telegramTextChunks(`${"word ".repeat(1000)}tail`)
 assert.equal(telegramHtml("**Done** with `code` & <safe>"), "<b>Done</b> with <code>code</code> &amp; &lt;safe&gt;")
+assert.equal(telegramTaskNeedsMoa("Hello? Just respond"), false)
+assert.equal(telegramTaskNeedsMoa("Please fix the Telegram agent and test everything"), true)
 assert.ok(telegramChunks.length > 1)
 assert.ok(telegramChunks.every((chunk) => chunk.length <= 3900))
 assert.equal(telegramChunks.join(" ").replace(/\s+/g, " ").trim(), `${"word ".repeat(1000)}tail`.replace(/\s+/g, " ").trim())

@@ -311,13 +311,26 @@ export class GrokBuildBackend {
       let buffer = ""
       let stderr = ""
       let settled = false
+      let inactivityTimeout = ""
+      let inactivityTimer: ReturnType<typeof setTimeout>
+      const armInactivityTimer = () => {
+        clearTimeout(inactivityTimer)
+        inactivityTimer = setTimeout(() => {
+          inactivityTimeout = "Grok Build produced no output for 3 minutes. The stalled provider request was stopped; retry the task or choose another model."
+          child.kill("SIGTERM")
+        }, 180_000)
+        inactivityTimer.unref()
+      }
+      armInactivityTimer()
       const finish = (callback: () => void) => {
         if (settled) return
         settled = true
+        clearTimeout(inactivityTimer)
         if (this.current === child) this.current = null
         callback()
       }
       const emitLines = (chunk: Buffer) => {
+        armInactivityTimer()
         buffer += chunk.toString()
         const lines = buffer.split("\n")
         buffer = lines.pop() ?? ""
@@ -332,7 +345,7 @@ export class GrokBuildBackend {
         }
       }
       child.stdout?.on("data", emitLines)
-      child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-1_000_000) })
+      child.stderr?.on("data", (chunk: Buffer) => { armInactivityTimer(); stderr = (stderr + chunk.toString()).slice(-1_000_000) })
       child.on("error", (error) => finish(() => reject(error)))
       child.on("exit", (code, signal) => {
         if (buffer.trim()) emitLines(Buffer.from("\n"))
@@ -342,7 +355,7 @@ export class GrokBuildBackend {
           onEvent({ type: "cancelled", data: "Task cancelled." })
           finish(() => resolve(stderr))
         } else if (code === 0) finish(() => resolve(stderr))
-        else finish(() => reject(new Error(stderr.trim() || `Grok Build exited ${code ?? `from ${signal || "an unknown signal"}`}`)))
+        else finish(() => reject(new Error(inactivityTimeout || stderr.trim() || `Grok Build exited ${code ?? `from ${signal || "an unknown signal"}`}`)))
       })
     })
 
