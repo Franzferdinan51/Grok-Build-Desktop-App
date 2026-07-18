@@ -22,6 +22,7 @@ import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
 import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeMoaReferenceBudget } from "./moa-utils"
 import { DuckbotMemory } from "./duckbot-memory"
+import { buildBaseArgs, compatibleCliArgs, promptArgsFor } from "./grok-args"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -163,21 +164,7 @@ export class GrokBuildBackend {
   }
 
   private compatibleCliArgs(args: string[], flags: Set<string>, onOmit: (flag: string) => void): string[] {
-    const requiresValue = new Set([
-      "-p", "--single", "--cwd", "--output-format", "--model", "--reasoning-effort", "--resume", "--best-of-n", "--max-turns",
-      "--agent", "--agents", "--permission-mode", "--allow", "--deny", "--tools", "--disallowed-tools", "--sandbox", "--rules",
-      "--system-prompt-override", "--session-id", "--worktree-ref", "--json-schema", "--prompt-file", "--prompt-json",
-    ])
-    const compatible: string[] = []
-    for (let index = 0; index < args.length; index += 1) {
-      const item = args[index]
-      if (!item.startsWith("-")) { compatible.push(item); continue }
-      const flag = item.split("=", 1)[0]
-      if (flags.has(flag)) { compatible.push(item); continue }
-      onOmit(flag)
-      if (requiresValue.has(flag) && !item.includes("=")) index += 1
-    }
-    return compatible
+    return compatibleCliArgs(args, flags, onOmit)
   }
 
   private terminateProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
@@ -246,7 +233,7 @@ export class GrokBuildBackend {
   private async syncCodexOAuthModels(): Promise<void> {
     if (!(await this.codexBridge.available())) return
     const models = await this.codexBridge.models()
-    configureCodexOAuthModels(this.codexBridge.baseUrl(), models)
+    await configureCodexOAuthModels(this.codexBridge.baseUrl(), models)
   }
 
   async startOAuth(provider: "xai" | "openai" | "minimax"): Promise<{ ok: boolean; message: string }> {
@@ -457,49 +444,8 @@ ${referenceSection}
     }
 
     const structuredOutput = Boolean(input.jsonSchema?.trim())
-    const promptArgs = input.promptJson?.trim() ? (JSON.parse(input.promptJson), ["--prompt-json", input.promptJson]) : input.promptFile?.trim() ? ["--prompt-file", input.promptFile.trim()] : ["-p", effectivePrompt]
-    const baseArgs = [...promptArgs, "--cwd", input.cwd, "--output-format", structuredOutput ? "json" : "streaming-json"]
-    const args = [...baseArgs]
-    if (effectiveModel) args.push("--model", effectiveModel)
-    const reasoningEffort = input.moa?.aggregatorReasoningEffort || (input.thinking ? "high" : undefined)
-    if (reasoningEffort) args.push("--reasoning-effort", reasoningEffort)
-    if (input.autoApprove) args.push("--always-approve")
-    if (input.resume) args.push("--resume", input.resume)
-    if (!input.moa && input.bestOfN && input.bestOfN >= 2) args.push("--best-of-n", String(Math.min(10, Math.floor(input.bestOfN))))
-    if (input.selfVerify) args.push("--check")
-    if (input.maxTurns && input.maxTurns > 0) args.push("--max-turns", String(Math.min(100, Math.floor(input.maxTurns))))
-    if (input.disableWebSearch) args.push("--disable-web-search")
-    // Grok 0.2.102 rejects --check together with --no-subagents because
-    // verification is implemented through the native subagent runtime.
-    // Prefer the explicitly requested verification pass when both UI toggles
-    // arrive enabled; otherwise preserve the user's no-subagents choice.
-    if (input.subagents === false && !input.selfVerify) args.push("--no-subagents")
-    if (input.agent?.trim()) args.push("--agent", input.agent.trim())
-    if (input.agents?.trim()) { JSON.parse(input.agents); args.push("--agents", input.agents) }
-    // Headless `default` cancels any tool call that would normally prompt.
-    // `auto` is Grok Build's balanced autonomous classifier; MoA needs it so
-    // the sole acting aggregator can implement while references stay read-only.
-    const permissionMode = input.moa && (!input.permissionMode || input.permissionMode === "default" || input.permissionMode === "acceptEdits")
-      ? "auto"
-      : input.permissionMode
-    if (permissionMode) args.push("--permission-mode", permissionMode)
-    for (const rule of input.allow || []) if (rule.trim()) args.push("--allow", rule.trim())
-    for (const rule of input.deny || []) if (rule.trim()) args.push("--deny", rule.trim())
-    if (input.tools?.trim()) args.push("--tools", input.tools.trim())
-    if (input.disallowedTools?.trim()) args.push("--disallowed-tools", input.disallowedTools.trim())
-    if (input.memory === "experimental") args.push("--experimental-memory")
-    if (input.memory === "disabled") args.push("--no-memory")
-    if (input.sandbox?.trim()) args.push("--sandbox", input.sandbox.trim())
-    if (input.rules?.trim()) args.push("--rules", input.rules.trim())
-    if (input.systemPrompt?.trim()) args.push("--system-prompt-override", input.systemPrompt.trim())
-    if (input.verbatim) args.push("--verbatim")
-    if (input.resume && input.forkSession) args.push("--fork-session")
-    if (input.resume && input.restoreCode) args.push("--restore-code")
-    if (input.sessionId?.trim() && (!input.resume || input.forkSession)) args.push("--session-id", input.sessionId.trim())
-    if (input.noPlan || (input.moa && permissionMode !== "plan")) args.push("--no-plan")
-    if (!input.resume && input.worktree) args.push(input.worktreeName?.trim() ? `--worktree=${input.worktreeName.trim()}` : "--worktree")
-    if (!input.resume && input.worktree && input.worktreeRef?.trim()) args.push("--worktree-ref", input.worktreeRef.trim())
-    if (structuredOutput) { JSON.parse(input.jsonSchema!); args.push("--json-schema", input.jsonSchema!) }
+    const promptArgs = promptArgsFor({ ...input, prompt: effectivePrompt }, effectivePrompt)
+    const args = buildBaseArgs({ ...input, prompt: effectivePrompt }, promptArgs)
 
     const omittedFlags = new Set<string>()
     const compatibleArgs = this.compatibleCliArgs(args, supportedFlags, (flag) => omittedFlags.add(flag))

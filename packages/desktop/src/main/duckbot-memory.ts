@@ -44,6 +44,7 @@ function identityContext(): string {
 }
 
 type PendingMemoryCall = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+const MAX_PENDING_MEMORY_CALLS = 50
 let memoryProcess: ChildProcessWithoutNullStreams | null = null
 let memoryBuffer = ""
 let memoryRequestId = 0
@@ -93,6 +94,13 @@ function ensureMemoryProcess(): ChildProcessWithoutNullStreams {
 }
 
 async function callTool(name: string, args: Record<string, unknown>, timeoutMs = 20_000): Promise<unknown> {
+  // A wedged server can let pending calls accumulate without bound; restart
+  // eagerly when the queue is overloaded so callers get a clean failure
+  // instead of unbounded memory growth.
+  if (pendingMemoryCalls.size >= MAX_PENDING_MEMORY_CALLS) {
+    stopMemoryProcess(new Error("DuckBot memory server overloaded, restarting"))
+    throw new Error("DuckBot memory server overloaded, retry shortly")
+  }
   const child = ensureMemoryProcess()
   const id = ++memoryRequestId
   return new Promise((resolveCall, reject) => {

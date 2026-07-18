@@ -1,9 +1,12 @@
 import { safeStorage } from "electron"
 import { getStore } from "./store"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
+import { mkdir, readFile, writeFile, rename, unlink } from "fs/promises"
 import { homedir } from "os"
 import { dirname, join } from "path"
+import { randomUUID } from "crypto"
 import { removeLegacyCodexBridgeTables } from "./model-config-utils"
+import { buildManagedModelsBlock, spliceManagedModels } from "./model-config-block"
+import { write as writeLog } from "./logging"
 
 export const PROVIDER_PRESETS = [
   { id: "lm-studio", label: "LM Studio", envKey: "LM_STUDIO_API_KEY", baseUrl: "http://localhost:1234/v1" },
@@ -27,7 +30,7 @@ export function listProviderSecrets() {
   return providers().map((preset) => ({ ...preset, ...settings[preset.id], modelId: settings[preset.id]?.modelId ?? "", configured: Boolean(saved[preset.id]) }))
 }
 
-export function addCustomProvider(label: string, baseUrl: string, modelId: string): void {
+export async function addCustomProvider(label: string, baseUrl: string, modelId: string): Promise<void> {
   const cleanLabel = label.trim(), cleanModel = modelId.trim()
   if (!cleanLabel || !cleanModel) throw new Error("Provider name and model ID are required")
   if (!/^[A-Za-z0-9_-]+$/.test(cleanModel)) throw new Error("Invalid model ID")
@@ -35,17 +38,17 @@ export function addCustomProvider(label: string, baseUrl: string, modelId: strin
   if (providers().some((provider) => provider.id === id)) throw new Error("That provider already exists")
   const envKey = `GROK_PROVIDER_${cleanModel.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`
   getStore().set("grok.customProviders", [...getStore().get("grok.customProviders", []), { id, label: cleanLabel, envKey, baseUrl }])
-  saveProviderSettings(id, baseUrl, cleanModel)
+  await saveProviderSettings(id, baseUrl, cleanModel)
 }
 
-export function removeCustomProvider(id: string): void {
+export async function removeCustomProvider(id: string): Promise<void> {
   if (!id.startsWith("custom-")) throw new Error("Built-in providers cannot be removed")
   getStore().set("grok.customProviders", getStore().get("grok.customProviders", []).filter((entry) => entry.id !== id))
   removeProviderSecret(id)
-  const settings = getStore().get("grok.providerSettings", {}); delete settings[id]; getStore().set("grok.providerSettings", settings); writeManagedModels(settings)
+  const settings = getStore().get("grok.providerSettings", {}); delete settings[id]; getStore().set("grok.providerSettings", settings); await writeManagedModels(settings)
 }
 
-export function saveProviderSettings(id: string, baseUrl: string, modelId: string): void {
+export async function saveProviderSettings(id: string, baseUrl: string, modelId: string): Promise<void> {
   const preset = providers().find((entry) => entry.id === id)
   if (!preset) throw new Error("Unknown provider")
   const url = new URL(baseUrl.trim())
@@ -55,34 +58,78 @@ export function saveProviderSettings(id: string, baseUrl: string, modelId: strin
   const settings = getStore().get("grok.providerSettings", {})
   settings[id] = { baseUrl: url.toString().replace(/\/$/, ""), modelId: cleanModel }
   getStore().set("grok.providerSettings", settings)
-  writeManagedModels(settings)
+  await writeManagedModels(settings)
 }
 
-function writeManagedModels(settings: Record<string, { baseUrl: string; modelId: string }>): void {
-  const path = join(homedir(), ".grok", "config.toml")
-  const start = "# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS"
-  const end = "# END GROK BUILD DESKTOP MANAGED PROVIDERS"
-  const existing = removeLegacyCodexBridgeTables(existsSync(path) ? readFileSync(path, "utf8") : "")
-  const blocks = providers().flatMap((preset) => {
-    const setting = settings[preset.id]
-    if (!setting?.modelId) return []
-    const alias = `${preset.id}-${setting.modelId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-")
-    return [`[model.${alias}]\nbase_url = ${JSON.stringify(setting.baseUrl)}\nmodel_name = ${JSON.stringify(setting.modelId)}\nname = ${JSON.stringify(`${preset.label} · ${setting.modelId}`)}\napi_backend = "chat_completions"\nenv_key = ${JSON.stringify(preset.envKey)}`]
-  })
-  const codexBlocks = (codexOAuth?.models || []).map((model) => {
-    const alias = `codex-${model.id.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`
-    const context = model.contextWindow ? `\ncontext_window = ${Math.floor(model.contextWindow)}` : ""
-    return `[model.${alias}]\nmodel = ${JSON.stringify(model.id)}\nbase_url = ${JSON.stringify(codexOAuth!.baseUrl)}\nname = ${JSON.stringify(`OpenAI Codex · ${model.id}`)}\napi_backend = "responses"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"${context}`
-  })
-  const managed = `${start}\n${[...blocks, ...codexBlocks].join("\n\n")}\n${end}`
-  const pattern = new RegExp(`${start}[\\s\\S]*?${end}`, "m")
-  const next = pattern.test(existing) ? existing.replace(pattern, managed) : `${existing.trimEnd()}\n\n${managed}\n`
-  mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, next, { mode: 0o600 })
+/**
+ * Build the next managed block for `~/.grok/config.toml` from the supplied
+ * provider settings + the live codex OAuth bridge snapshot. Thin re-export
+ * over `model-config-block.ts` so the persisted provider store layout stays
+ * decoupled from the safe-storage / IPC side and can be tested in isolation.
+ */
+export const buildManagedModelsBlockForProviders = (
+  settings: Record<string, { baseUrl: string; modelId: string }>,
+  codexSnapshot: { baseUrl: string; models: CodexOAuthModel[] } | null,
+): string => buildManagedModelsBlock(providers(), settings, codexSnapshot)
+
+// Single-flight serialised queue. The previous implementation called
+// `writeManagedModels` synchronously inside every `saveProviderSettings`
+// / `removeCustomProvider` / `configureCodexOAuthModels` invocation; on
+// slow disks that stalls the main process and on crash can leave the
+// managed block half-written. Async + atomic + serialised is the floor.
+let writes: Promise<unknown> = Promise.resolve()
+function enqueueWrite(task: () => Promise<void>): Promise<void> {
+  writes = writes.catch(() => undefined).then(task)
+  return writes.then(() => undefined)
 }
 
-export function configureCodexOAuthModels(baseUrl: string, models: CodexOAuthModel[]): void {
+export function writeManagedModels(settings: Record<string, { baseUrl: string; modelId: string }>): Promise<void> {
+  return enqueueWrite(async () => {
+    const path = join(homedir(), ".grok", "config.toml")
+    let existing = ""
+    try {
+      existing = await readFile(path, "utf8")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    }
+    const cleaned = removeLegacyCodexBridgeTables(existing)
+    const managedBlock = buildManagedModelsBlockForProviders(settings, codexOAuth)
+    const next = spliceManagedModels(cleaned, managedBlock)
+    await mkdir(dirname(path), { recursive: true })
+    // Atomic temp + rename so a power loss cannot leave a partial file
+    // with an open managed block. Falls back to a direct write when the
+    // destination does not yet exist (no file to atomically replace).
+    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`
+    try {
+      await writeFile(temporary, next, { encoding: "utf8", mode: 0o600 })
+      await rename(temporary, path)
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined)
+      throw error
+    }
+    // Post-write verify: the marker block must be present, otherwise we
+    // silently lost the user's other config (e.g. credentials, model
+    // aliases they typed by hand). A logged warn beats a silent failure.
+    try {
+      const reread = await readFile(path, "utf8")
+      if (!reread.includes("# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS") || !reread.includes("# END GROK BUILD DESKTOP MANAGED PROVIDERS")) {
+        writeLog("warn", "writeManagedModels post-write verify: managed markers missing after rewrite")
+      }
+    } catch (error) {
+      writeLog("warn", `writeManagedModels post-write verify failed: ${String(error)}`)
+    }
+  })
+}
+
+// Back-compat for tests + IPC handlers that haven't been migrated yet.
+// The desktop never relied on the synchronous return value.
+export function writeManagedModelsSyncUnavailable(): never {
+  throw new Error("writeManagedModels is async only; await writeManagedModels(...)")
+}
+
+export async function configureCodexOAuthModels(baseUrl: string, models: CodexOAuthModel[]): Promise<void> {
   codexOAuth = { baseUrl, models }
-  writeManagedModels(getStore().get("grok.providerSettings", {}))
+  await writeManagedModels(getStore().get("grok.providerSettings", {}))
 }
 
 export function saveProviderSecret(id: string, value: string): void {

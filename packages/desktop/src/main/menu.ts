@@ -4,9 +4,18 @@
  * Standard macOS/Windows/Linux menu bar with app, file, edit, view, help menus.
  */
 
-import { Menu, MenuItemConstructorOptions, BrowserWindow, app, shell } from "electron"
+import { Menu, MenuItemConstructorOptions, BrowserWindow, app } from "electron"
+import { safeOpenExternal, isSafeExternalUrl } from "./security"
 
 export function createMenu(mainWindow: BrowserWindow): Menu {
+  // Centralised openExternal handles every help/about link so a future
+  // menu entry that receives a renderer-supplied URL cannot bypass the
+  // http(s)-only protocol whitelist. `isSafeExternalUrl` is the trusted
+  // gate — `safeOpenExternal` is the trusted executor.
+  const openTrustedExternal = (url: string) => {
+    if (!isSafeExternalUrl(url)) return
+    void safeOpenExternal(url)
+  }
   const isMac = process.platform === "darwin"
 
   const template: MenuItemConstructorOptions[] = [
@@ -115,11 +124,11 @@ export function createMenu(mainWindow: BrowserWindow): Menu {
       submenu: [
         {
           label: "Grok Build CLI Docs",
-          click: () => shell.openExternal("https://docs.x.ai/build/overview"),
+          click: () => openTrustedExternal("https://docs.x.ai/build/overview"),
         },
         {
           label: "GitHub Repository",
-          click: () => shell.openExternal("https://github.com/Franzferdinan51/Grok-Build-Desktop-App"),
+          click: () => openTrustedExternal("https://github.com/Franzferdinan51/Grok-Build-Desktop-App"),
         },
         { type: "separator" },
         {

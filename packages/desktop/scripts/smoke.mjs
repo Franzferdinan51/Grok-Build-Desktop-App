@@ -20,10 +20,15 @@ import { normalizeBackendStderr } from "../src/main/backend-error.ts"
 import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
 import { withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
 import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
-import { mergeLogs, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
+import { mergeLogs, LiveEventBuffer, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
 import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
 import { parseGrokModels } from "../src/main/grok-models.ts"
 import { parseGrokSubcommands, parseGrokSubcommandNames } from "../src/main/grok-subcommands.ts"
+import { isSafeExternalUrl } from "../src/shared/url-safety.ts"
+import { validateAppAction, validateAppActions } from "../src/main/app-actions.ts"
+import { validateAppAction as validateAppActionRenderer } from "../src/renderer/app-actions.ts"
+import { buildManagedModelsBlock, spliceManagedModels } from "../src/main/model-config-block.ts"
+import { buildBaseArgs, compatibleCliArgs, promptArgsFor, KNOWN_FLAG_NAMES } from "../src/main/grok-args.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -375,6 +380,34 @@ assert.throws(() => tokenizeCommandLine("inspect foo\\"), ShellQuoteError)
 // Empty incoming is a no-op.
 assert.deepEqual(mergeLogs([{ kind: "text", content: "kept" }], []), [{ kind: "text", content: "kept" }])
 
+// LiveEventBuffer is the incremental version the renderer uses between
+// rAF flushes. The O(1) amortised cost per append matters at high token
+// throughput; verify the totals stay bounded across long streams.
+{
+  const buffer = new LiveEventBuffer()
+  buffer.append([{ kind: "text", content: "hello " }])
+  buffer.append([{ kind: "text", content: "world" }])
+  assert.equal(buffer.snapshot().length, 1, "adjacent same-kind entries must coalesce")
+  assert.equal(buffer.snapshot()[0].content, "hello world")
+}
+{
+  const buffer = new LiveEventBuffer()
+  const oversized = Array.from({ length: MAX_LIVE_LOG_ENTRIES + 50 }, (_, index) => ({ kind: index % 2 ? "thought" : "text", content: `e${index}` }))
+  buffer.append(oversized)
+  const snap = buffer.snapshot()
+  assert.ok(snap.length <= MAX_LIVE_LOG_ENTRIES, "LiveEventBuffer must respect MAX_LIVE_LOG_ENTRIES")
+  // Adjacent alternating-kind entries coalesce by pair. The last surviving
+  // entry must contain the most recent token at its tail.
+  assert.match(snap[snap.length - 1].content, /e549$/, "most recent entry must survive")
+}
+{
+  const buffer = new LiveEventBuffer()
+  buffer.append([{ kind: "text", content: "x".repeat(MAX_LIVE_LOG_CHARS + 1_000) }])
+  const snap = buffer.snapshot()
+  assert.ok(snap.length === 1)
+  assert.ok(snap[0].content.length <= MAX_LIVE_LOG_CHARS)
+}
+
 // Telegram command parser: every supported prefix round-trips, plain text
 // returns null, and the trailing argument is trimmed.
 assert.deepEqual(parseTelegramCommand("/run fix the bug"), { name: "run", argument: "fix the bug" })
@@ -495,4 +528,257 @@ assert.equal(parseGrokSubcommands("Usage: foo\nOptions:\n  -h\n").length, 0)
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
+
+// isSafeExternalUrl is the canonical protocol whitelist every shell.openExternal
+// caller funnels through. A regression here would let javascript:/data:/file:
+// URLs from a hostile renderer reach the OS.
+assert.equal(isSafeExternalUrl("https://example.com/"), true)
+assert.equal(isSafeExternalUrl("http://localhost:3000/"), true)
+assert.equal(isSafeExternalUrl("HTTPS://Example.COM"), true, "scheme comparison must be case-insensitive")
+assert.equal(isSafeExternalUrl("javascript:alert(1)"), false)
+assert.equal(isSafeExternalUrl("data:text/html,foo"), false)
+assert.equal(isSafeExternalUrl("file:///etc/passwd"), false)
+assert.equal(isSafeExternalUrl(""), false)
+assert.equal(isSafeExternalUrl("   "), false)
+assert.equal(isSafeExternalUrl("not a url"), false)
+assert.equal(isSafeExternalUrl(42), false)
+assert.equal(isSafeExternalUrl(null), false)
+// Trimmed values still classify correctly so callers can hand the result
+// of String.prototype.trim directly.
+assert.equal(isSafeExternalUrl("  https://example.com/  "), true)
+
+// validateAppAction: the agent's <app_action> tag parser. The renderer and
+// main share this contract; both must produce the same verdict for every
+// shape so a hostile payload cannot slip past one surface but get caught
+// by another.
+{
+  const future = Date.now() + 60_000
+  const okSchedule = validateAppAction({ type: "schedule.create", name: "ship", prompt: "deploy it", runAt: future, repeatMinutes: 30 })
+  assert.equal(okSchedule.ok, true)
+  if (okSchedule.ok) {
+    assert.equal(okSchedule.action.type, "schedule.create")
+    if (okSchedule.action.type === "schedule.create") {
+      assert.equal(okSchedule.action.repeatMinutes, 30)
+    }
+  }
+  // repeatMinutes > 1y is clamped (mirrors the original behaviour).
+  const longRepeat = validateAppAction({ type: "schedule.create", name: "x", prompt: "y", runAt: future, repeatMinutes: 5_000_000 })
+  assert.equal(longRepeat.ok, true)
+  if (longRepeat.ok && longRepeat.action.type === "schedule.create") {
+    assert.equal(longRepeat.action.repeatMinutes, 525_600)
+  }
+  // Truncation surfaces a notice instead of silently dropping characters.
+  const truncated = validateAppAction({ type: "schedule.create", name: "n".repeat(200), prompt: "p".repeat(30_000), runAt: future })
+  assert.equal(truncated.ok, true)
+  assert.match(truncated.notice || "", /truncated/)
+  if (truncated.ok && truncated.action.type === "schedule.create") {
+    assert.equal(truncated.action.name.length, 120)
+    assert.equal(truncated.action.prompt.length, 20_000)
+  }
+  // Each rejection path must return `ok: false`, never throw.
+  assert.equal(validateAppAction(null).ok, false)
+  assert.equal(validateAppAction(undefined).ok, false)
+  assert.equal(validateAppAction("string").ok, false)
+  assert.equal(validateAppAction({ type: "rm -rf /" }).ok, false)
+  assert.equal(validateAppAction({ type: "browser.open", url: "" }).ok, false)
+  assert.equal(validateAppAction({ type: "browser.open", url: "javascript:alert(1)" }).ok, false)
+  assert.equal(validateAppAction({ type: "browser.open", url: "https://safe.example/" }).ok, true)
+  assert.equal(validateAppAction({ type: "schedule.create", name: "x", prompt: "y", runAt: -1 }).ok, false)
+  assert.equal(validateAppAction({ type: "schedule.create", name: "x", prompt: "y", runAt: "now" }).ok, false)
+  assert.equal(validateAppAction({ type: "schedule.create", name: "", prompt: "y", runAt: future }).ok, false)
+  assert.equal(validateAppAction({ type: "schedule.create", name: "x", prompt: "", runAt: future }).ok, false)
+  assert.equal(validateAppAction({ type: "schedule.create", name: "x", prompt: "y", runAt: Date.now() }).ok, false, "past runAt must reject")
+}
+// validateAppActions extracts + validates from the response body. A
+// single response can carry multiple action tags; each must be validated
+// independently.
+{
+  const future = Date.now() + 60_000
+  const body = `<app_action>{"type":"preview.open"}</app_action>\n<app_action>{"type":"browser.open","url":"javascript:alert(1)"}</app_action>\n<app_action>{"type":"schedule.create","name":"ship","prompt":"go","runAt":${future}}</app_action>\n<app_action>{"not really json"}</app_action>`
+  const result = validateAppActions(body)
+  assert.equal(result.actions.length, 2)
+  assert.equal(result.errors.length, 2)
+  assert.match(result.errors.join("\n"), /not http\(s\)/)
+  assert.match(result.errors.join("\n"), /JSON|position|line/i, "Malformed JSON action must surface a parse error")
+}
+// Renderer mirror must agree with the main implementation so neither
+// surface silently lets a rejected shape through.
+{
+  const future = Date.now() + 60_000
+  const action = { type: "schedule.create", name: "x", prompt: "y", runAt: future }
+  assert.deepEqual(validateAppActionRenderer(action), validateAppAction(action))
+  assert.deepEqual(validateAppActionRenderer(null), validateAppAction(null))
+}
+
+// Managed-models block builder + splicer are the pure helpers behind the
+// async writeManagedModels in main/model-secrets.ts. The block layout is
+// what Grok Build reads from `~/.grok/config.toml`, so any drift here
+// silently breaks the model catalog.
+{
+  const block = buildManagedModelsBlock(
+    [{ id: "lm-studio", label: "LM Studio", envKey: "LM_STUDIO_API_KEY", baseUrl: "http://localhost:1234/v1" }],
+    { "lm-studio": { baseUrl: "http://localhost:1234/v1", modelId: "qwen2.5" } },
+    null,
+  )
+  assert.match(block, /# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS\n/)
+  assert.match(block, /# END GROK BUILD DESKTOP MANAGED PROVIDERS/)
+  assert.match(block, /\[model\.lm-studio-qwen2-5\]/)
+  assert.match(block, /base_url = "http:\/\/localhost:1234\/v1"/)
+  assert.match(block, /env_key = "LM_STUDIO_API_KEY"/)
+}
+{
+  // codexOAuth snapshot emits the responses backend block.
+  const block = buildManagedModelsBlock(
+    [],
+    {},
+    { baseUrl: "https://chatgpt.com/backend-api/codex", models: [{ id: "gpt-5", contextWindow: 200000 }] },
+  )
+  assert.match(block, /\[model\.codex-gpt-5\]/)
+  assert.match(block, /api_backend = "responses"/)
+  assert.match(block, /context_window = 200000/)
+  assert.match(block, /env_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"/)
+}
+{
+  // spliceManagedModels replaces a pre-existing block AND preserves
+  // hand-written configuration outside the markers.
+  const existing = "# hand-written\n[model.user-typed]\nmodel = \"keep-me\"\n\n" + "# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS\n[model.stale]\nmodel = \"old\"\n# END GROK BUILD DESKTOP MANAGED PROVIDERS\n"
+  const next = spliceManagedModels(existing, "# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS\n[model.fresh]\nmodel = \"new\"\n# END GROK BUILD DESKTOP MANAGED PROVIDERS")
+  assert.match(next, /\[model\.user-typed\]\nmodel = "keep-me"/, "hand-written config outside markers must survive")
+  assert.doesNotMatch(next, /\[model\.stale\]/, "old managed block must be removed")
+  assert.match(next, /\[model\.fresh\]/, "new managed block must be present")
+}
+{
+  // First-write path: append the block when no markers exist yet.
+  const fresh = spliceManagedModels("# only hand config\n", "# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS\nx\n# END GROK BUILD DESKTOP MANAGED PROVIDERS")
+  assert.match(fresh, /# only hand config/)
+  assert.match(fresh, /# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS/)
+}
+
+// grok-args.ts builders: every CLI flag the desktop attaches to a
+// `grok -p` invocation must round-trip through these helpers so a future
+// audit can grep one place. AGENTS.md is strict about "only verified
+// Grok Build flags" — these builders are how that gate is enforced.
+{
+  const baseArgs = buildBaseArgs({
+    prompt: "ship it",
+    cwd: "/tmp/proj",
+    model: "grok-4.5",
+    thinking: true,
+    autoApprove: true,
+    resume: "abc-123",
+    bestOfN: 4,
+    selfVerify: false,
+    maxTurns: 12,
+    disableWebSearch: true,
+    subagents: false,
+    permissionMode: "auto",
+    allow: ["edit", "shell"],
+    deny: ["delete-user"],
+    tools: "Read,Edit",
+    disallowedTools: "WebFetch",
+    memory: "experimental",
+    sandbox: "default",
+    rules: "be concise",
+    systemPrompt: "you are a coder",
+    verbatim: true,
+    worktree: true,
+    worktreeName: "feat-x",
+    worktreeRef: "main",
+    noPlan: true,
+  }, ["-p", "ship it"])
+  // Required flags the desktop unconditionally passes.
+  assert.ok(baseArgs.includes("--cwd"))
+  assert.ok(baseArgs.includes("--output-format"))
+  assert.ok(baseArgs.includes("streaming-json"), "no --json-schema → streaming-json")
+  // Propagated booleans and values.
+  assert.ok(baseArgs.includes("--model"))
+  assert.ok(baseArgs.includes("grok-4.5"))
+  assert.ok(baseArgs.includes("--reasoning-effort"))
+  assert.ok(baseArgs.includes("high"))
+  assert.ok(baseArgs.includes("--always-approve"))
+  assert.ok(baseArgs.includes("--resume"))
+  assert.ok(baseArgs.includes("abc-123"))
+  assert.ok(baseArgs.includes("--best-of-n"))
+  assert.ok(baseArgs.includes("4"), "best-of-n is clamped to [2,10]")
+  assert.ok(baseArgs.includes("--max-turns"))
+  assert.ok(baseArgs.includes("12"))
+  assert.ok(baseArgs.includes("--disable-web-search"))
+  assert.ok(baseArgs.includes("--no-subagents"))
+  assert.ok(baseArgs.includes("--permission-mode"))
+  assert.ok(baseArgs.includes("auto"))
+  assert.ok(baseArgs.includes("--allow"))
+  assert.ok(baseArgs.includes("edit"))
+  assert.ok(baseArgs.includes("--deny"))
+  assert.ok(baseArgs.includes("delete-user"))
+  assert.ok(baseArgs.includes("--tools"))
+  assert.ok(baseArgs.includes("Read,Edit"))
+  assert.ok(baseArgs.includes("--disallowed-tools"))
+  assert.ok(baseArgs.includes("WebFetch"))
+  assert.ok(baseArgs.includes("--experimental-memory"))
+  assert.ok(baseArgs.includes("--sandbox"))
+  assert.ok(baseArgs.includes("default"))
+  assert.ok(baseArgs.includes("--rules"))
+  assert.ok(baseArgs.includes("be concise"))
+  assert.ok(baseArgs.includes("--system-prompt-override"))
+  assert.ok(baseArgs.includes("you are a coder"))
+  assert.ok(baseArgs.includes("--verbatim"))
+  // resume is set so worktree is suppressed; the focused worktree test
+  // below exercises the no-resume path.
+  // --no-plan is conditional on no `plan` permission-mode (we pass `auto`).
+  assert.ok(baseArgs.includes("--no-plan"))
+}
+// Without `resume`, worktree flags surface. With `resume`, worktree is
+// suppressed (Grok Build cannot attach a worktree to an existing session).
+{
+  const withWorktree = buildBaseArgs({ prompt: "x", cwd: "/p", worktree: true, worktreeName: "feat-x" }, ["-p", "x"])
+  assert.ok(withWorktree.includes("--worktree=feat-x"))
+  const withResume = buildBaseArgs({ prompt: "x", cwd: "/p", resume: "abc", worktree: true, worktreeName: "feat-x" }, ["-p", "x"])
+  assert.ok(!withResume.includes("--worktree=feat-x"), "resume suppresses worktree")
+}
+// best-of-n is clamped 1→10 and selfVerify wins over --no-subagents.
+{
+  const args = buildBaseArgs({ prompt: "x", cwd: "/p", selfVerify: true, subagents: false }, ["-p", "x"])
+  assert.ok(args.includes("--check"))
+  assert.ok(KNOWN_FLAG_NAMES.includes("--check"), "every emitted flag must appear in the canonical flag list")
+  assert.ok(KNOWN_FLAG_NAMES.includes("-p"), "the default prompt flag must appear in the canonical flag list")
+  assert.ok(!args.includes("--no-subagents"), "--no-subagents must be omitted when --check is set")
+  assert.equal(args.indexOf("--check") >= 0, true)
+}
+// MoA floors permission-mode to `auto` (the only mode the aggregator
+// can implement under). User-passed `plan` is preserved so reviews stay
+// read-only.
+{
+  const moa = buildBaseArgs({ prompt: "x", cwd: "/p", moa: { referenceModels: ["m"], aggregatorModel: "m" } }, ["-p", "x"])
+  assert.ok(moa.includes("--permission-mode"))
+  assert.ok(moa.includes("auto"))
+  // MoA also defaults --no-plan unless permissionMode === "plan".
+  assert.ok(moa.includes("--no-plan"))
+}
+// promptArgsFor dispatches to the right prefix. Most desktop runs use -p.
+{
+  assert.deepEqual(promptArgsFor({ prompt: "hello", cwd: "/p" }), ["-p", "hello"])
+  assert.deepEqual(promptArgsFor({ prompt: "ignored", cwd: "/p", promptFile: "/tmp/prompt.txt" }), ["--prompt-file", "/tmp/prompt.txt"])
+  assert.deepEqual(promptArgsFor({ prompt: "ignored", cwd: "/p", promptJson: '[{"type":"text","text":"x"}]' }), ["--prompt-json", '[{"type":"text","text":"x"}]'])
+}
+// compatibleCliArgs drops unsupported flags (calling the omit callback)
+// and consumes the next token for known value flags.
+{
+  const omit = []
+  const result = compatibleCliArgs(["-p", "hi", "--unknown", "value", "--known", "value-2", "literal"], new Set(["-p", "--known"]), (flag) => omit.push(flag))
+  assert.deepEqual(omit, ["--unknown"])
+  // --unknown has no entry in FLAGS_WITH_VALUES so the next token ("value")
+  // is preserved as a literal. Only flags we know take a value consume
+  // the next token, which keeps the safe-mode behaviour: we never guess
+  // about an unknown CLI shape.
+  assert.deepEqual(result, ["-p", "hi", "value", "--known", "value-2", "literal"])
+  // --flag=value form does NOT consume the next token.
+  const r2 = compatibleCliArgs(["--unknown=value", "literal"], new Set(), () => {})
+  assert.deepEqual(r2, ["literal"])
+  assert.equal(r2.length, 1)
+  // A known value-flag from FLAGS_WITH_VALUES strips its value when
+  // omitted. `--model` is in the registry; unknown lists treat it as
+  // missing.
+  const r3 = compatibleCliArgs(["--model", "gpt-x", "literal"], new Set(), () => {})
+  assert.deepEqual(r3, ["literal"])
+}
 console.log("Smoke test passed: CLI, chat parsing, Telegram keyboards, workspace, preview, containment, terminal, and Git review")

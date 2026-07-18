@@ -1,3 +1,5 @@
+import { isSafeExternalUrl } from "../shared/url-safety.ts"
+
 export function telegramTextChunks(text: string, limit = 3000): string[] {
   const chunks: string[] = []
   // A non-positive limit is nonsensical; surface the input unchanged instead
@@ -34,9 +36,12 @@ export function telegramHtml(text: string): string {
       // href values, but reject them here too so a hostile model output that
       // builds `javascript:` or `data:` URLs from markdown link syntax never
       // produces a clickable payload even on a future parser regression.
+      // `isSafeExternalUrl` is the canonical whitelist used by every other
+      // openExternal surface in the desktop shell, so all URL gating lives
+      // in one place.
       try {
+        if (!isSafeExternalUrl(href)) return label
         const parsed = new URL(href)
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return label
         return `<a href="${parsed.href}">${label}</a>`
       } catch {
         return label

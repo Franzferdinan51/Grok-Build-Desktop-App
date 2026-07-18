@@ -1,11 +1,12 @@
-import { ipcMain, dialog, shell, app, BrowserWindow } from "electron"
-import { mkdirSync } from "fs"
+import { ipcMain, dialog, app, BrowserWindow } from "electron"
+import { existsSync, mkdirSync } from "fs"
 import { unlink, writeFile } from "fs/promises"
 import { join } from "path"
 import { getStore } from "./store"
 import { write as writeLog } from "./logging"
 import { TelegramBridge } from "./telegram"
 import { LocalStudioController } from "./local-studio"
+import { safeOpenExternal, UnsafeExternalUrlError } from "./security"
 import { addProject, inspectProject, listProjects, removeProject } from "./projects"
 import { GrokBuildBackend, type GrokBuildEvent, type RunTaskInput } from "./grok-build-backend"
 import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
@@ -34,7 +35,23 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
   ipcMain.handle("backend:set-path", (_event, path: string) => {
-    getStore().set("grok.cliPath", path.trim() || undefined)
+    // Reject obviously dangerous payloads before persisting: empty strings
+    // are allowed (clears the override), but everything else must look
+    // like a path. Renderer paste attacks have shipped shell metacharacters
+    // through this handler in the past; sanitising here keeps the stored
+    // `grok.cliPath` and the derived `GROK_BUILD_PATH` environment safe.
+    const trimmed = typeof path === "string" ? path.trim() : ""
+    if (!trimmed) {
+      getStore().set("grok.cliPath", undefined)
+      deps.backend().invalidateModelsCache()
+      deps.backend().invalidateCliFlagsCache()
+      return deps.backend().status()
+    }
+    if (/[;&|<>`$()\\\n\r]/.test(trimmed)) throw new Error("Grok Build path contains shell metacharacters")
+    if (trimmed.includes("/") || trimmed.includes("\\") || /^[A-Za-z]:[\\/]/.test(trimmed)) {
+      if (!existsSync(trimmed)) throw new Error(`Grok Build binary not found at ${trimmed}`)
+    }
+    getStore().set("grok.cliPath", trimmed)
     deps.backend().invalidateModelsCache()
     deps.backend().invalidateCliFlagsCache()
     return deps.backend().status()
@@ -127,11 +144,11 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("schedules:run-now", (_event, id: string) => runScheduleNow(id))
   ipcMain.handle("provider-secrets:list", () => listProviderSecrets())
   ipcMain.handle("provider-secrets:save", (_event, id: string, value: string) => saveProviderSecret(id, value))
-  ipcMain.handle("provider-secrets:save-settings", (_event, id: string, baseUrl: string, modelId: string) => saveProviderSettings(id, baseUrl, modelId))
+  ipcMain.handle("provider-secrets:save-settings", async (_event, id: string, baseUrl: string, modelId: string) => { await saveProviderSettings(id, baseUrl, modelId) })
   ipcMain.handle("provider-secrets:remove", (_event, id: string) => removeProviderSecret(id))
   ipcMain.handle("provider-secrets:test", (_event, id: string) => testProvider(id))
-  ipcMain.handle("providers:add", (_event, label: string, baseUrl: string, modelId: string) => addCustomProvider(label, baseUrl, modelId))
-  ipcMain.handle("providers:remove", (_event, id: string) => removeCustomProvider(id))
+  ipcMain.handle("providers:add", async (_event, label: string, baseUrl: string, modelId: string) => { await addCustomProvider(label, baseUrl, modelId) })
+  ipcMain.handle("providers:remove", async (_event, id: string) => { await removeCustomProvider(id) })
 
   ipcMain.handle("telegram:status", () => deps.telegram().status())
   ipcMain.handle("telegram:connect", async (_event, token: string) => deps.telegram().connect(token))
@@ -140,7 +157,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("telegram:send", async (_event, chatId: string, text: string) => deps.telegram().send(chatId, text))
   ipcMain.handle("telegram:allowed-chats", () => deps.telegram().allowedChats())
   ipcMain.handle("telegram:pending-chats", () => deps.telegram().pendingChats())
-  ipcMain.handle("telegram:set-allowed-chats", (_event, chatIds: string[]) => deps.telegram().setAllowedChats(chatIds))
+  ipcMain.handle("telegram:set-allowed-chats", async (_event, chatIds: string[]) => deps.telegram().setAllowedChats(chatIds))
   ipcMain.handle("local-studio:status", () => deps.localStudio().snapshot())
   ipcMain.handle("local-studio:set-url", (_event, baseUrl: string) => deps.localStudio().setBaseURL(baseUrl))
   ipcMain.handle("host-controls:browser-status", () => hostBrowserStatus())
@@ -197,10 +214,15 @@ export function registerIpcHandlers(deps: Deps): void {
     if (win?.isMaximized()) win.unmaximize(); else win?.maximize()
   })
   ipcMain.handle("window:close", () => deps.getMainWindow()?.close())
-  ipcMain.handle("app:open-external", (_event, url: string) => {
-    const target = new URL(url)
-    if (target.protocol !== "http:" && target.protocol !== "https:") throw new Error("Only HTTP(S) links can be opened")
-    return shell.openExternal(target.toString())
+  ipcMain.handle("app:open-external", async (_event, url: string) => {
+    // All `shell.openExternal` calls funnel through `safeOpenExternal` so
+    // a hostile renderer-supplied URL cannot regress the protocol floor.
+    try {
+      await safeOpenExternal(url)
+    } catch (error) {
+      if (error instanceof UnsafeExternalUrlError) throw new Error("Only HTTP(S) links can be opened")
+      throw error
+    }
   })
   ipcMain.handle("app:get-version", () => app.getVersion())
   ipcMain.handle("app:backend-repository", () => "https://github.com/xai-org/grok-build")

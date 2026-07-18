@@ -12,24 +12,19 @@
  */
 
 import { app, BrowserWindow, Menu } from "electron"
-import { mkdirSync } from "fs"
-import { publicTelegramResponse } from "./telegram-output"
-import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "./telegram/commands"
-import { join } from "path"
-import windowStateKeeper from "electron-window-state"
 import { registerIpcHandlers } from "./ipc"
 import { GrokBuildBackend } from "./grok-build-backend"
 import { TelegramBridge } from "./telegram"
 import { LocalStudioController } from "./local-studio"
 import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
-import { addSchedule, GrokTaskScheduler, listSchedules } from "./scheduled-tasks"
+import { GrokTaskScheduler } from "./scheduled-tasks"
 import { PreviewServer } from "./preview-server"
 import { getStore } from "./store"
-import { finishGrokRun, recoverInterruptedGrokRuns, startGrokRun } from "./grok-runs"
-import { telegramTaskNeedsMoa } from "./telegram-agent-policy"
-
-const APP_NAME = "Grok Build Desktop"
+import { recoverInterruptedGrokRuns } from "./grok-runs"
+import { createAgentHandler, saveAgentSession } from "./telegram/agent-handler"
+import { buildAgentInput } from "./telegram/agent-input"
+import { acquireSingleInstanceLock, createMainWindow, loadRenderer, APP_NAME } from "./window-factory"
 
 let mainWindow: BrowserWindow | null = null
 const backend = new GrokBuildBackend()
@@ -47,21 +42,18 @@ const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
 // Single-instance lock: a second launch would start a second Telegram polling
 // loop on the same bot token (Telegram allows only one getUpdates owner) and
 // race on the same settings file. Focus the existing window instead.
-const gotSingleInstanceLock = app.requestSingleInstanceLock()
-if (!gotSingleInstanceLock) {
+if (!acquireSingleInstanceLock(() => {
+  // Focus the existing window on the second launch.
+  const windows = BrowserWindow.getAllWindows()
+  if (windows.length) {
+    const [win] = windows
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+})) {
   writeLog("info", "Another Grok Build Desktop instance is already running. Exiting.")
   app.quit()
-} else {
-  app.on("second-instance", () => {
-    // Focus the existing window on the second launch.
-    const windows = BrowserWindow.getAllWindows()
-    if (windows.length) {
-      const [win] = windows
-      if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
-    }
-  })
 }
 
 // Surface any unhandled async failure to the log instead of letting it die
@@ -74,73 +66,26 @@ process.on("uncaughtException", (error) => {
   writeLog("error", `Uncaught exception: ${error.message}\n${error.stack ?? ""}`)
 })
 
+// ── App lifecycle ─────────────────────────────────────────────────────────────
+
 type TelegramAgentSession = {
   sessionId?: string; model?: string; workspace?: string; updatedAt: number
   transcript?: { role: "user" | "assistant"; text: string }[]
   lastTask?: string; compressedSummary?: string; thinking?: boolean; mode?: "fast" | "balanced" | "deep"
 }
 const telegramSession = (chatId: string): TelegramAgentSession => getStore().get("telegram").sessions?.[chatId] || { updatedAt: Date.now() }
-const saveTelegramSession = (chatId: string, patch: Partial<TelegramAgentSession>): TelegramAgentSession => {
-  const telegramSettings = getStore().get("telegram")
-  const next = { ...telegramSession(chatId), ...patch, updatedAt: Date.now() }
-  getStore().set("telegram", { ...telegramSettings, sessions: { ...telegramSettings.sessions, [chatId]: next } })
-  return next
-}
-
-// ── Window factory ────────────────────────────────────────────────────────────
-
-function createMainWindow(): BrowserWindow {
-  const state = windowStateKeeper({
-    defaultWidth: 1280,
-    defaultHeight: 800,
-  })
-
-  const win = new BrowserWindow({
-    x: state.x,
-    y: state.y,
-    width: state.width,
-    height: state.height,
-    minWidth: 900,
-    minHeight: 600,
-    title: APP_NAME,
-    backgroundColor: "#0d0d0f",
-    show: false, // show after ready-to-show
-    webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    },
-  })
-
-  state.manage(win)
-
-  win.once("ready-to-show", () => {
-    win.show()
-    writeLog("info", `Window ready, pid=${process.pid}`)
-  })
-
-  win.on("closed", () => {
-    mainWindow = null
-  })
-
-  return win
-}
 
 async function createAndLoadMainWindow(): Promise<BrowserWindow> {
-  const win = createMainWindow()
+  const win = createMainWindow({ onClosed: () => { mainWindow = null } })
   mainWindow = win
-  if (process.env.ELECTRON_RENDERER_URL) await win.loadURL(process.env.ELECTRON_RENDERER_URL)
-  else await win.loadFile(join(__dirname, "../renderer/index.html"))
+  await loadRenderer(win)
   return win
 }
-
-// ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
   _logger = initLogging()
   writeLog("info", `${APP_NAME} starting — pid=${process.pid}`)
-  recoverInterruptedGrokRuns()
+  try { recoverInterruptedGrokRuns() } catch (error) { writeLog("error", `Interrupted run recovery failed: ${String(error)}`) }
 
   // Register all IPC handlers before window creation
   registerIpcHandlers({
@@ -151,295 +96,30 @@ app.whenReady().then(async () => {
     preview: () => preview,
   })
 
-  const handleTelegramAgentMessage = async (chatId: string, text: string): Promise<string | { text: string; buttons: { text: string; data: string }[][] }> => {
-    // Picker callbacks: each prefix is routed through the shipped
-    // parseTelegramCallback so the dispatcher table can stay in one place.
-    const callback = parseTelegramCallback(text)
-    if (callback) {
-      if (callback.kind === "pick_model") {
-        const index = Number(callback.payload)
-        const catalog = await backend.models(); const selected = catalog.models[index]
-        if (!selected) return "That model is no longer available. Open /models again."
-        saveTelegramSession(chatId, { model: selected }); return `✓ Model set to ${selected}`
-      }
-      if (callback.kind === "pick_project_index") {
-        const index = Number(callback.payload)
-        const selected = getStore().get("projects")[index]
-        if (!selected) return "That project is no longer available. Open /projects again."
-        saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
-      }
-      if (callback.kind === "pick_project_id") {
-        const selected = getStore().get("projects").find((project) => project.id === callback.payload)
-        if (!selected) return "That project is no longer available. Open /project again."
-        saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
-      }
-      if (callback.kind === "pick_project_scratch") {
-        const scratch = join(app.getPath("userData"), "Scratch")
-        mkdirSync(scratch, { recursive: true }); saveTelegramSession(chatId, { workspace: scratch, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
-        return `✓ Project set to Scratch\n${scratch}\nStarted a fresh project session.`
-      }
-      if (callback.kind === "pick_project_agent") {
-        const workspace = join(app.getPath("userData"), "Agent Workspace")
-        mkdirSync(workspace, { recursive: true }); saveTelegramSession(chatId, { workspace, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
-        return `✓ Agent mode enabled\nWorking directory: ${workspace}\nThis is a persistent general-purpose workspace and is not tied to any project.`
-      }
-      if (callback.kind === "pick_mode") {
-        const mode = callback.payload as "fast" | "balanced" | "deep"
-        saveTelegramSession(chatId, { mode })
-        return `⚡ Response mode set to ${mode}.`
-      }
-      if (callback.kind === "menu") {
-        const rewritten = mapMenuCallback(callback.payload)
-        if (rewritten) return handleTelegramAgentMessage(chatId, rewritten)
-      }
-    }
-    const parsed = parseTelegramCommand(text)
-    const name = parsed?.name
-    const argument = parsed?.argument || ""
-    const menu = buildTelegramMenuReply()
-    if (name === "start" || name === "help" || name === "menu") return menu
-    if (name === "new" || name === "reset") {
-      saveTelegramSession(chatId, { sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
-      return "✨ Fresh agent session started. Your selected model and project are unchanged."
-    }
-    if (name === "queue") {
-      const queued = telegramQueue.filter((entry) => entry.chatId === chatId)
-      if (!queued.length) return backend.isRunning() ? "No additional work queued. One task is currently running." : "The agent queue is empty."
-      return `Queued work (${queued.length}):\n${queued.map((entry, index) => `${index + 1}. ${entry.text.slice(0, 120)}`).join("\n")}`
-    }
-    if (name === "history") {
-      const transcript = telegramSession(chatId).transcript || []
-      if (!transcript.length) return "This agent session has no visible conversation history yet."
-      return transcript.slice(-8).map((entry) => `${entry.role === "user" ? "You" : "Agent"}: ${entry.text.slice(0, 700)}`).join("\n\n")
-    }
-    if (name === "undo") {
-      const agent = telegramSession(chatId)
-      const transcript = agent.transcript || []
-      if (transcript.length < 2) return "There is no completed turn to undo."
-      saveTelegramSession(chatId, { transcript: transcript.slice(0, -2), sessionId: "", lastTask: undefined })
-      return "↩️ Previous turn removed. The next message will continue from the restored visible context."
-    }
-    if (name === "compress") {
-      const agent = telegramSession(chatId)
-      const transcript = agent.transcript || []
-      if (transcript.length < 4) return "The session is already compact."
-      const summary = transcript.slice(0, -4).map((entry) => `${entry.role === "user" ? "User" : "Agent"}: ${entry.text.slice(0, 900)}`).join("\n").slice(-8_000)
-      saveTelegramSession(chatId, { compressedSummary: summary, transcript: transcript.slice(-4), sessionId: "" })
-      return `🗜️ Context checkpointed. Kept the latest ${Math.min(2, transcript.length / 2)} turns active and preserved earlier decisions in a bounded recovery summary.`
-    }
-    if (name === "reasoning") {
-      const normalized = argument.toLowerCase()
-      if (!normalized) return `Session reasoning: ${(telegramSession(chatId).thinking ?? ((getStore().get("defaults.thinking") as boolean | undefined) ?? true)) ? "on" : "off"}\nUse /reasoning on or /reasoning off.`
-      if (!["on", "off", "high", "low"].includes(normalized)) return "Usage: /reasoning on|off"
-      const enabled = normalized === "on" || normalized === "high"
-      saveTelegramSession(chatId, { thinking: enabled })
-      return `🧠 Session reasoning ${enabled ? "enabled" : "disabled"}.`
-    }
-    if (name === "mode") {
-      const normalized = argument.toLowerCase() as "fast" | "balanced" | "deep"
-      const current = telegramSession(chatId).mode || "balanced"
-      if (!argument) return `Response mode: ${current}\nFast uses the direct model, balanced uses a short advisor deadline for substantial work, and deep runs the full configured MoA.\nUse /mode fast, /mode balanced, or /mode deep.`
-      if (!["fast", "balanced", "deep"].includes(normalized)) return "Usage: /mode fast|balanced|deep"
-      saveTelegramSession(chatId, { mode: normalized })
-      return `⚡ Response mode set to ${normalized}.`
-    }
-    if (name === "retry") {
-      const agent = telegramSession(chatId)
-      if (!agent.lastTask) return "There is no previous instruction to retry."
-      const transcript = agent.transcript || []
-      saveTelegramSession(chatId, { transcript: transcript.slice(0, -2), sessionId: "" })
-      return handleTelegramAgentMessage(chatId, agent.lastTask)
-    }
-    if (name === "schedules") {
-      const schedules = listSchedules().filter((task) => task.enabled).slice(0, 20)
-      if (!schedules.length) return "No scheduled agent work is enabled."
-      return `Scheduled work:\n${schedules.map((task, index) => `${index + 1}. ${task.name} — ${new Date(task.nextRunAt).toLocaleString()}`).join("\n")}`
-    }
-    if (name === "steer" || name === "interrupt") {
-      if (!argument) return `Usage: /${name} <instruction>`
-      if (name === "interrupt" && telegramRunningChat === chatId) { telegramTaskCancelled = true; backend.cancel() }
-      telegramQueue.unshift({ chatId, text: argument.slice(0, 20_000), queuedAt: Date.now() })
-      queueMicrotask(() => void processNextTelegramTask())
-      return name === "interrupt" ? "⏭ Interrupting current work; your instruction is next." : "↪️ Instruction prioritized for the next agent turn."
-    }
-    if (name === "cancel" || name === "stop") {
-      const wasRunning = telegramRunningChat === chatId
-      if (wasRunning) telegramTaskCancelled = true
-      if (wasRunning) backend.cancel()
-      return wasRunning ? "Stopping this chat’s active Grok Build task…" : "This chat does not own the active task."
-    }
-    if (name === "restart") {
-      if (telegramRunningChat && telegramRunningChat !== chatId) return "Another chat owns the active task. Stop it there before restarting the agent."
-      if (telegramRunningChat === chatId) { telegramTaskCancelled = true; backend.cancel() }
-      setTimeout(() => {
-        writeLog("info", `Telegram-authorized agent restart requested by chat ${chatId}`)
-        app.relaunch()
-        app.exit(0)
-      }, 2_000).unref()
-      return "🔄 Restarting Grok Build Desktop and its Telegram agent. I’ll resume polling automatically when it is back."
-    }
-    if (name === "workspace") return `Active working directory: ${telegramSession(chatId).workspace || (getStore().get("workspace.last") as string | undefined) || "Scratch"}`
-    if (name === "status" || name === "health") {
-      const status = await backend.status()
-      const catalog = await backend.models()
-      const agent = telegramSession(chatId)
-      const model = agent.model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
-      const workspacePath = agent.workspace || (getStore().get("workspace.last") as string | undefined) || join(app.getPath("userData"), "Scratch")
-      const workspace = workspacePath === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : getStore().get("projects").find((project) => project.path === workspacePath)?.name || "Scratch"
-      const moaOn = Boolean(getStore().get("moa.enabled"))
-      const moaAggregator = (getStore().get("moa.aggregatorModel") as string | undefined) || model
-      const mode = agent.mode || "balanced"
-      const moaLine = moaOn ? `\nMode: ${mode}\nMoA: ${mode === "fast" ? "Bypassed for fastest replies" : mode === "deep" ? `Full configured advisors → ${moaAggregator}` : `Adaptive, short advisor deadline → ${moaAggregator}`}` : "\nMoA: Off"
-      if (!status.available) return `🔴 Grok Build unavailable\n${status.error}`
-      return `🟢 Grok Build agent ready\n\nStatus: ${backend.isRunning() ? `Task running${telegramRunningChat === chatId ? " in this chat" : ""}` : "Idle"}\nSession: ${agent.sessionId ? "Resumable" : "Fresh"}\nDirect model: ${model}${moaLine}\nProject: ${workspace}\nBackend: ${status.version || "available"}\nModels: ${catalog.models.length}\n\nUse /new to reset, or /models and /project to change context.`
-    }
-    if (name === "models") {
-      const catalog = await backend.models()
-      const current = telegramSession(chatId).model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
-      return buildTelegramModelPicker(catalog.models, current)
-    }
-    if (name === "model") {
-      if (!argument) return "Usage: /model <name>\nUse /models to see available models."
-      const catalog = await backend.models()
-      if (!catalog.models.includes(argument)) return `Unknown model: ${argument}\nUse /models to see available models.`
-      saveTelegramSession(chatId, { model: argument })
-      return `Default model set to ${argument}.`
-    }
-    if (name === "projects" || name === "project") {
-      const projects = getStore().get("projects")
-      const current = telegramSession(chatId).workspace || getStore().get("workspace.last") as string | undefined
-      const scratch = join(app.getPath("userData"), "Scratch")
-      const agentWorkspace = join(app.getPath("userData"), "Agent Workspace")
-      return { text: "Choose where the agent works. Agent mode is persistent and does not require a project:", buttons: [
-        [{ text: `${current === agentWorkspace ? "✓ " : ""}🤖 Agent (no project)`, data: "pick_project_agent" }],
-        [{ text: `${current === scratch ? "✓ " : ""}Scratch`, data: "pick_project_scratch" }],
-        ...projects.slice(0, 30).map((project) => [{ text: `${project.path === current ? "✓ " : ""}${project.name}`.slice(0, 60), data: `pick_project_id:${project.id}` }]),
-      ] }
-    }
-    if (name && name !== "run") return `Unknown command /${name}.\n\n${TELEGRAM_HELP_TEXT}`
-    const taskText = name === "run" ? argument : text
-    if (!taskText) return "Usage: /run <task>"
-    if (backend.isRunning() || telegramTaskReserved) {
-      telegramQueue.push({ chatId, text: taskText.slice(0, 20_000), queuedAt: Date.now() })
-      return `📥 Task queued at position ${telegramQueue.length}. Use /queue to inspect it, /steer to prioritize work, or /interrupt to stop the active turn.`
-    }
-    let agent = telegramSession(chatId)
-    const idleHours = Math.max(0, Number(getStore().get("agent.sessionIdleHours")) || 0)
-    if (idleHours > 0 && Date.now() - agent.updatedAt > idleHours * 60 * 60_000) {
-      saveTelegramSession(chatId, { sessionId: "", transcript: [], compressedSummary: "" })
-      agent = telegramSession(chatId)
-    }
-    const storedWorkspace = agent.workspace || getStore().get("workspace.last") as string | undefined
-    const cwd = storedWorkspace || join(app.getPath("userData"), "Scratch")
-    mkdirSync(cwd, { recursive: true })
-    let response = ""
-    const transcript = agent.transcript || []
-    const fallbackContext = [`Earlier checkpoint:\n${agent.compressedSummary || ""}`, ...transcript.slice(-10).map((entry) => `${entry.role === "user" ? "User" : "Assistant"}: ${entry.text}`)].filter((entry) => !entry.endsWith("\n")).join("\n\n").slice(-20_000)
-    const appControls = Boolean(getStore().get("agent.appControls"))
-    const agentPrompt = appControls
-      ? `${taskText.slice(0, 20_000)}\n\n## Safe host actions\nWhen the user explicitly asks to schedule future work, append exactly one validated action tag to your answer:\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nUse an absolute future Unix timestamp in milliseconds. Omit repeatMinutes for one-time work. Never put credentials or shell commands in an action.`
-      : taskText.slice(0, 20_000)
-    const moaEnabled = Boolean(getStore().get("moa.enabled"))
-    const moaReferences = ((getStore().get("moa.referenceModels") as string[] | undefined) || []).filter(Boolean).slice(0, 8)
-    const responseMode = agent.mode || "balanced"
-    const useMoa = moaEnabled && responseMode !== "fast" && moaReferences.length >= 2 && telegramTaskNeedsMoa(taskText)
-    const activeReferences = responseMode === "deep" ? moaReferences : moaReferences.slice(0, 2)
-    const input = {
-      prompt: agentPrompt, cwd,
-      model: agent.model || getStore().get("defaults.model") as string | undefined,
-      resume: agent.sessionId || undefined,
-      resumeFallbackPrompt: fallbackContext ? `Continue this Telegram agent conversation using the context below. Preserve prior decisions and unfinished work.\n\n${fallbackContext}\n\nCurrent instruction:\n${agentPrompt}` : undefined,
-      permissionMode: "auto" as const, noPlan: true,
-      thinking: agent.thinking ?? ((getStore().get("defaults.thinking") as boolean | undefined) ?? true),
-      selfVerify: Boolean(getStore().get("defaults.selfVerify")),
-      maxTurns: (getStore().get("defaults.maxTurns") as number | undefined) || undefined,
-      disableWebSearch: getStore().get("defaults.webSearch") === false,
-      subagents: (getStore().get("agent.subagents") as boolean | undefined) ?? true,
-      longTermMemory: Boolean(getStore().get("memory.telegramEnabled")),
-      moa: useMoa ? {
-        referenceModels: activeReferences,
-        aggregatorModel: (getStore().get("moa.aggregatorModel") as string | undefined) || agent.model,
-        referenceReasoningEffort: responseMode === "deep" ? ((getStore().get("moa.referenceEffort") as "low" | "medium" | "high" | undefined) || "medium") : "low",
-        aggregatorReasoningEffort: (getStore().get("moa.aggregatorEffort") as "low" | "medium" | "high" | undefined) || "high",
-        referenceTokenBudget: responseMode === "deep" ? ((getStore().get("moa.referenceTokenBudget") as number | undefined) || 600) : Math.min(400, (getStore().get("moa.referenceTokenBudget") as number | undefined) || 600),
-        referenceTimeoutMs: responseMode === "deep" ? 90_000 : 25_000,
-        context: fallbackContext || undefined,
-      } : undefined,
-    }
-    telegramTaskReserved = true
-    telegramTaskCancelled = false
-    telegramRunningChat = chatId
-    const run = startGrokRun(input)
-    const startedAt = Date.now()
-    const workspaceName = cwd === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : getStore().get("projects").find((project) => project.path === cwd)?.name || "Scratch"
-    const modelName = input.model || "Grok Build default"
-    await telegram.sendActivity(chatId)
-    const progressId = await telegram.sendProgress(chatId, `🚀 Task started\nModel: ${modelName}\nWorkspace: ${workspaceName}`)
-    let stage = "🧠 Grok Build is reasoning"
-    let lastProgress = ""
-    let progressPending = false
-    const elapsed = () => {
-      const seconds = Math.max(1, Math.floor((Date.now() - startedAt) / 1000))
-      return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-    }
-    const updateProgress = (nextStage = stage) => {
-      stage = nextStage
-      const message = `${stage}…\nElapsed: ${elapsed()}\nModel: ${modelName}`
-      if (message === lastProgress || progressPending) return
-      lastProgress = message
-      progressPending = true
-      void telegram.editProgress(chatId, progressId, message).finally(() => { progressPending = false })
-    }
-    const activityTimer = setInterval(() => { void telegram.sendActivity(chatId); updateProgress() }, 7_000)
-    activityTimer.unref()
-    try {
-      await backend.run(input, (event) => {
-        if (event.type === "text" && typeof event.data === "string") { response += event.data; updateProgress("✍️ Grok Build is preparing the response") }
-        else if (event.type === "end" && typeof event.sessionId === "string") saveTelegramSession(chatId, { sessionId: event.sessionId })
-        else if (event.type === "thought") updateProgress("🧠 Grok Build is reasoning")
-        else if (event.type.toLowerCase().includes("tool")) updateProgress("🔧 Grok Build is using workspace tools")
-      })
-      if (telegramTaskCancelled) {
-        finishGrokRun(run.id, { status: "cancelled" })
-        await telegram.editProgress(chatId, progressId, `⏹ Task cancelled\nTime: ${elapsed()}\nModel: ${modelName}`)
-        return "Task cancelled."
-      }
-      finishGrokRun(run.id, { status: "completed" })
-    } catch (error) {
-      finishGrokRun(run.id, { status: "failed", error: error instanceof Error ? error.message : String(error) })
-      await telegram.editProgress(chatId, progressId, `❌ Task failed\nTime: ${elapsed()}\nModel: ${modelName}`)
-      throw error
-    } finally {
-      clearInterval(activityTimer)
-      telegramRunningChat = ""
-      telegramTaskReserved = false
-      queueMicrotask(() => void processNextTelegramTask())
-    }
-    if (appControls) {
-      for (const match of response.matchAll(/<app_action>(\{[^<]+\})<\/app_action>/g)) {
-        try {
-          const action = JSON.parse(match[1]) as { type?: string; name?: string; prompt?: string; runAt?: number; repeatMinutes?: number }
-          if (action.type === "schedule.create" && action.name?.trim() && action.prompt?.trim() && Number.isFinite(action.runAt) && action.runAt! > Date.now()) {
-            addSchedule({ name: action.name.slice(0, 120), prompt: action.prompt.slice(0, 20_000), cwd, model: input.model, runAt: action.runAt!, repeatMinutes: action.repeatMinutes && action.repeatMinutes >= 1 ? Math.min(action.repeatMinutes, 525_600) : undefined })
-          }
-        } catch { /* Invalid model actions never gain host authority. */ }
-      }
-    }
-    const publicResponse = publicTelegramResponse(response) || "Task completed without a public text response."
-    // The handler sends the actual answer immediately after returning. Remove
-    // the transient progress card first so users never get a misleading
-    // "Task finished" card without the model's response.
-    await telegram.deleteProgress(chatId, progressId)
-    const nextTranscript = [...transcript, { role: "user" as const, text: taskText.slice(0, 20_000) }, { role: "assistant" as const, text: publicResponse.slice(0, 20_000) }].slice(-12)
-    saveTelegramSession(chatId, { transcript: nextTranscript, workspace: cwd, model: input.model, lastTask: taskText.slice(0, 20_000) })
-    return publicResponse
-  }
+  // Telegram agent dispatcher + queue runner. The dispatcher logic moved
+  // to `telegram/agent-handler.ts` so the ~280 branches can be tested
+  // in isolation; this block wires the queue + flags the factory expects.
+  const agentHandler = createAgentHandler({
+    backend,
+    telegram,
+    queue: telegramQueue,
+    getReserved: () => telegramTaskReserved,
+    setReserved: (v) => { telegramTaskReserved = v },
+    getCancelled: () => telegramTaskCancelled,
+    setCancelled: (v) => { telegramTaskCancelled = v },
+    getRunningChat: () => telegramRunningChat,
+    setRunningChat: (v) => { telegramRunningChat = v },
+    session: telegramSession,
+    saveSession: saveAgentSession,
+    scheduleNextTask: () => queueMicrotask(() => void processNextTelegramTask()),
+    buildInput: async (chatId, taskText, agent) => buildAgentInput(chatId, taskText, agent),
+  })
   const processNextTelegramTask = async (): Promise<void> => {
     if (backend.isRunning() || telegramTaskReserved) return
     const next = telegramQueue.shift()
     if (!next) return
     try {
-      const reply = await handleTelegramAgentMessage(next.chatId, next.text)
+      const reply = await agentHandler.handleMessage(next.chatId, next.text)
       if (typeof reply === "string") await telegram.sendLong(next.chatId, reply)
       else await telegram.sendReply(next.chatId, reply)
     } catch (error) {
@@ -448,7 +128,7 @@ app.whenReady().then(async () => {
       if (telegramQueue.length) queueMicrotask(() => void processNextTelegramTask())
     }
   }
-  telegram.setMessageHandler(handleTelegramAgentMessage)
+  telegram.setMessageHandler(agentHandler.handleMessage)
   telegram.start()
 
   mainWindow = await createAndLoadMainWindow()
@@ -457,23 +137,39 @@ app.whenReady().then(async () => {
   const menu = createMenu(mainWindow)
   Menu.setApplicationMenu(menu)
   scheduler.start()
+  // Auto-update is now single-flight: a 6h `setInterval` and the 30s
+  // warmup `setTimeout` can land in either order, and `installUpdate`
+  // may take up to 10 minutes. Without the inflight guard, a long update
+  // race-fires the very next tick and re-tries the install.
+  let autoUpdateInFlight: Promise<void> | null = null
   const autoUpdate = async () => {
-    if (!getStore().get("grok.autoUpdate") || backend.isRunning()) return
-    try {
-      const update = await backend.checkUpdate()
-      if (update.updateAvailable) {
-        const attemptedTarget = getStore().get("grok.lastAutoUpdateTarget") as string | undefined
-        if (attemptedTarget === `${update.channel}:${update.latestVersion}`) return
-        writeLog("info", `Updating Grok Build ${update.currentVersion} → ${update.latestVersion} (${update.channel})`)
-        await backend.installUpdate((getStore().get("grok.updateChannel") as "stable" | "alpha" | undefined) || "stable")
-        getStore().set("grok.lastAutoUpdateTarget", `${update.channel}:${update.latestVersion}`)
-        // The CLI binary on disk just changed: drop the cached flag/model
-        // snapshots so the next run reflects the new version instead of
-        // serving stale state from before the update.
-        backend.invalidateModelsCache()
-        backend.invalidateCliFlagsCache()
-      }
-    } catch (error) { writeLog("error", `Automatic Grok Build update failed: ${String(error)}`) }
+    if (autoUpdateInFlight) return autoUpdateInFlight
+    autoUpdateInFlight = (async () => {
+      if (!getStore().get("grok.autoUpdate") || backend.isRunning()) return
+      try {
+        const update = await backend.checkUpdate()
+        if (update.updateAvailable) {
+          const target = `${update.channel}:${update.latestVersion}`
+          const attemptedTarget = getStore().get("grok.lastAutoUpdateTarget") as string | undefined
+          const attemptedAt = Number(getStore().get("grok.lastAutoUpdateAttempt") as number | undefined) || 0
+          // Skip when we already attempted this exact target — even across
+          // channel updates the user might have just retried, so persist a
+          // timestamp too. After seven days the user is assumed to want a
+          // fresh attempt (e.g. the previous install failed mid-flight).
+          if (attemptedTarget === target && Date.now() - attemptedAt < 7 * 24 * 60 * 60_000) return
+          writeLog("info", `Updating Grok Build ${update.currentVersion} → ${update.latestVersion} (${update.channel})`)
+          await backend.installUpdate((getStore().get("grok.updateChannel") as "stable" | "alpha" | undefined) || "stable")
+          getStore().set("grok.lastAutoUpdateTarget", target)
+          getStore().set("grok.lastAutoUpdateAttempt", Date.now())
+          // The CLI binary on disk just changed: drop the cached flag/model
+          // snapshots so the next run reflects the new version instead of
+          // serving stale state from before the update.
+          backend.invalidateModelsCache()
+          backend.invalidateCliFlagsCache()
+        }
+      } catch (error) { writeLog("error", `Automatic Grok Build update failed: ${String(error)}`) }
+    })()
+    try { await autoUpdateInFlight } finally { autoUpdateInFlight = null }
   }
   updateTimer = setInterval(() => void autoUpdate(), 6 * 60 * 60_000)
   setTimeout(() => void autoUpdate(), 30_000)
