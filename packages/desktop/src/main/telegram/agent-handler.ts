@@ -24,11 +24,13 @@ import { write as writeLog } from "../logging"
 import { getStore } from "../store"
 import type { TelegramBridge } from "../telegram"
 import type { GrokBuildBackend, RunTaskInput, GrokBuildEvent } from "../grok-build-backend"
+import { nemoConfig, nemoStatus, recordNemoAudit, taskApprovalReason } from "../nemoclaw-security"
 
 export type TelegramQueueEntry = { chatId: string; text: string; queuedAt: number }
 export type TelegramAgentSession = {
   sessionId?: string; model?: string; workspace?: string; updatedAt: number
   transcript?: { role: "user" | "assistant"; text: string }[]
+  pendingApproval?: { task: string; reason: string; requestedAt: number }; approvedTask?: string
   lastTask?: string; compressedSummary?: string; thinking?: boolean; mode?: "fast" | "balanced" | "deep"
 }
 
@@ -147,6 +149,29 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     const argument = parsed?.argument || ""
     const menu = buildTelegramMenuReply()
     if (name === "start" || name === "help" || name === "menu") return menu
+    if (name === "security" || name === "sandbox") {
+      if (!argument) return `${nemoStatus()}\n\nUse /security on|off or /security approvals on|off.`
+      const setting = argument.toLowerCase()
+      if (!["on", "off", "approvals on", "approvals off"].includes(setting)) return "Usage: /security on|off or /security approvals on|off"
+      if (setting === "on" || setting === "off") getStore().set("nemoclaw.enabled", setting === "on")
+      else getStore().set("nemoclaw.requireApproval", setting.endsWith("on"))
+      recordNemoAudit({ chatId, action: `security.${setting.replaceAll(" ", ".")}`, decision: "allowed" })
+      return nemoStatus()
+    }
+    if (name === "approve") {
+      const pending = deps.session(chatId).pendingApproval
+      if (!pending) return "There is no pending action for this chat."
+      deps.saveSession(chatId, { pendingApproval: undefined, approvedTask: pending.task })
+      recordNemoAudit({ chatId, action: "telegram.approval", decision: "allowed", detail: pending.reason })
+      return handleMessage(chatId, pending.task)
+    }
+    if (name === "deny") {
+      const pending = deps.session(chatId).pendingApproval
+      if (!pending) return "There is no pending action for this chat."
+      deps.saveSession(chatId, { pendingApproval: undefined })
+      recordNemoAudit({ chatId, action: "telegram.approval", decision: "blocked", detail: pending.reason })
+      return `🚫 Blocked: ${pending.reason}.`
+    }
     if (name === "new" || name === "reset") {
       deps.saveSession(chatId, { sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
       return "✨ Fresh agent session started. Your selected model and project are unchanged."
@@ -270,6 +295,15 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     if (name && name !== "run") return `Unknown command /${name}.\n\n${TELEGRAM_HELP_TEXT}`
     const taskText = name === "run" ? argument : text
     if (!taskText) return "Usage: /run <task>"
+    const security = nemoConfig()
+    const approvedTask = deps.session(chatId).approvedTask === taskText
+    if (approvedTask) deps.saveSession(chatId, { approvedTask: undefined })
+    const approvalReason = security.enabled && security.requireApproval ? taskApprovalReason(taskText) : undefined
+    if (approvalReason && !approvedTask && !deps.session(chatId).pendingApproval) {
+      deps.saveSession(chatId, { pendingApproval: { task: taskText.slice(0, 20_000), reason: approvalReason, requestedAt: Date.now() } })
+      recordNemoAudit({ chatId, action: "telegram.task", decision: "pending", detail: approvalReason })
+      return `🛡️ Approval required: ${approvalReason}.\n\nTask held safely. Review it, then use /approve or /deny.`
+    }
     if (backend.isRunning() || deps.getReserved()) {
       queue.push({ chatId, text: taskText.slice(0, 20_000), queuedAt: Date.now() })
       return `📥 Task queued at position ${queue.length}. Use /queue to inspect it, /steer to prioritize work, or /interrupt to stop the active turn.`
@@ -291,6 +325,7 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
   const input = await deps.buildInput(chatId, taskText, agent)
   if (!input) return "Agent task could not be built — no project / model configured."
   deps.setReserved(true)
+  recordNemoAudit({ chatId, action: "telegram.task", decision: "allowed", detail: taskText.slice(0, 240) })
   deps.setCancelled(false)
   deps.setRunningChat(chatId)
   const run = startGrokRun(input)

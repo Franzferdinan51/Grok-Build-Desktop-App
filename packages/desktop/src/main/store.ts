@@ -53,7 +53,12 @@ type StoreSchema = {
       sessionId?: string; model?: string; workspace?: string; updatedAt: number
       transcript?: { role: "user" | "assistant"; text: string }[]
       lastTask?: string; compressedSummary?: string; thinking?: boolean; mode?: "fast" | "balanced" | "deep"
+      pendingApproval?: { task: string; reason: string; requestedAt: number }; approvedTask?: string
     }>
+  }
+  nemoclaw: {
+    enabled?: boolean; requireApproval?: boolean; networkAllowlist?: string[]; filesystemRoots?: string[]; maxTurns?: number
+    audit?: { id: string; at: number; chatId: string; action: string; decision: "allowed" | "blocked" | "pending"; detail?: string }[]
   }
   projects: { id: string; name: string; path: string; addedAt: number }[]
   schedules: ScheduledGrokTask[]
@@ -67,7 +72,7 @@ export function getStore(): Store<StoreSchema> {
   if (!_store) {
     _store = new Store<StoreSchema>({
       name: "grok-build-desktop",
-      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, localStudio: { baseUrl: "" }, telegram: { allowedChatIds: [], pendingChatIds: [] }, projects: [], schedules: [] },
+      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, localStudio: { baseUrl: "" }, telegram: { allowedChatIds: [], pendingChatIds: [] }, nemoclaw: { enabled: true, requireApproval: true, audit: [] }, projects: [], schedules: [] },
       clearInvalidConfig: true,
     })
   }

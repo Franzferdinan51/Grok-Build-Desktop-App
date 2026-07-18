@@ -39,9 +39,24 @@ The Agent tab is the desktop control plane for the same persistent agent. Runtim
 - `/history` — show recent public conversation
 - `/schedules` — list enabled scheduled work
 - `/cancel` — stop the active task
+- `/security` or `/sandbox` — show the NemoClaw-inspired host policy
+- `/security on|off` — enable or disable the policy layer
+- `/security approvals on|off` — control approval gating for sensitive tasks
+- `/approve` / `/deny` — resolve a held destructive, external, network, or credential-related task
 
 The Agent tab can optionally reset remote sessions after a configured number of idle hours. A retry, undo, compaction, or idle reset starts a clean native Grok session and supplies only the retained visible context, preventing removed replies or private reasoning from returning through native session state.
 - `/menu`, `/help` — show controls
+
+## NemoClaw security mode
+
+The Telegram agent includes an optional host-side policy layer inspired by
+[NVIDIA NemoClaw](https://github.com/NVIDIA/NemoClaw) and OpenShell. It keeps a
+bounded audit trail, injects a security policy into the agent system prompt,
+uses a default network allowlist, and pauses high-risk instructions until the
+chat explicitly approves them. This is not a replacement for OpenShell's OS
+sandbox; it is the lightweight mode intended for the desktop app. The full
+NemoClaw/OpenShell runtime can be added later when the host has enough space
+and its dependencies are available.
 
 ## Reliability
 

@@ -12,6 +12,7 @@ import { app } from "electron"
 import { join } from "path"
 import { getStore } from "../store"
 import { telegramTaskNeedsMoa } from "../telegram-agent-policy"
+import { nemoConfig, nemoSecurityPrompt } from "../nemoclaw-security"
 import type { RunTaskInput } from "../grok-build-backend"
 import type { TelegramAgentSession } from "./agent-handler"
 
@@ -29,6 +30,7 @@ export async function buildAgentInput(chatId: string, taskText: string, agent: T
   const agentPrompt = appControls
     ? `${taskText.slice(0, 20_000)}\n\n## Safe host actions\nWhen the user explicitly asks to schedule future work, append exactly one validated action tag to your answer:\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nUse an absolute future Unix timestamp in milliseconds. Omit repeatMinutes for one-time work. Never put credentials or shell commands in an action.`
     : taskText.slice(0, 20_000)
+  const securityPrompt = nemoSecurityPrompt(nemoConfig())
   const moaEnabled = Boolean(getStore().get("moa.enabled"))
   const moaReferences = ((getStore().get("moa.referenceModels") as string[] | undefined) || []).filter(Boolean).slice(0, 8)
   const responseMode = agent.mode || "balanced"
@@ -47,6 +49,7 @@ export async function buildAgentInput(chatId: string, taskText: string, agent: T
     maxTurns: (getStore().get("defaults.maxTurns") as number | undefined) || undefined,
     disableWebSearch: getStore().get("defaults.webSearch") === false,
     subagents: (getStore().get("agent.subagents") as boolean | undefined) ?? true,
+    systemPrompt: securityPrompt || undefined,
     longTermMemory: Boolean(getStore().get("memory.telegramEnabled")),
     moa: useMoa ? {
       referenceModels: activeReferences,
