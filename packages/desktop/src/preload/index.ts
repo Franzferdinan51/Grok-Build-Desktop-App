@@ -14,7 +14,7 @@ export type ScheduledGrokTask = { id: string; name: string; prompt: string; cwd:
 export type ProviderSecret = { id: string; label: string; envKey: string; baseUrl: string; modelId: string; configured: boolean }
 export type WorkspaceFile = { path: string; size: number }
 export type StoredChatThread = { id: string; workspace: string; title: string; createdAt: number; updatedAt: number; messages: { id: string; role: "user" | "assistant"; logs: { kind: "text" | "thought" | "error"; content: string }[]; createdAt: number }[]; sessionId: string; model?: string; summary?: string; pinned?: boolean; archived?: boolean; sessionStatus?: "new" | "resumable" | "recovered" | "broken" }
-export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; error?: string }
+export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; embeddingProvider: string; embeddingModel?: string; error?: string }
 
 export type ElectronAPI = {
   backend: {

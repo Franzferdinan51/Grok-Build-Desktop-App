@@ -4,8 +4,9 @@ import { homedir } from "os"
 import { join, resolve } from "path"
 import { getStore } from "./store"
 import { write as writeLog } from "./logging"
+import { providerSecretEnvironment } from "./model-secrets"
 
-export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; error?: string }
+export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; embeddingProvider: string; embeddingModel?: string; error?: string }
 
 const REPO_CANDIDATES = [join(homedir(), ".openclaw", "workspace", "duckbot-rag-memory"), join(homedir(), "duckbot-rag-memory"), join(homedir(), "Desktop", "duckbot-rag-memory")]
 const SOUL_FILES: Record<string, string> = {
@@ -63,7 +64,17 @@ function ensureMemoryProcess(): ChildProcessWithoutNullStreams {
   const repo = repository()
   if (!repo) throw new Error("DuckBot RAG repository or Python environment was not found")
   if (memoryProcess && !memoryProcess.killed) return memoryProcess
-  const child = spawn(join(repo, ".venv", "bin", "python"), ["-m", "src.mcp_server"], { cwd: repo, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PYTHONPATH: repo } })
+  const configuredProvider = String(getStore().get("memory.embeddingProvider") || "").trim().toLowerCase()
+  const configuredModel = String(getStore().get("memory.embeddingModel") || "").trim()
+  const memoryEnv = providerSecretEnvironment({ PYTHONPATH: repo })
+  // NVIDIA Build/NIM credentials are already encrypted and managed by the
+  // desktop provider settings. Opt into NVIDIA embeddings only when that
+  // credential exists; otherwise preserve the brain's existing local-first
+  // provider selection.
+  if (configuredProvider) memoryEnv.DUCKBOT_EMBEDDING = configuredProvider
+  else if (memoryEnv.NVIDIA_API_KEY) memoryEnv.DUCKBOT_EMBEDDING = "nvidia"
+  if (configuredModel) memoryEnv.NVIDIA_EMBED_MODEL = configuredModel
+  const child = spawn(join(repo, ".venv", "bin", "python"), ["-m", "src.mcp_server"], { cwd: repo, stdio: ["pipe", "pipe", "pipe"], env: memoryEnv })
   memoryProcess = child
   let stderr = ""
   child.stdout.on("data", (chunk) => {
@@ -140,7 +151,12 @@ function safeRecallText(value: string): string {
 
 export class DuckbotMemory {
   enabled(): boolean { return (getStore().get("memory.enabled") as boolean | undefined) ?? true }
-  status(): DuckbotMemoryStatus { const repo = repository(); return { enabled: this.enabled(), available: Boolean(repo), repository: repo, soulDirectory: ensureSoulFiles(), error: repo ? undefined : "Install duckbot-rag-memory and its .venv to enable semantic recall" } }
+  status(): DuckbotMemoryStatus {
+    const repo = repository()
+    const provider = String(getStore().get("memory.embeddingProvider") || "").trim() || "nvidia-if-configured / local fallback"
+    const model = String(getStore().get("memory.embeddingModel") || "").trim() || undefined
+    return { enabled: this.enabled(), available: Boolean(repo), repository: repo, soulDirectory: ensureSoulFiles(), embeddingProvider: provider, embeddingModel: model, error: repo ? undefined : "Install duckbot-rag-memory and its .venv to enable semantic recall" }
+  }
   async context(query: string): Promise<string> {
     const identity = identityContext()
     if (!this.enabled()) return identity

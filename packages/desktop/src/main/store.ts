@@ -57,7 +57,7 @@ type StoreSchema = {
   }
   projects: { id: string; name: string; path: string; addedAt: number }[]
   schedules: ScheduledGrokTask[]
-  memory?: { enabled?: boolean; telegramEnabled?: boolean; duckbotPath?: string; soulPath?: string }
+  memory?: { enabled?: boolean; telegramEnabled?: boolean; duckbotPath?: string; soulPath?: string; embeddingProvider?: string; embeddingModel?: string }
   host?: { browserScript?: string; desktopScript?: string; disabled?: boolean }
 }
 

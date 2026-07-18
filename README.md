@@ -73,6 +73,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Hermes-style lifecycle commands add `/retry`, `/undo`, `/compress`, and per-session `/reasoning`, with optional idle resets and corrected-transcript recovery after rewinds.
 - Telegram tasks retain Grok Build tools, web search, verification, subagents, optional MoA, run history, progress updates, and schema-validated scheduling when Agent App Controls are enabled.
 - DuckBot RAG is auto-detected from common local install locations and enabled by default for desktop/scheduled agent work. It degrades safely to filesystem soul files if the local embedding service is offline. Personal memory access from Telegram is a separate, explicit opt-in because authorized group chats may contain other people.
+- When an encrypted NVIDIA Build/NIM key is configured, DuckBot RAG can use NVIDIA's `nvidia/llama-3.2-nv-embedqa-1b-v2` embedding model through the same provider boundary. Switching embedding models requires re-indexing the existing vector store; vectors from different models must not be mixed.
 - Use a dedicated BotFather bot. A token already consumed by OpenClaw or another long-polling client cannot simultaneously be polled by this app.
 
 ### Learning and automation

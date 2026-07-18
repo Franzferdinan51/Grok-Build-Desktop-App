@@ -68,3 +68,7 @@ ODS defaults vary by platform and install; confirm its active endpoint in the OD
 ## Why no fake multi-provider buttons
 
 The first scaffold advertised Codex/OpenAI choices that had no connected execution backend. They were removed from the executable UI. New providers must supply a real adapter, credential boundary, model discovery, and error handling before they are shown as runnable.
+
+### DuckBot RAG embeddings
+
+The desktop app reuses the encrypted NVIDIA Build/NIM credential for the optional DuckBot RAG process. When that credential is present, the memory child process selects `nvidia/llama-3.2-nv-embedqa-1b-v2` through NVIDIA's `/v1/embeddings` endpoint. Set `memory.embeddingProvider` to `local` or `lmstudio` to override this behavior. Changing providers changes vector dimensions and requires rebuilding/re-indexing the memory store; never mix vectors from different embedding models in one collection.
