@@ -15,6 +15,7 @@ import { write as writeLog } from "./logging"
 import { resolveGrokBuild } from "./grok-build-resolver"
 import { normalizeBackendStderr } from "./backend-error"
 import { tokenizeCommandLine, ShellQuoteError } from "./shell-quote"
+import { parseGrokModels } from "./grok-models"
 import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
 import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
@@ -183,19 +184,7 @@ export class GrokBuildBackend {
       try { await this.syncCodexOAuthModels() }
       catch (error) { writeLog("error", `Could not sync OpenAI Codex OAuth models: ${String(error)}`) }
       const { stdout } = await execFileAsync(status.command, ["models"], { timeout: 10_000, env: this.environment() })
-      const models: string[] = []
-      let defaultModel: string | undefined
-      for (const raw of stdout.split(/\r?\n/)) {
-        const defaultMatch = raw.match(/^\s*\*\s+(.+?)\s+\(default\)\s*$/)
-        const regularMatch = raw.match(/^\s*-\s+(.+?)\s*$/)
-        if (defaultMatch) {
-          defaultModel = defaultMatch[1]
-          models.push(defaultModel)
-        } else if (regularMatch) {
-          models.push(regularMatch[1])
-        }
-      }
-      const catalog = { defaultModel, models: [...new Set(models)] }
+      const catalog = parseGrokModels(stdout)
       getStore().set("grok.lastModelCatalog", catalog)
       this.modelsCache = { data: catalog, expiresAt: now + GrokBuildBackend.MODELS_CACHE_TTL_MS }
       return catalog

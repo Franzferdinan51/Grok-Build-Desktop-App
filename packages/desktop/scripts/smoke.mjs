@@ -22,6 +22,7 @@ import { withDisconnectedState, withForgottenTokenState } from "../src/main/tele
 import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
 import { mergeLogs, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
 import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
+import { parseGrokModels } from "../src/main/grok-models.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -409,6 +410,45 @@ assert.equal(mapMenuCallback("unknown"), null)
   assert.equal(picker.buttons.length, 30)
   assert.equal(picker.buttons[0][0].data, "pick_model:0")
   assert.equal(picker.buttons[29][0].data, "pick_model:29")
+}
+
+// parseGrokModels: the shipped CLI output format. Default line gets
+// `* <id> (default)`, regular lines get `- <id>`. Embedded blank lines
+// and prose headers are skipped.
+{
+  const stdout = `You are logged in with grok.com.
+
+Default model: grok-4.5
+
+Available models:
+  - grok-4.5
+  - duckbot-v2-qwen-9b-q4_k_m
+  * nemotron-3-ultra-550b (default)
+  - minimax-m2-7
+
+`
+  const catalog = parseGrokModels(stdout)
+  assert.equal(catalog.defaultModel, "nemotron-3-ultra-550b")
+  assert.deepEqual(catalog.models, ["grok-4.5", "duckbot-v2-qwen-9b-q4_k_m", "nemotron-3-ultra-550b", "minimax-m2-7"])
+}
+// Robustness: no default line, duplicate model names, blank lines.
+{
+  const stdout = `Available models:\n  - a\n  - b\n  - a\n\n`
+  const catalog = parseGrokModels(stdout)
+  assert.equal(catalog.defaultModel, undefined)
+  assert.deepEqual(catalog.models, ["a", "b"])
+}
+// Empty / malformed input must not throw.
+{
+  const catalog = parseGrokModels("")
+  assert.deepEqual(catalog, { defaultModel: undefined, models: [] })
+}
+// Default-line presence is independent of order.
+{
+  const stdout = `* zed (default)\n- alpha\n- beta\n`
+  const catalog = parseGrokModels(stdout)
+  assert.equal(catalog.defaultModel, "zed")
+  assert.deepEqual(catalog.models, ["zed", "alpha", "beta"])
 }
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
