@@ -21,7 +21,7 @@ import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
 import { withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
 import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
 import { mergeLogs, LiveEventBuffer, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
-import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
+import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, buildTelegramMoaMenu, buildTelegramMoaReferencePicker, buildTelegramMoaAggregatorPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
 import { parseGrokModels } from "../src/main/grok-models.ts"
 import { parseGrokSubcommands, parseGrokSubcommandNames } from "../src/main/grok-subcommands.ts"
 import { isSafeExternalUrl } from "../src/shared/url-safety.ts"
@@ -424,6 +424,12 @@ assert.deepEqual(parseTelegramCallback("pick_project_id:abc"), { kind: "pick_pro
 assert.deepEqual(parseTelegramCallback("pick_project_scratch"), { kind: "pick_project_scratch", payload: "" })
 assert.deepEqual(parseTelegramCallback("pick_project_agent"), { kind: "pick_project_agent", payload: "" })
 assert.deepEqual(parseTelegramCallback("pick_mode:deep"), { kind: "pick_mode", payload: "deep" })
+assert.deepEqual(parseTelegramCallback("moa_toggle"), { kind: "moa_toggle", payload: "" })
+assert.deepEqual(parseTelegramCallback("moa_menu"), { kind: "moa_menu", payload: "" })
+assert.deepEqual(parseTelegramCallback("moa_refs"), { kind: "moa_refs", payload: "" })
+assert.deepEqual(parseTelegramCallback("moa_ref:2"), { kind: "moa_ref", payload: "2" })
+assert.deepEqual(parseTelegramCallback("moa_aggregator"), { kind: "moa_aggregator", payload: "" })
+assert.deepEqual(parseTelegramCallback("moa_agg:1"), { kind: "moa_agg", payload: "1" })
 assert.deepEqual(parseTelegramCallback("menu:models"), { kind: "menu", payload: "models" })
 assert.equal(parseTelegramCallback("hello"), null)
 
@@ -448,18 +454,32 @@ assert.equal(mapMenuCallback("unknown"), null)
 }
 {
   const picker = buildTelegramModelPicker(["a", "b", "c"], "b")
-  assert.equal(picker.text, "Choose a model\nCurrent: b")
-  assert.equal(picker.buttons.length, 3)
-  assert.equal(picker.buttons[1][0].text, "✓ b")
-  assert.equal(picker.buttons[1][0].data, "pick_model:1")
+  assert.equal(picker.text, "Choose a direct model\nCurrent: b\nMoA: Off")
+  assert.equal(picker.buttons.length, 4)
+  assert.equal(picker.buttons[2][0].text, "✓ b")
+  assert.equal(picker.buttons[2][0].data, "pick_model:1")
+  assert.equal(picker.buttons[0][0].data, "moa_toggle")
+  assert.equal(picker.buttons[0][1].data, "moa_menu")
 }
 // Picker caps at 30 entries (mirrors the prior inline cap).
 {
   const many = Array.from({ length: 100 }, (_, i) => `model-${i}`)
   const picker = buildTelegramModelPicker(many, "model-0")
-  assert.equal(picker.buttons.length, 30)
-  assert.equal(picker.buttons[0][0].data, "pick_model:0")
-  assert.equal(picker.buttons[29][0].data, "pick_model:29")
+  assert.equal(picker.buttons.length, 31)
+  assert.equal(picker.buttons[1][0].data, "pick_model:0")
+  assert.equal(picker.buttons[30][0].data, "pick_model:29")
+}
+{
+  const menu = buildTelegramMoaMenu(true, ["a", "b"], "c")
+  assert.match(menu.text, /Status: On/)
+  assert.equal(menu.buttons[0][0].data, "moa_toggle")
+  const references = buildTelegramMoaReferencePicker(["a", "b", "c"], ["a", "c"])
+  assert.equal(references.buttons[0][0].text, "✓ a")
+  assert.equal(references.buttons[1][0].text, "b")
+  assert.equal(references.buttons[2][0].data, "moa_ref:2")
+  const aggregator = buildTelegramMoaAggregatorPicker(["a", "b"], "b")
+  assert.equal(aggregator.buttons[1][0].text, "✓ b")
+  assert.equal(aggregator.buttons[1][0].data, "moa_agg:1")
 }
 
 // parseGrokModels: the shipped CLI output format. Default line gets

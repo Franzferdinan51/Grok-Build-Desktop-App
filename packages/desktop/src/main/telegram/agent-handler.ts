@@ -16,7 +16,7 @@ import { mkdirSync } from "fs"
 import { join } from "path"
 import { app } from "electron"
 import { publicTelegramResponse } from "../telegram-output"
-import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "./commands"
+import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, buildTelegramMoaMenu, buildTelegramMoaReferencePicker, buildTelegramMoaAggregatorPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "./commands"
 import { addSchedule, listSchedules } from "../scheduled-tasks"
 import { finishGrokRun, startGrokRun } from "../grok-runs"
 import { validateAppActions } from "../app-actions"
@@ -100,6 +100,42 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
         const mode = callback.payload as "fast" | "balanced" | "deep"
         deps.saveSession(chatId, { mode })
         return `⚡ Response mode set to ${mode}.`
+      }
+      if (callback.kind.startsWith("moa_")) {
+        const catalog = await backend.models()
+        const currentModel = deps.session(chatId).model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || catalog.models[0] || ""
+        const references = ((getStore().get("moa.referenceModels") as string[] | undefined) || []).filter((model) => catalog.models.includes(model)).slice(0, 8)
+        const aggregator = (getStore().get("moa.aggregatorModel") as string | undefined) || currentModel
+        if (callback.kind === "moa_toggle") {
+          const nextEnabled = !Boolean(getStore().get("moa.enabled"))
+          let nextReferences = references
+          if (nextEnabled && nextReferences.length < 2) {
+            nextReferences = catalog.models.filter((model) => model !== aggregator).slice(0, 2)
+            if (nextReferences.length < 2) nextReferences = catalog.models.slice(0, 2)
+            getStore().set("moa.referenceModels", nextReferences)
+          }
+          if (nextEnabled && nextReferences.length < 2) return "MoA needs at least 2 available models. Configure another provider or model first."
+          getStore().set("moa.enabled", nextEnabled)
+          if (nextEnabled && !getStore().get("moa.aggregatorModel")) getStore().set("moa.aggregatorModel", aggregator)
+          return buildTelegramMoaMenu(nextEnabled, nextReferences, aggregator)
+        }
+        if (callback.kind === "moa_ref") {
+          const selected = catalog.models[Number(callback.payload)]
+          if (!selected) return "That model is no longer available. Open MoA settings again."
+          const nextReferences = references.includes(selected) ? references.filter((model) => model !== selected) : [...references, selected].slice(0, 8)
+          getStore().set("moa.referenceModels", nextReferences)
+          if (Boolean(getStore().get("moa.enabled")) && nextReferences.length < 2) getStore().set("moa.enabled", false)
+          return buildTelegramMoaReferencePicker(catalog.models, nextReferences)
+        }
+        if (callback.kind === "moa_agg") {
+          const selected = catalog.models[Number(callback.payload)]
+          if (!selected) return "That model is no longer available. Open MoA settings again."
+          getStore().set("moa.aggregatorModel", selected)
+          return buildTelegramMoaMenu(Boolean(getStore().get("moa.enabled")), references, selected)
+        }
+        if (callback.kind === "moa_refs") return buildTelegramMoaReferencePicker(catalog.models, references)
+        if (callback.kind === "moa_aggregator") return buildTelegramMoaAggregatorPicker(catalog.models, aggregator)
+        return buildTelegramMoaMenu(Boolean(getStore().get("moa.enabled")), references, aggregator)
       }
       if (callback.kind === "menu") {
         const rewritten = mapMenuCallback(callback.payload)
@@ -210,8 +246,9 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     if (name === "models") {
       const catalog = await backend.models()
       const current = deps.session(chatId).model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
-      return buildTelegramModelPicker(catalog.models, current)
+      return buildTelegramModelPicker(catalog.models, current, 30, Boolean(getStore().get("moa.enabled")))
     }
+    if (name === "moa") return handleMessage(chatId, "moa_menu")
     if (name === "model") {
       if (!argument) return "Usage: /model <name>\nUse /models to see available models."
       const catalog = await backend.models()

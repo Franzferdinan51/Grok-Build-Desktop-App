@@ -31,6 +31,12 @@ export const TELEGRAM_CALLBACK_PREFIXES = [
   "pick_project_scratch",
   "pick_project_agent",
   "pick_mode:",
+  "moa_toggle",
+  "moa_menu",
+  "moa_refs",
+  "moa_ref:",
+  "moa_aggregator",
+  "moa_agg:",
   "menu:",
 ] as const
 
@@ -41,6 +47,12 @@ export type TelegramCallbackKind =
   | "pick_project_scratch"
   | "pick_project_agent"
   | "pick_mode"
+  | "moa_toggle"
+  | "moa_menu"
+  | "moa_refs"
+  | "moa_ref"
+  | "moa_aggregator"
+  | "moa_agg"
   | "menu"
 
 export function parseTelegramCallback(text: string): { kind: TelegramCallbackKind; payload: string } | null {
@@ -59,10 +71,16 @@ function prefixToKind(prefix: typeof TELEGRAM_CALLBACK_PREFIXES[number]): Telegr
   if (prefix === "pick_project_scratch") return "pick_project_scratch"
   if (prefix === "pick_project_agent") return "pick_project_agent"
   if (prefix === "pick_mode:") return "pick_mode"
+  if (prefix === "moa_toggle") return "moa_toggle"
+  if (prefix === "moa_menu") return "moa_menu"
+  if (prefix === "moa_refs") return "moa_refs"
+  if (prefix === "moa_ref:") return "moa_ref"
+  if (prefix === "moa_aggregator") return "moa_aggregator"
+  if (prefix === "moa_agg:") return "moa_agg"
   return "menu"
 }
 
-export const TELEGRAM_HELP_TEXT = "**Grok Build Desktop Agent**\n\n/run <task> — run an agent task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose Project, Scratch, or Agent mode\n/mode [fast|balanced|deep] — response-speed profile\n/queue — show queued work\n/steer <task> — prioritize the next instruction\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n/restart — restart the desktop agent\n\nPlain messages continue the current agent session."
+export const TELEGRAM_HELP_TEXT = "**Grok Build Desktop Agent**\n\n/run <task> — run an agent task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model or configure MoA\n/moa — configure Mixture of Agents\n/project — choose Project, Scratch, or Agent mode\n/mode [fast|balanced|deep] — response-speed profile\n/queue — show queued work\n/steer <task> — prioritize the next instruction\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n/restart — restart the desktop agent\n\nPlain messages continue the current agent session."
 
 export type TelegramReply = { text: string; buttons: { text: string; data: string }[][] }
 
@@ -84,10 +102,46 @@ export function buildTelegramMenuReply(): TelegramReply {
  * inline implementation and clips each label to Telegram's 60-char limit
  * (Telegram itself caps labels at 64 chars but the prior code used 60).
  */
-export function buildTelegramModelPicker(models: string[], current: string, limit = 30): TelegramReply {
+export function buildTelegramModelPicker(models: string[], current: string, limit = 30, moaEnabled = false): TelegramReply {
   return {
-    text: `Choose a model\nCurrent: ${current}`,
-    buttons: models.slice(0, limit).map((entry, index) => [{ text: `${entry === current ? "✓ " : ""}${entry}`.slice(0, 60), data: `pick_model:${index}` }]),
+    text: `Choose a direct model\nCurrent: ${current}\nMoA: ${moaEnabled ? "On" : "Off"}`,
+    buttons: [
+      [{ text: `${moaEnabled ? "🟢" : "⚪️"} MoA ${moaEnabled ? "On" : "Off"}`, data: "moa_toggle" }, { text: "⚙️ Configure MoA", data: "moa_menu" }],
+      ...models.slice(0, limit).map((entry, index) => [{ text: `${entry === current ? "✓ " : ""}${entry}`.slice(0, 60), data: `pick_model:${index}` }]),
+    ],
+  }
+}
+
+export function buildTelegramMoaMenu(enabled: boolean, references: string[], aggregator: string): TelegramReply {
+  return {
+    text: `Mixture of Agents\nStatus: ${enabled ? "On" : "Off"}\nReferences: ${references.length ? references.join(", ") : "None selected"}\nAggregator: ${aggregator || "Direct model"}\n\nBalanced uses up to 2 references for substantial tasks; Deep uses all selected references.`,
+    buttons: [
+      [{ text: enabled ? "🟢 Disable MoA" : "⚪️ Enable MoA", data: "moa_toggle" }],
+      [{ text: `🧩 Reference models (${references.length})`, data: "moa_refs" }],
+      [{ text: "🎯 Aggregator model", data: "moa_aggregator" }],
+      [{ text: "← Direct models", data: "menu:models" }],
+    ],
+  }
+}
+
+export function buildTelegramMoaReferencePicker(models: string[], selected: string[], limit = 30): TelegramReply {
+  const chosen = new Set(selected)
+  return {
+    text: `Choose at least 2 MoA reference models\nSelected: ${selected.length}`,
+    buttons: [
+      ...models.slice(0, limit).map((entry, index) => [{ text: `${chosen.has(entry) ? "✓ " : ""}${entry}`.slice(0, 60), data: `moa_ref:${index}` }]),
+      [{ text: "← MoA settings", data: "moa_menu" }],
+    ],
+  }
+}
+
+export function buildTelegramMoaAggregatorPicker(models: string[], current: string, limit = 30): TelegramReply {
+  return {
+    text: `Choose the MoA aggregator\nCurrent: ${current || "Direct model"}`,
+    buttons: [
+      ...models.slice(0, limit).map((entry, index) => [{ text: `${entry === current ? "✓ " : ""}${entry}`.slice(0, 60), data: `moa_agg:${index}` }]),
+      [{ text: "← MoA settings", data: "moa_menu" }],
+    ],
   }
 }
 
