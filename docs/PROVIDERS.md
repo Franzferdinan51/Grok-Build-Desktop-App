@@ -71,4 +71,4 @@ The first scaffold advertised Codex/OpenAI choices that had no connected executi
 
 ### DuckBot RAG embeddings
 
-The desktop app reuses the encrypted NVIDIA Build/NIM credential for the optional DuckBot RAG process. When that credential is present, the memory child process selects `nvidia/llama-3.2-nv-embedqa-1b-v2` through NVIDIA's `/v1/embeddings` endpoint. Set `memory.embeddingProvider` to `local` or `lmstudio` to override this behavior. Changing providers changes vector dimensions and requires rebuilding/re-indexing the memory store; never mix vectors from different embedding models in one collection.
+The desktop app reuses the encrypted NVIDIA Build/NIM credential for the optional DuckBot RAG process. When that credential is present, the memory child process selects `nvidia/nemotron-3-embed-1b` through NVIDIA's `/v1/embeddings` endpoint. Set `memory.embeddingProvider` to `local` or `lmstudio` to override this behavior. Changing providers changes vector dimensions and requires rebuilding/re-indexing the memory store; never mix vectors from different embedding models in one collection.
