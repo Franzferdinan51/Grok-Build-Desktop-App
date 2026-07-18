@@ -14,6 +14,7 @@
 import { app, BrowserWindow, Menu } from "electron"
 import { mkdirSync } from "fs"
 import { publicTelegramResponse } from "./telegram-output"
+import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "./telegram/commands"
 import { join } from "path"
 import windowStateKeeper from "electron-window-state"
 import { registerIpcHandlers } from "./ipc"
@@ -152,51 +153,51 @@ app.whenReady().then(async () => {
   })
 
   const handleTelegramAgentMessage = async (chatId: string, text: string): Promise<string | { text: string; buttons: { text: string; data: string }[][] }> => {
-    const modelChoice = text.match(/^pick_model:(\d+)$/)
-    if (modelChoice) {
-      const catalog = await backend.models(); const selected = catalog.models[Number(modelChoice[1])]
-      if (!selected) return "That model is no longer available. Open /models again."
-      saveTelegramSession(chatId, { model: selected }); return `✓ Model set to ${selected}`
+    // Picker callbacks: each prefix is routed through the shipped
+    // parseTelegramCallback so the dispatcher table can stay in one place.
+    const callback = parseTelegramCallback(text)
+    if (callback) {
+      if (callback.kind === "pick_model") {
+        const index = Number(callback.payload)
+        const catalog = await backend.models(); const selected = catalog.models[index]
+        if (!selected) return "That model is no longer available. Open /models again."
+        saveTelegramSession(chatId, { model: selected }); return `✓ Model set to ${selected}`
+      }
+      if (callback.kind === "pick_project_index") {
+        const index = Number(callback.payload)
+        const selected = getStore().get("projects")[index]
+        if (!selected) return "That project is no longer available. Open /projects again."
+        saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
+      }
+      if (callback.kind === "pick_project_id") {
+        const selected = getStore().get("projects").find((project) => project.id === callback.payload)
+        if (!selected) return "That project is no longer available. Open /project again."
+        saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
+      }
+      if (callback.kind === "pick_project_scratch") {
+        const scratch = join(app.getPath("userData"), "Scratch")
+        mkdirSync(scratch, { recursive: true }); saveTelegramSession(chatId, { workspace: scratch, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
+        return `✓ Project set to Scratch\n${scratch}\nStarted a fresh project session.`
+      }
+      if (callback.kind === "pick_project_agent") {
+        const workspace = join(app.getPath("userData"), "Agent Workspace")
+        mkdirSync(workspace, { recursive: true }); saveTelegramSession(chatId, { workspace, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
+        return `✓ Agent mode enabled\nWorking directory: ${workspace}\nThis is a persistent general-purpose workspace and is not tied to any project.`
+      }
+      if (callback.kind === "pick_mode") {
+        const mode = callback.payload as "fast" | "balanced" | "deep"
+        saveTelegramSession(chatId, { mode })
+        return `⚡ Response mode set to ${mode}.`
+      }
+      if (callback.kind === "menu") {
+        const rewritten = mapMenuCallback(callback.payload)
+        if (rewritten) return handleTelegramAgentMessage(chatId, rewritten)
+      }
     }
-    const projectChoice = text.match(/^pick_project:(\d+)$/)
-    if (projectChoice) {
-      const selected = getStore().get("projects")[Number(projectChoice[1])]
-      if (!selected) return "That project is no longer available. Open /projects again."
-      saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
-    }
-    const projectIdChoice = text.match(/^pick_project_id:([a-f0-9-]+)$/i)
-    if (projectIdChoice) {
-      const selected = getStore().get("projects").find((project) => project.id === projectIdChoice[1])
-      if (!selected) return "That project is no longer available. Open /project again."
-      saveTelegramSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
-    }
-    if (text === "pick_project_scratch") {
-      const scratch = join(app.getPath("userData"), "Scratch")
-      mkdirSync(scratch, { recursive: true }); saveTelegramSession(chatId, { workspace: scratch, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
-      return `✓ Project set to Scratch\n${scratch}\nStarted a fresh project session.`
-    }
-    if (text === "pick_project_agent") {
-      const workspace = join(app.getPath("userData"), "Agent Workspace")
-      mkdirSync(workspace, { recursive: true }); saveTelegramSession(chatId, { workspace, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
-      return `✓ Agent mode enabled\nWorking directory: ${workspace}\nThis is a persistent general-purpose workspace and is not tied to any project.`
-    }
-    const modeChoice = text.match(/^pick_mode:(fast|balanced|deep)$/)
-    if (modeChoice) {
-      const mode = modeChoice[1] as "fast" | "balanced" | "deep"
-      saveTelegramSession(chatId, { mode })
-      return `⚡ Response mode set to ${mode}.`
-    }
-    if (text === "menu:models") text = "/models"
-    if (text === "menu:projects") text = "/projects"
-    if (text === "menu:status") text = "/status"
-    if (text === "menu:cancel") text = "/cancel"
-    if (text === "menu:new") text = "/new"
-    if (text === "menu:queue") text = "/queue"
-    const command = text.match(/^\/(\w+)(?:@\w+)?(?:\s+([\s\S]*))?$/)
-    const name = command?.[1]?.toLowerCase()
-    const argument = command?.[2]?.trim() || ""
-    const help = "**Grok Build Desktop Agent**\n\n/run <task> — run an agent task\n/new — start a fresh session\n/status — detailed agent status\n/models — choose a model\n/project — choose Project, Scratch, or Agent mode\n/mode [fast|balanced|deep] — response-speed profile\n/queue — show queued work\n/steer <task> — prioritize the next instruction\n/interrupt <task> — stop and redirect active work\n/retry — retry the previous instruction\n/undo — rewind the previous turn\n/compress — checkpoint and compact context\n/reasoning [on|off] — session reasoning control\n/history — recent visible conversation\n/schedules — scheduled agent work\n/cancel — stop the current task\n/restart — restart the desktop agent\n\nPlain messages continue the current agent session."
-    const menu = { text: help, buttons: [[{ text: "🤖 Models", data: "menu:models" }, { text: "📁 Projects", data: "menu:projects" }], [{ text: "⚡ Fast", data: "pick_mode:fast" }, { text: "⚖️ Balanced", data: "pick_mode:balanced" }, { text: "🧠 Deep", data: "pick_mode:deep" }], [{ text: "📊 Status", data: "menu:status" }, { text: "📥 Queue", data: "menu:queue" }], [{ text: "✨ New session", data: "menu:new" }, { text: "⏹ Cancel", data: "menu:cancel" }]] }
+    const parsed = parseTelegramCommand(text)
+    const name = parsed?.name
+    const argument = parsed?.argument || ""
+    const menu = buildTelegramMenuReply()
     if (name === "start" || name === "help" || name === "menu") return menu
     if (name === "new" || name === "reset") {
       saveTelegramSession(chatId, { sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined })
@@ -296,7 +297,7 @@ app.whenReady().then(async () => {
     if (name === "models") {
       const catalog = await backend.models()
       const current = telegramSession(chatId).model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
-      return { text: `Choose a model\nCurrent: ${current}`, buttons: catalog.models.slice(0, 30).map((entry, index) => [{ text: `${entry === current ? "✓ " : ""}${entry}`.slice(0, 60), data: `pick_model:${index}` }]) }
+      return buildTelegramModelPicker(catalog.models, current)
     }
     if (name === "model") {
       if (!argument) return "Usage: /model <name>\nUse /models to see available models."
@@ -316,7 +317,7 @@ app.whenReady().then(async () => {
         ...projects.slice(0, 30).map((project) => [{ text: `${project.path === current ? "✓ " : ""}${project.name}`.slice(0, 60), data: `pick_project_id:${project.id}` }]),
       ] }
     }
-    if (name && name !== "run") return `Unknown command /${name}.\n\n${help}`
+    if (name && name !== "run") return `Unknown command /${name}.\n\n${TELEGRAM_HELP_TEXT}`
     const taskText = name === "run" ? argument : text
     if (!taskText) return "Usage: /run <task>"
     if (backend.isRunning() || telegramTaskReserved) {

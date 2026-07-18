@@ -21,6 +21,7 @@ import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
 import { withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
 import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
 import { mergeLogs, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
+import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -355,6 +356,60 @@ assert.throws(() => tokenizeCommandLine("inspect foo\\"), ShellQuoteError)
 }
 // Empty incoming is a no-op.
 assert.deepEqual(mergeLogs([{ kind: "text", content: "kept" }], []), [{ kind: "text", content: "kept" }])
+
+// Telegram command parser: every supported prefix round-trips, plain text
+// returns null, and the trailing argument is trimmed.
+assert.deepEqual(parseTelegramCommand("/run fix the bug"), { name: "run", argument: "fix the bug" })
+assert.deepEqual(parseTelegramCommand("/models"), { name: "models", argument: "" })
+assert.deepEqual(parseTelegramCommand("/reasoning off"), { name: "reasoning", argument: "off" })
+assert.deepEqual(parseTelegramCommand("/status  "), { name: "status", argument: "" })
+assert.deepEqual(parseTelegramCommand("hello"), null)
+assert.equal(parseTelegramCommand("/"), null)
+
+// Callback parsing: every inline-keyboard prefix classifies cleanly.
+assert.deepEqual(parseTelegramCallback("pick_model:2"), { kind: "pick_model", payload: "2" })
+assert.deepEqual(parseTelegramCallback("pick_project:0"), { kind: "pick_project_index", payload: "0" })
+assert.deepEqual(parseTelegramCallback("pick_project_id:abc"), { kind: "pick_project_id", payload: "abc" })
+assert.deepEqual(parseTelegramCallback("pick_project_scratch"), { kind: "pick_project_scratch", payload: "" })
+assert.deepEqual(parseTelegramCallback("pick_project_agent"), { kind: "pick_project_agent", payload: "" })
+assert.deepEqual(parseTelegramCallback("pick_mode:deep"), { kind: "pick_mode", payload: "deep" })
+assert.deepEqual(parseTelegramCallback("menu:models"), { kind: "menu", payload: "models" })
+assert.equal(parseTelegramCallback("hello"), null)
+
+// Menu mapping: each menu:* callback maps to its slash equivalent.
+assert.equal(mapMenuCallback("models"), "/models")
+assert.equal(mapMenuCallback("projects"), "/projects")
+assert.equal(mapMenuCallback("status"), "/status")
+assert.equal(mapMenuCallback("cancel"), "/cancel")
+assert.equal(mapMenuCallback("new"), "/new")
+assert.equal(mapMenuCallback("queue"), "/queue")
+assert.equal(mapMenuCallback("unknown"), null)
+
+// Menu + picker builders: the shipped helpers produce the same shape as
+// the inline constants they replaced, so the Telegram inline-keyboard
+// contract is preserved byte-for-byte.
+{
+  const menu = buildTelegramMenuReply()
+  assert.equal(menu.text, TELEGRAM_HELP_TEXT)
+  assert.equal(menu.buttons.length, 4)
+  assert.equal(menu.buttons[0][0].data, "menu:models")
+  assert.equal(menu.buttons[0][1].data, "menu:projects")
+}
+{
+  const picker = buildTelegramModelPicker(["a", "b", "c"], "b")
+  assert.equal(picker.text, "Choose a model\nCurrent: b")
+  assert.equal(picker.buttons.length, 3)
+  assert.equal(picker.buttons[1][0].text, "✓ b")
+  assert.equal(picker.buttons[1][0].data, "pick_model:1")
+}
+// Picker caps at 30 entries (mirrors the prior inline cap).
+{
+  const many = Array.from({ length: 100 }, (_, i) => `model-${i}`)
+  const picker = buildTelegramModelPicker(many, "model-0")
+  assert.equal(picker.buttons.length, 30)
+  assert.equal(picker.buttons[0][0].data, "pick_model:0")
+  assert.equal(picker.buttons[29][0].data, "pick_model:29")
+}
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
