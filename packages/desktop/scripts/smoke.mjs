@@ -20,6 +20,7 @@ import { normalizeBackendStderr } from "../src/main/backend-error.ts"
 import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
 import { withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
 import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
+import { mergeLogs, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -324,6 +325,36 @@ assert.deepEqual(tokenizeCommandLine("   "), [])
 assert.throws(() => tokenizeCommandLine('inspect --message "unterminated'), ShellQuoteError)
 assert.throws(() => tokenizeCommandLine("inspect --message 'unterminated"), ShellQuoteError)
 assert.throws(() => tokenizeCommandLine("inspect foo\\"), ShellQuoteError)
+
+// Live event buffer: adjacent entries of the same kind coalesce into one
+// row so streamed token chunks merge, and the tail is bounded by the
+// shipped MAX_LIVE_LOG_ENTRIES / MAX_LIVE_LOG_CHARS limits.
+{
+  const merged = mergeLogs([], [{ kind: "text", content: "hello " }, { kind: "text", content: "world" }])
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].content, "hello world")
+}
+{
+  const split = mergeLogs([], [{ kind: "text", content: "public " }, { kind: "thought", content: "private" }, { kind: "text", content: "more" }])
+  assert.equal(split.length, 3)
+  assert.equal(split.map((entry) => entry.kind).join(","), "text,thought,text")
+  assert.equal(split[2].content, "more")
+}
+{
+  const oversized = Array.from({ length: 600 }, (_, index) => ({ kind: "text", content: `entry-${index}` }))
+  const trimmed = mergeLogs([], oversized)
+  assert.ok(trimmed.length <= MAX_LIVE_LOG_ENTRIES, "mergeLogs must respect MAX_LIVE_LOG_ENTRIES")
+  // Most-recent entry must survive.
+  assert.match(trimmed[trimmed.length - 1].content, /entry-599$/)
+}
+{
+  const huge = [{ kind: "text", content: "x".repeat(MAX_LIVE_LOG_CHARS + 10_000) }]
+  const trimmed = mergeLogs([], huge)
+  assert.ok(trimmed.length === 1)
+  assert.ok(trimmed[0].content.length <= MAX_LIVE_LOG_CHARS)
+}
+// Empty incoming is a no-op.
+assert.deepEqual(mergeLogs([{ kind: "text", content: "kept" }], []), [{ kind: "text", content: "kept" }])
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)

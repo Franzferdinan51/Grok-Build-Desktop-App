@@ -11,6 +11,7 @@ import "./styles.css"
 import "./preview-layout.css"
 import "./branding.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
+import * as eventBuffer from "./event-buffer"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
 type ChatThread = StoredChatThread & { messages: ChatMessage[] }
@@ -18,8 +19,8 @@ type QueuedPrompt = { id: string; text: string }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type AdvancedSettings = { agent: string; agents: string; permissionMode: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow: string; deny: string; tools: string; disallowedTools: string; memory: "default" | "experimental" | "disabled"; sandbox: string; rules: string; systemPrompt: string; verbatim: boolean; forkSession: boolean; restoreCode: boolean; worktree: boolean; worktreeName: string; worktreeRef: string; jsonSchema: string; promptFile: string; promptJson: string; sessionId: string; noPlan: boolean }
 const ADVANCED_DEFAULTS: AdvancedSettings = { agent: "", agents: "", permissionMode: "auto", allow: "", deny: "", tools: "", disallowedTools: "", memory: "default", sandbox: "", rules: "", systemPrompt: "", verbatim: false, forkSession: false, restoreCode: false, worktree: false, worktreeName: "", worktreeRef: "", jsonSchema: "", promptFile: "", promptJson: "", sessionId: "", noPlan: true }
-const MAX_LIVE_LOG_CHARS = 2 * 1024 * 1024
-const MAX_LIVE_LOG_ENTRIES = 500
+const MAX_LIVE_LOG_CHARS = eventBuffer.MAX_LIVE_LOG_CHARS
+const MAX_LIVE_LOG_ENTRIES = eventBuffer.MAX_LIVE_LOG_ENTRIES
 
 function RichText(props: { content: string }) {
   const html = () => DOMPurify.sanitize(marked.parse(props.content, { async: false }) as string)
@@ -155,25 +156,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   let saveChain = Promise.resolve()
   let userNearBottom = true
 
-  const mergeLogs = (target: TaskLog[], incoming: TaskLog[]): TaskLog[] => {
-    if (!incoming.length) return target
-    const next = target.slice()
-    for (const log of incoming) {
-      const previous = next[next.length - 1]
-      if (previous?.kind === log.kind) next[next.length - 1] = { ...previous, content: previous.content + log.content }
-      else next.push(log)
-    }
-    let chars = 0
-    const bounded: TaskLog[] = []
-    for (let index = next.length - 1; index >= 0 && bounded.length < MAX_LIVE_LOG_ENTRIES; index--) {
-      const log = next[index]
-      const remaining = MAX_LIVE_LOG_CHARS - chars
-      if (remaining <= 0) break
-      bounded.push(log.content.length > remaining ? { ...log, content: log.content.slice(-remaining) } : log)
-      chars += Math.min(log.content.length, remaining)
-    }
-    return bounded.reverse()
-  }
+  const mergeLogs = (target: TaskLog[], incoming: TaskLog[]): TaskLog[] => eventBuffer.mergeLogs(target, incoming)
 
   const flushBackendEvents = () => {
     if (eventFrame) cancelAnimationFrame(eventFrame)
