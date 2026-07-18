@@ -14,7 +14,7 @@ import { telegramInlineKeyboard } from "../src/main/telegram-format.ts"
 import { publicTelegramResponse } from "../src/main/telegram-output.ts"
 import { telegramHtml, telegramTextChunks } from "../src/main/telegram-text.ts"
 import { telegramTaskNeedsMoa } from "../src/main/telegram-agent-policy.ts"
-import { boundedMoaContext, cleanMoaAdvisorOutput, normalizeMoaReferenceBudget } from "../src/main/moa-utils.ts"
+import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeMoaReferenceBudget, MAX_MOA_CONTEXT_CHARS } from "../src/main/moa-utils.ts"
 import { listGrokSkills } from "../src/main/grok-skills.ts"
 import { normalizeBackendStderr } from "../src/main/backend-error.ts"
 import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
@@ -160,12 +160,28 @@ assert.equal(boundedMoaContext(" short context "), "short context")
 const oversizedMoaContext = `old-${"x".repeat(20_000)}-latest`
 const boundedContext = boundedMoaContext(oversizedMoaContext)
 assert.equal(boundedContext.endsWith("-latest"), true)
-assert.equal(boundedContext.length < 13_000, true)
+assert.ok(boundedContext.length <= MAX_MOA_CONTEXT_CHARS + "[Earlier context omitted to keep reference prompts within OS limits.]\n".length)
 assert.equal(normalizeMoaReferenceBudget(), 600)
 assert.equal(normalizeMoaReferenceBudget(50), 200)
 assert.equal(normalizeMoaReferenceBudget(50_000), 2_000)
 assert.equal(cleanMoaAdvisorOutput("<think>private chain of thought</think>\nConcrete advice"), "Concrete advice")
 assert.equal(cleanMoaAdvisorOutput("Useful advice</think>"), "Useful advice")
+// Hermes-style Grok Build reasoning channel markers must not leak into
+// the PRIVATE_ADVISORY_DATA block that the aggregator consumes.
+assert.equal(cleanMoaAdvisorOutput("<|channel|>analysis hidden reasoning<|channel|>final Visible answer"), "Visible answer")
+assert.equal(cleanMoaAdvisorOutput("before<|channel|>analysis\nreasoning\nmore reasoning\n<|channel|>final\nfinal visible"), "before\nfinal visible")
+assert.equal(cleanMoaAdvisorOutput("public<|channel|>analysis private without final"), "public")
+// Reference labels match the Hermes-rendered thinking chunk shape.
+assert.equal(moaReferenceLabel(0, 3, "grok-4.5"), "◇ Reference 1/3 — grok-4.5")
+assert.equal(moaReferenceLabel(2, 3, "nemotron-3-ultra-550b"), "◇ Reference 3/3 — nemotron-3-ultra-550b")
+// Conversation context budget was bumped so multi-turn histories have room.
+assert.equal(MAX_MOA_CONTEXT_CHARS, 16_000)
+{
+  const huge = "x".repeat(20_000)
+  const sliced = boundedMoaContext(huge)
+  assert.ok(sliced.length <= MAX_MOA_CONTEXT_CHARS + "[Earlier context omitted to keep reference prompts within OS limits.]\n".length + 100)
+  assert.match(sliced, /\[Earlier context omitted/)
+}
 
 const duplicateCodexConfig = `[model.keep]\nmodel = "keep"\n\n[model.codex-old]\nmodel = "gpt-old"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"\n\n# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS\n[model.codex-new]\nmodel = "gpt-new"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"\n# END GROK BUILD DESKTOP MANAGED PROVIDERS\n`
 const repairedCodexConfig = removeLegacyCodexBridgeTables(duplicateCodexConfig)
