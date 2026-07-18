@@ -23,6 +23,7 @@ import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts
 import { mergeLogs, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
 import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
 import { parseGrokModels } from "../src/main/grok-models.ts"
+import { parseGrokSubcommands, parseGrokSubcommandNames } from "../src/main/grok-subcommands.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -450,6 +451,31 @@ Available models:
   assert.equal(catalog.defaultModel, "zed")
   assert.deepEqual(catalog.models, ["zed", "alpha", "beta"])
 }
+
+// parseGrokSubcommands: extract the documented subcommand list from the
+// live CLI's --help output. The previously-hardcoded desktop allowlist
+// was stale — the CLI ships `agent`, `leader`, `update`, `version`,
+// `help`, `wrap` which the desktop was rejecting.
+{
+  const help = execFileSync("grok", ["--help"], { encoding: "utf8" })
+  const names = parseGrokSubcommandNames(help)
+  // The live CLI ships these and the desktop must accept them.
+  for (const expected of ["agent", "mcp", "models", "update", "version", "help", "wrap", "leader", "inspect"]) {
+    assert.ok(names.includes(expected), `live subcommand list missing ${expected}: ${names.join(", ")}`)
+  }
+  assert.ok(names.length >= 15, `expected at least 15 documented subcommands, got ${names.length}`)
+}
+// The parser handles leading blank lines after the `Commands:` header and
+// stops at the first non-matching line.
+{
+  const help = `Usage: foo [OPTIONS]\n\nOptions:\n  -h\n\nCommands:\n\n  alpha      First subcommand\n  beta       Second subcommand\n\nNotes:\n  trailing block that must not be parsed\n`
+  const cmds = parseGrokSubcommands(help)
+  assert.deepEqual(cmds.map((c) => c.name), ["alpha", "beta"])
+  assert.equal(cmds[0].description, "First subcommand")
+}
+// Empty input / missing Commands block both yield empty arrays, never throw.
+assert.equal(parseGrokSubcommands("").length, 0)
+assert.equal(parseGrokSubcommands("Usage: foo\nOptions:\n  -h\n").length, 0)
 
 assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
 assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)

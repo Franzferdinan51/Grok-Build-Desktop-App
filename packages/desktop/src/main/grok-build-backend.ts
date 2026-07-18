@@ -16,6 +16,7 @@ import { resolveGrokBuild } from "./grok-build-resolver"
 import { normalizeBackendStderr } from "./backend-error"
 import { tokenizeCommandLine, ShellQuoteError } from "./shell-quote"
 import { parseGrokModels } from "./grok-models"
+import { parseGrokSubcommandNames } from "./grok-subcommands"
 import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
 import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
@@ -105,9 +106,18 @@ export class GrokBuildBackend {
   // the Codex bridge each time. The disk store is still the cold-start
   // fallback for actual subprocess failures.
   private modelsCache: { data: GrokBuildModelCatalog; expiresAt: number } | null = null
-  private cliFlagsCache: { command: string; flags: Set<string>; expiresAt: number } | null = null
+  private cliFlagsCache: { command: string; flags: Set<string>; expiresAt: number; helpText?: string } | null = null
+  private allowedSubcommands: Set<string> = new Set(["mcp", "plugin", "memory", "sessions", "worktree", "export", "inspect", "setup", "trace", "completions", "login", "logout", "dashboard"])
   private static readonly MODELS_CACHE_TTL_MS = 30_000
   private static readonly CLI_FLAGS_CACHE_TTL_MS = 60_000
+  // Safe fallback when the CLI is unavailable (probe failed): every
+  // subcommand the previous desktop release knew about. Combined with
+  // the live CLI refresh above, this keeps the panel usable offline.
+  private static readonly FALLBACK_SUBCOMMANDS = new Set([
+    "agent", "completions", "dashboard", "export", "help", "inspect", "leader",
+    "login", "logout", "mcp", "memory", "models", "plugin", "sessions", "setup",
+    "trace", "update", "version", "worktree", "wrap",
+  ])
 
   isRunning(): boolean { return this.current !== null || this.moaAbort !== null }
 
@@ -119,7 +129,14 @@ export class GrokBuildBackend {
    */
   private async supportedCliFlags(command: string): Promise<Set<string>> {
     const now = Date.now()
-    if (this.cliFlagsCache?.command === command && this.cliFlagsCache.expiresAt > now) return this.cliFlagsCache.flags
+    if (this.cliFlagsCache?.command === command && this.cliFlagsCache.expiresAt > now) {
+      // Refresh the subcommand set from any cached help text we have already
+      // parsed so runTool validation tracks the installed CLI without an
+      // extra subprocess when the flag cache is still warm.
+      const cachedHelp = this.cliFlagsCache.helpText
+      if (cachedHelp) this.refreshAllowedSubcommandsFromHelp(cachedHelp)
+      return this.cliFlagsCache.flags
+    }
     const { stdout, stderr } = await execFileAsync(command, ["--help"], {
       timeout: 10_000,
       maxBuffer: 2_000_000,
@@ -128,8 +145,21 @@ export class GrokBuildBackend {
     const help = `${stdout}\n${stderr}`
     const flags = new Set<string>()
     for (const match of help.matchAll(/(?:^|[\s,])(--?[a-z][\w-]*)\b/gi)) flags.add(match[1])
-    this.cliFlagsCache = { command, flags, expiresAt: now + GrokBuildBackend.CLI_FLAGS_CACHE_TTL_MS }
+    this.cliFlagsCache = { command, flags, expiresAt: now + GrokBuildBackend.CLI_FLAGS_CACHE_TTL_MS, helpText: help }
+    this.refreshAllowedSubcommandsFromHelp(help)
     return flags
+  }
+
+  /** Update the runtime subcommand allowlist from a fresh `grok --help` text. */
+  private refreshAllowedSubcommandsFromHelp(helpText: string): void {
+    const parsed = parseGrokSubcommandNames(helpText)
+    if (parsed.length === 0) {
+      // Don't replace a populated allowlist with an empty one if the help
+      // output is missing the Commands block — fall back to the shipped set.
+      this.allowedSubcommands = new Set(GrokBuildBackend.FALLBACK_SUBCOMMANDS)
+      return
+    }
+    this.allowedSubcommands = new Set(parsed)
   }
 
   private compatibleCliArgs(args: string[], flags: Set<string>, onOmit: (flag: string) => void): string[] {
@@ -264,9 +294,18 @@ export class GrokBuildBackend {
       throw error
     }
     const command = args.shift()?.toLowerCase()
-    const allowed = new Set(["mcp", "plugin", "memory", "sessions", "worktree", "export", "inspect", "setup", "trace", "completions", "login", "logout", "dashboard"])
-    if (!command || !allowed.has(command)) throw new Error(`Unsupported Grok tool command: ${command || "empty"}`)
+    if (!command) throw new Error("Unsupported Grok tool command: empty")
+    // Delegate subcommand validation to the installed CLI rather than to a
+    // frozen desktop-side allowlist: refresh the documented subcommand
+    // list from `grok --help` on first use (and piggy-back on the existing
+    // flag-cache exec when it is still warm). Falls back to a hard-coded
+    // safe set when the help output is unavailable so the panel never goes
+    // blank.
     const status = await this.status()
+    if (status.available && this.allowedSubcommands.size <= GrokBuildBackend.FALLBACK_SUBCOMMANDS.size) {
+      await this.supportedCliFlags(status.command)
+    }
+    if (!this.allowedSubcommands.has(command)) throw new Error(`Unsupported Grok tool command: ${command}. Run grok --help to see documented subcommands.`)
     if (!status.available) throw new Error(status.error)
     if (command === "dashboard") {
       if (process.platform === "darwin") {
