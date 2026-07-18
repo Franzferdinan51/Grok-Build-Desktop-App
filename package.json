@@ -12,10 +12,17 @@
     "package": "pnpm --filter @grok-build/desktop package",
     "typecheck": "pnpm --filter @grok-build/desktop typecheck",
     "test:smoke": "pnpm --filter @grok-build/desktop test:smoke",
+    "test:unit": "pnpm --filter @grok-build/desktop test:unit",
+    "lint": "eslint .",
     "sync:grok-upstream": "bash scripts/sync-grok-fork.sh"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8",
+    "@typescript-eslint/parser": "^8",
+    "eslint": "^9"
   }
 }

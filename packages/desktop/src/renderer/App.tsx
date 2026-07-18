@@ -21,6 +21,8 @@ type AdvancedSettings = { agent: string; agents: string; permissionMode: "defaul
 const ADVANCED_DEFAULTS: AdvancedSettings = { agent: "", agents: "", permissionMode: "auto", allow: "", deny: "", tools: "", disallowedTools: "", memory: "default", sandbox: "", rules: "", systemPrompt: "", verbatim: false, forkSession: false, restoreCode: false, worktree: false, worktreeName: "", worktreeRef: "", jsonSchema: "", promptFile: "", promptJson: "", sessionId: "", noPlan: true }
 const MAX_LIVE_LOG_CHARS = eventBuffer.MAX_LIVE_LOG_CHARS
 const MAX_LIVE_LOG_ENTRIES = eventBuffer.MAX_LIVE_LOG_ENTRIES
+void MAX_LIVE_LOG_CHARS
+void MAX_LIVE_LOG_ENTRIES
 
 function RichText(props: { content: string }) {
   const html = () => DOMPurify.sanitize(marked.parse(props.content, { async: false }) as string)
@@ -280,7 +282,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (thread.sessionId) await window.api.store.set(sessionKey(root), thread.sessionId); else await window.api.store.delete(sessionKey(root))
     }
   }
-  const forkConversation = async (thread: ChatThread) => {
+  const _forkConversation = async (thread: ChatThread) => {
     const now = Date.now()
     const fork: ChatThread = { ...thread, id: crypto.randomUUID(), title: `${thread.title} (fork)`, createdAt: now, updatedAt: now, sessionId: "", sessionStatus: "new", pinned: false, archived: false }
     await window.api.conversations.save(fork)

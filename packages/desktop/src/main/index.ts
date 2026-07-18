@@ -30,7 +30,6 @@ import { finishGrokRun, recoverInterruptedGrokRuns, startGrokRun } from "./grok-
 import { telegramTaskNeedsMoa } from "./telegram-agent-policy"
 
 const APP_NAME = "Grok Build Desktop"
-const APP_ID = "ai.grokbuild.desktop"
 
 let mainWindow: BrowserWindow | null = null
 const backend = new GrokBuildBackend()
@@ -38,7 +37,7 @@ const telegram = new TelegramBridge()
 const localStudio = new LocalStudioController()
 const scheduler = new GrokTaskScheduler(backend)
 const preview = new PreviewServer()
-let logger: ReturnType<typeof initLogging>
+let _logger: ReturnType<typeof initLogging>
 let updateTimer: ReturnType<typeof setInterval> | undefined
 let telegramTaskCancelled = false
 let telegramRunningChat = ""
@@ -139,7 +138,7 @@ async function createAndLoadMainWindow(): Promise<BrowserWindow> {
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
-  logger = initLogging()
+  _logger = initLogging()
   writeLog("info", `${APP_NAME} starting — pid=${process.pid}`)
   recoverInterruptedGrokRuns()
 

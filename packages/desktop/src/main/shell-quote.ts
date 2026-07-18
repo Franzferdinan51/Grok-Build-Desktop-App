@@ -54,7 +54,6 @@ export function tokenizeCommandLine(input: string, start = 0): string[] {
     let inToken = false
     while (i < n) {
       const ch = input[i]
-      const code = input.charCodeAt(i)
       if (ch === " " || ch === "\t") {
         i++
         break
