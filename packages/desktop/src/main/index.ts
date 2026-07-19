@@ -25,6 +25,7 @@ import { recoverInterruptedGrokRuns } from "./grok-runs"
 import { createAgentHandler, saveAgentSession } from "./telegram/agent-handler"
 import { buildAgentInput } from "./telegram/agent-input"
 import { acquireSingleInstanceLock, createMainWindow, loadRenderer, APP_NAME } from "./window-factory"
+import { installBundledSkills } from "./bundled-skills"
 
 let mainWindow: BrowserWindow | null = null
 const backend = new GrokBuildBackend()
@@ -85,6 +86,7 @@ async function createAndLoadMainWindow(): Promise<BrowserWindow> {
 app.whenReady().then(async () => {
   _logger = initLogging()
   writeLog("info", `${APP_NAME} starting — pid=${process.pid}`)
+  try { const installedSkills = await installBundledSkills(); if (installedSkills) writeLog("info", `Installed ${installedSkills} bundled Grok skills`) } catch (error) { writeLog("warn", `Bundled skill install skipped: ${String(error)}`) }
   try { recoverInterruptedGrokRuns() } catch (error) { writeLog("error", `Interrupted run recovery failed: ${String(error)}`) }
 
   // Register all IPC handlers before window creation

@@ -16,6 +16,9 @@ const config: Configuration = {
     "out/**/*",
     "!out/**/*.map",
   ],
+  extraResources: [
+    { from: "resources/grok-skills", to: "grok-skills" },
+  ],
   extraMetadata: {
     main: "out/main/index.js",
   },
