@@ -10,6 +10,8 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - **Project or project-free:** use a repository, temporary Scratch space, or a persistent **Agent (no project)** working directory.
 - **Persistent continuity:** conversations, checkpoints, model/workspace affinity, native session IDs, queues, recovery context, and interrupted work survive relaunches.
 - **Remote agent:** Telegram includes pairing, queues, steering, interruption, lifecycle controls, rich formatting, live progress, model/project pickers, and private reasoning.
+- **Telegram security mode:** NemoClaw-inspired host policy with default-deny guidance, sensitive-task approvals, bounded audit events, secret-leak prevention, `/security`, `/sandbox`, `/approve`, and `/deny`—without replacing the Grok Build harness with OpenShell.
+- **Research-ready skills:** Bundled skills install into the local Grok skill directory for Tavily, Brave, X search via `xurl`, private SearXNG, BrowserOS/browser-control, source verification, and tool discovery. Private endpoints and credentials stay local and are never committed.
 - **Hybrid durable memory:** OpenClaw/Hermes-style `SOUL.md`, `USER.md`, `AGENTS.md`, and curated `MEMORY.md` files provide identity and policy, while the optional local [duckbot-rag-memory](https://github.com/Franzferdinan51/duckbot-rag-memory) layer recalls only relevant long-term context and captures successful turns episodically.
 - **Provider choice:** xAI, OpenAI Codex OAuth, MiniMax OAuth/API, NVIDIA Build/NIM, OpenRouter, LM Studio, ODS, and OpenAI-compatible endpoints.
 - **Built and tested cross-platform:** signed local macOS DMG/ZIP artifacts and Windows x64 NSIS installers are produced by the release workflow.
@@ -71,6 +73,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Per-chat response profiles keep the agent fluid without removing capabilities: Fast uses the direct Grok Build agent, Balanced applies a short adaptive MoA consultation to substantial tasks, and Deep uses the full configured council.
 - DuckBot RAG stays warm in a persistent local process, avoiding repeated Python/model startup latency while preserving semantic recall and graceful fallback.
 - Hermes-style lifecycle commands add `/retry`, `/undo`, `/compress`, and per-session `/reasoning`, with optional idle resets and corrected-transcript recovery after rewinds.
+- `/models` exposes Hermes-style **MoA Balanced** and **MoA Deep** presets alongside direct models; selecting a direct model disables MoA for that chat.
 - Telegram tasks retain Grok Build tools, web search, verification, subagents, optional MoA, run history, progress updates, and schema-validated scheduling when Agent App Controls are enabled.
 - DuckBot RAG is auto-detected from common local install locations and enabled by default for desktop/scheduled agent work. It degrades safely to filesystem soul files if the local embedding service is offline. Personal memory access from Telegram is a separate, explicit opt-in because authorized group chats may contain other people.
 - When an encrypted NVIDIA Build/NIM key is configured, DuckBot RAG can use NVIDIA's `nvidia/nemotron-3-embed-1b` embedding model through the same provider boundary. Switching embedding models requires re-indexing the existing vector store; vectors from different models must not be mixed.
@@ -132,6 +135,18 @@ Output is written to `packages/desktop/dist`.
 5. Choose **Agent (no project)** for persistent general-purpose work, **Scratch** for temporary isolated work, or **Open project** for an existing codebase.
 6. Use the Agent tab to configure Telegram, subagents, MoA, safe app controls, and shared desktop/remote runtime defaults; enable Preview or automatic learning only when needed.
 
+Bundled research skills are installed on first launch. Configure private providers
+locally, never in GitHub:
+
+```text
+TAVILY_API_KEY=<local secret>
+BRAVE_API_KEY=<local secret>
+SEARXNG_URL=<private/local endpoint>
+```
+
+The Telegram agent also recognizes authenticated `xurl` and the verified
+BrowserOS/browser-control helper when they are installed.
+
 ## Chat workflow
 
 Each conversation is stored atomically outside the settings file and owns its workspace, selected model, transcript, checkpoint, and resumable Grok session. Press **Enter** to send, **Shift+Enter** for a new line, and use Up/Down at the input boundary for prompt history. Messages submitted during a run are queued and drained automatically. Stopping a run preserves partial output and continuity for the next instruction; **New chat** archives the current conversation in History and starts a clean backend session.
@@ -167,6 +182,11 @@ Connect a dedicated BotFather bot in the **Agent** tab, send `/start`, and appro
 /menu                 rich control panel
 /status               backend, model, session, queue, and working directory
 /models               inline model selector
+/moa                  MoA settings and Balanced/Deep presets
+/security             NemoClaw-inspired policy status
+/sandbox              alias for /security
+/approve              approve a held sensitive task
+/deny                 deny a held sensitive task
 /project              Agent, Scratch, or saved-project selector
 /run <instruction>    execute an agent turn
 /steer <instruction>  prioritize the next turn
@@ -213,6 +233,8 @@ pnpm sync:grok-upstream
 - Provider API keys use OS encryption; OAuth tokens are not copied into desktop settings.
 - Agent App Controls are opt-in, typed, and allowlisted.
 - Automatic approvals are visibly marked because they reduce interactive safety prompts.
+- NemoClaw/OpenShell is not installed or required. The Telegram policy layer preserves the existing Grok Build CLI and harness.
+- Search credentials and private SearXNG endpoints are read only from local configuration/environment and are never included in skills, README files, or commits.
 - The app does not automatically load or unload LM Studio models.
 
 ## Verification
@@ -239,6 +261,7 @@ upstream/hermes/        Retained MIT Hermes reference sources and notices
 
 - [xai-org/grok-build](https://github.com/xai-org/grok-build) — coding-agent backend and headless/model contracts.
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — MIT desktop, MoA, OAuth, and agent-workflow patterns.
+- [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) — security-policy and approval patterns; only the lightweight host-side policy layer is used here.
 - [openclaw/openclaw](https://github.com/openclaw/openclaw) — channel, scheduling, skills, model-routing, and OAuth reference patterns.
 - [MiniMax-AI/cli](https://github.com/MiniMax-AI/cli) — official MiniMax OAuth and runtime integration.
 - [dyad-sh/dyad](https://github.com/dyad-sh/dyad) — Apache-2.0 live-preview patterns.
@@ -256,6 +279,7 @@ No third-party branding, proprietary assets, or unsupported provider behavior is
 - [Install and build](docs/INSTALL.md)
 - [Telegram](docs/TELEGRAM.md)
 - [Testing and release checks](docs/TESTING.md)
+- [Search providers and private configuration](docs/SEARCH-PROVIDERS.md)
 - [Live Preview](docs/PREVIEW.md)
 
 ## License
