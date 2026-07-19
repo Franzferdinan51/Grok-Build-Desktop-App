@@ -261,9 +261,10 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     if (name === "restart") {
       if (deps.getRunningChat() && deps.getRunningChat() !== chatId) return "Another chat owns the active task. Stop it there before restarting the agent."
       if (deps.getRunningChat() === chatId) { deps.setCancelled(true); backend.cancel() }
+      deps.telegram.stop()
       setTimeout(() => {
         writeLog("info", `Telegram-authorized agent restart requested by chat ${chatId}`)
-        app.relaunch()
+        app.relaunch({ execPath: process.execPath, args: process.argv.slice(1) })
         app.exit(0)
       }, 2_000).unref()
       return "🔄 Restarting Grok Build Desktop and its Telegram agent. I’ll resume polling automatically when it is back."

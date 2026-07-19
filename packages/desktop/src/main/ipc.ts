@@ -71,7 +71,13 @@ export function registerIpcHandlers(deps: Deps): void {
     // Stop the entire Grok child process group before relaunching so Restart
     // cannot leave MCP/tool children behind consuming CPU or memory.
     deps.backend().cancel()
-    setTimeout(() => { app.relaunch(); app.exit(0) }, 1_000).unref()
+    setTimeout(() => {
+      // Preserve the packaged executable and renderer arguments. Calling
+      // relaunch() with Electron's implicit defaults can relaunch the helper
+      // process (or no app at all) in packaged builds.
+      app.relaunch({ execPath: process.execPath, args: process.argv.slice(1) })
+      app.exit(0)
+    }, 1_000).unref()
     return { ok: true }
   })
   ipcMain.handle("memory:status", () => memory.status())
