@@ -30,7 +30,7 @@ export type TelegramQueueEntry = { chatId: string; text: string; queuedAt: numbe
 export type TelegramAgentSession = {
   sessionId?: string; model?: string; workspace?: string; updatedAt: number
   transcript?: { role: "user" | "assistant"; text: string }[]
-  pendingApproval?: { task: string; reason: string; requestedAt: number }; approvedTask?: string
+  pendingApproval?: { task: string; reason: string; requestedAt: number }; approvedTask?: string; moaPreset?: "balanced" | "deep"
   lastTask?: string; compressedSummary?: string; thinking?: boolean; mode?: "fast" | "balanced" | "deep"
 }
 
@@ -73,7 +73,7 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
         const index = Number(callback.payload)
         const catalog = await backend.models(); const selected = catalog.models[index]
         if (!selected) return "That model is no longer available. Open /models again."
-        deps.saveSession(chatId, { model: selected }); return `✓ Model set to ${selected}`
+        deps.saveSession(chatId, { model: selected, moaPreset: undefined }); getStore().set("moa.enabled", false); return `✓ Direct model set to ${selected}`
       }
       if (callback.kind === "pick_project_index") {
         const index = Number(callback.payload)
@@ -108,6 +108,21 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
         const currentModel = deps.session(chatId).model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || catalog.models[0] || ""
         const references = ((getStore().get("moa.referenceModels") as string[] | undefined) || []).filter((model) => catalog.models.includes(model)).slice(0, 8)
         const aggregator = (getStore().get("moa.aggregatorModel") as string | undefined) || currentModel
+        if (callback.kind === "moa_preset") {
+          const preset = callback.payload as "balanced" | "deep"
+          if (preset !== "balanced" && preset !== "deep") return "Unknown MoA preset. Use /models again."
+          let nextReferences = references
+          if (nextReferences.length < 2) {
+            nextReferences = catalog.models.filter((model) => model !== aggregator).slice(0, 2)
+            if (nextReferences.length < 2) nextReferences = catalog.models.slice(0, 2)
+            getStore().set("moa.referenceModels", nextReferences)
+          }
+          if (nextReferences.length < 2) return "MoA needs at least 2 available models. Configure another provider or model first."
+          getStore().set("moa.enabled", true)
+          getStore().set("moa.aggregatorModel", aggregator)
+          deps.saveSession(chatId, { moaPreset: preset, mode: preset })
+          return buildTelegramMoaMenu(true, nextReferences, aggregator)
+        }
         if (callback.kind === "moa_toggle") {
           const nextEnabled = !Boolean(getStore().get("moa.enabled"))
           let nextReferences = references
@@ -278,7 +293,7 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       if (!argument) return "Usage: /model <name>\nUse /models to see available models."
       const catalog = await backend.models()
       if (!catalog.models.includes(argument)) return `Unknown model: ${argument}\nUse /models to see available models.`
-      deps.saveSession(chatId, { model: argument })
+      deps.saveSession(chatId, { model: argument, moaPreset: undefined }); getStore().set("moa.enabled", false)
       return `Default model set to ${argument}.`
     }
     if (name === "projects" || name === "project") {

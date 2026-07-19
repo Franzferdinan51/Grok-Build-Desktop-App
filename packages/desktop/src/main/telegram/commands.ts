@@ -37,6 +37,7 @@ export const TELEGRAM_CALLBACK_PREFIXES = [
   "moa_ref:",
   "moa_aggregator",
   "moa_agg:",
+  "moa_preset:",
   "menu:",
 ] as const
 
@@ -53,6 +54,7 @@ export type TelegramCallbackKind =
   | "moa_ref"
   | "moa_aggregator"
   | "moa_agg"
+  | "moa_preset"
   | "menu"
 
 export function parseTelegramCallback(text: string): { kind: TelegramCallbackKind; payload: string } | null {
@@ -77,6 +79,7 @@ function prefixToKind(prefix: typeof TELEGRAM_CALLBACK_PREFIXES[number]): Telegr
   if (prefix === "moa_ref:") return "moa_ref"
   if (prefix === "moa_aggregator") return "moa_aggregator"
   if (prefix === "moa_agg:") return "moa_agg"
+  if (prefix === "moa_preset:") return "moa_preset"
   return "menu"
 }
 
@@ -107,6 +110,7 @@ export function buildTelegramModelPicker(models: string[], current: string, limi
     text: `Choose a direct model\nCurrent: ${current}\nMoA: ${moaEnabled ? "On" : "Off"}`,
     buttons: [
       [{ text: `${moaEnabled ? "🟢" : "⚪️"} MoA ${moaEnabled ? "On" : "Off"}`, data: "moa_toggle" }, { text: "⚙️ Configure MoA", data: "moa_menu" }],
+      [{ text: "🧩 MoA Balanced", data: "moa_preset:balanced" }, { text: "🧠 MoA Deep", data: "moa_preset:deep" }],
       ...models.slice(0, limit).map((entry, index) => [{ text: `${entry === current ? "✓ " : ""}${entry}`.slice(0, 60), data: `pick_model:${index}` }]),
     ],
   }
@@ -117,6 +121,7 @@ export function buildTelegramMoaMenu(enabled: boolean, references: string[], agg
     text: `Mixture of Agents\nStatus: ${enabled ? "On" : "Off"}\nReferences: ${references.length ? references.join(", ") : "None selected"}\nAggregator: ${aggregator || "Direct model"}\n\nBalanced uses up to 2 references for substantial tasks; Deep uses all selected references.`,
     buttons: [
       [{ text: enabled ? "🟢 Disable MoA" : "⚪️ Enable MoA", data: "moa_toggle" }],
+      [{ text: "🧩 Use Balanced preset", data: "moa_preset:balanced" }, { text: "🧠 Use Deep preset", data: "moa_preset:deep" }],
       [{ text: `🧩 Reference models (${references.length})`, data: "moa_refs" }],
       [{ text: "🎯 Aggregator model", data: "moa_aggregator" }],
       [{ text: "← Direct models", data: "menu:models" }],

@@ -53,7 +53,7 @@ type StoreSchema = {
       sessionId?: string; model?: string; workspace?: string; updatedAt: number
       transcript?: { role: "user" | "assistant"; text: string }[]
       lastTask?: string; compressedSummary?: string; thinking?: boolean; mode?: "fast" | "balanced" | "deep"
-      pendingApproval?: { task: string; reason: string; requestedAt: number }; approvedTask?: string
+      pendingApproval?: { task: string; reason: string; requestedAt: number }; approvedTask?: string; moaPreset?: "balanced" | "deep"
     }>
   }
   nemoclaw: {
