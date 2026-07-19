@@ -11,6 +11,7 @@
 import { execFile, spawn, type ChildProcess } from "child_process"
 import { promisify } from "util"
 import { existsSync } from "fs"
+import { homedir } from "os"
 import { write as writeLog } from "./logging"
 import { resolveGrokBuild } from "./grok-build-resolver"
 import { normalizeBackendStderr } from "./backend-error"
@@ -327,11 +328,15 @@ export class GrokBuildBackend {
     const hostConfig = getStore().get("host") as { browser?: string; desktop?: string; disabled?: boolean } | undefined
     const browserControl = hostConfig?.browser || "/Users/duckets/.openclaw/workspace/tools/browser-control.sh"
     const desktopControl = hostConfig?.desktop || "/Users/duckets/.openclaw/workspace/tools/desktop-control.sh"
+    const searchHelper = process.env.GROK_SEARCH_HELPER || `${homedir()}/.openclaw/workspace/tools/web-search-fallback.sh`
     const hostControlsEnabled = !hostConfig?.disabled && (existsSync(browserControl) || existsSync(desktopControl))
     const hostControls = hostControlsEnabled
       ? `\n\n## Verified host browser and computer-use controls\n${existsSync(browserControl) ? `Browser: ${browserControl} status | ${browserControl} open <https-url>` : ""}\n${existsSync(desktopControl) ? `macOS CuA preflight: ${desktopControl} status. After a successful preflight, use the installed Peekaboo/Lobster desktop-control workflow for native UI actions.` : ""}\nTreat only exit code 0 plus JSON ok:true and observed state as success. Empty output, daemon startup, shell open commands, or an unverified tool call are failures. If permission_required is true, report the exact missing permission and never claim the action completed. Never kill or replace the user's normal Chrome profile.`
       : ""
-    let effectivePrompt = `${memoryContext}\n\n## Current instruction\n${input.prompt}${hostControls}`
+    const searchControls = existsSync(searchHelper)
+      ? `\n\n## Verified multi-provider search helper\nSearch fallback: ${searchHelper} search <query>. It uses configured local provider credentials without exposing them. Prefer the bundled search-providers skill, cross-check important claims, and never print private endpoint values or API keys.`
+      : ""
+    let effectivePrompt = `${memoryContext}\n\n## Current instruction\n${input.prompt}${hostControls}${searchControls}`
     let effectiveModel = input.model
     let visibleAssistant = ""
     const deliver = onEvent
