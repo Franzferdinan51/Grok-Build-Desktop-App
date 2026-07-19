@@ -30,7 +30,7 @@ export function RunsPanel(props: RunsPanelProps) {
         {(run) => <article class="run-row">
           <div>
             <strong>{run.prompt}</strong>
-            <span>{run.cwd}{run.model ? ` · ${run.model}` : ""}{run.grokSessionId ? ` · session ${run.grokSessionId}` : ""}{run.error ? ` · ${run.error}` : ""}</span>
+            <span>{run.cwd}{run.model ? ` · ${run.model}` : ""}{run.grokSessionId ? ` · session ${run.grokSessionId}` : ""}{run.latencyMs !== undefined ? ` · ${(run.latencyMs / 1000).toFixed(1)}s` : ""}{run.tokensIn !== undefined ? ` · in ${run.tokensIn.toLocaleString()}` : ""}{run.tokensOut !== undefined ? ` · out ${run.tokensOut.toLocaleString()}` : ""}{run.costUsd !== undefined ? ` · $${run.costUsd.toFixed(4)}` : ""}{run.advisorCount ? ` · advisors ${run.advisorCount}${run.advisorFailures ? ` (${run.advisorFailures} failed)` : ""}` : ""}{run.errorClass ? ` · ${run.errorClass}` : ""}{run.error ? ` · ${run.error}` : ""}</span>
           </div>
           <div class={`run-status run-status--${run.status}`}>{run.status}</div>
         </article>}

@@ -466,28 +466,31 @@ ${referenceSection}
       let settled = false
       let inactivityTimeout = ""
       let inactivityWarningTimer: ReturnType<typeof setTimeout>
-      let inactivityKillTimer: ReturnType<typeof setTimeout>
+      let inactivityEscalationTimer: ReturnType<typeof setTimeout>
       let completionTimer: ReturnType<typeof setTimeout> | undefined
       let protocolEnded = false
       const armInactivityTimer = () => {
         clearTimeout(inactivityWarningTimer)
-        clearTimeout(inactivityKillTimer)
+        clearTimeout(inactivityEscalationTimer)
         inactivityWarningTimer = setTimeout(() => {
           onEvent({ type: "thought", data: "The provider is still working but has not streamed output for 3 minutes. Keeping the task alive…\n" })
         }, 180_000)
         inactivityWarningTimer.unref()
-        inactivityKillTimer = setTimeout(() => {
-          inactivityTimeout = "Grok Build produced no output for 10 minutes. The stalled provider request was stopped; retry the task or choose another model."
-          this.terminateProcessTree(child, "SIGTERM")
+        inactivityEscalationTimer = setTimeout(() => {
+          // Never kill a potentially recoverable provider request behind the
+          // user's back. The renderer already exposes Stop; this event makes
+          // the stalled state explicit so the user can wait or cancel.
+          inactivityTimeout = "Grok Build has been silent for 10 minutes. It is still running; choose Stop to cancel or keep waiting."
+          onEvent({ type: "thought", data: `${inactivityTimeout}\n` })
         }, 600_000)
-        inactivityKillTimer.unref()
+        inactivityEscalationTimer.unref()
       }
       armInactivityTimer()
       const finish = (callback: () => void) => {
         if (settled) return
         settled = true
         clearTimeout(inactivityWarningTimer)
-        clearTimeout(inactivityKillTimer)
+        clearTimeout(inactivityEscalationTimer)
         if (completionTimer) clearTimeout(completionTimer)
         if (this.current === child) this.current = null
         callback()

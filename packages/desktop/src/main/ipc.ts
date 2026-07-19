@@ -9,7 +9,7 @@ import { LocalStudioController } from "./local-studio"
 import { safeOpenExternal, UnsafeExternalUrlError } from "./security"
 import { addProject, inspectProject, listProjects, removeProject } from "./projects"
 import { GrokBuildBackend, type GrokBuildEvent, type RunTaskInput } from "./grok-build-backend"
-import { finishGrokRun, listGrokRuns, startGrokRun } from "./grok-runs"
+import { classifyRunError, finishGrokRun, listGrokRuns, startGrokRun, usageMetrics } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
 import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
@@ -83,9 +83,11 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("memory:status", () => memory.status())
   ipcMain.handle("memory:recall", (_event, query: string) => memory.context(query))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
-    const run = startGrokRun(input)
+    const run = startGrokRun({ ...input, advisorCount: input.moa?.referenceModels.filter(Boolean).slice(0, 8).length })
     let grokSessionId: string | undefined
     let cancelled = false
+    let usage: unknown
+    let advisorFailures = 0
     let eventTimer: ReturnType<typeof setTimeout> | undefined
     let pendingEvents: GrokBuildEvent[] = []
     const flushEvents = () => {
@@ -98,6 +100,8 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     const queueEvent = (update: GrokBuildEvent) => {
       if (update.type === "cancelled") cancelled = true
+      if (update.type === "end") usage = update.usage
+      if (update.type === "thought" && typeof update.data === "string" && /Reference \d+ failed and was skipped\./.test(update.data)) advisorFailures += 1
       const previous = pendingEvents[pendingEvents.length - 1]
       if ((update.type === "text" || update.type === "thought") && previous?.type === update.type && typeof previous.data === "string" && typeof update.data === "string") {
         previous.data += update.data
@@ -113,11 +117,11 @@ export function registerIpcHandlers(deps: Deps): void {
         queueEvent(update)
       })
       flushEvents()
-      finishGrokRun(run.id, { status: cancelled ? "cancelled" : "completed", grokSessionId })
+      finishGrokRun(run.id, { status: cancelled ? "cancelled" : "completed", grokSessionId, latencyMs: Date.now() - run.startedAt, advisorFailures, ...usageMetrics(usage) })
     } catch (error) {
       flushEvents()
       const message = error instanceof Error ? error.message : String(error)
-      finishGrokRun(run.id, { status: "failed", grokSessionId, error: message })
+      finishGrokRun(run.id, { status: "failed", grokSessionId, error: message, latencyMs: Date.now() - run.startedAt, advisorFailures, ...usageMetrics(usage), errorClass: classifyRunError(message) })
       throw error
     }
     return { ok: true, runId: run.id, grokSessionId }

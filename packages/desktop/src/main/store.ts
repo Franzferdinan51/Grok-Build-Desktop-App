@@ -17,6 +17,14 @@ export type GrokRunRecord = {
   status: "running" | "completed" | "failed" | "cancelled"
   grokSessionId?: string
   error?: string
+  /** Structured local observability. Cost stays absent unless the CLI reports it. */
+  latencyMs?: number
+  tokensIn?: number
+  tokensOut?: number
+  costUsd?: number
+  advisorCount?: number
+  advisorFailures?: number
+  errorClass?: string
 }
 
 export type ScheduledGrokTask = {
