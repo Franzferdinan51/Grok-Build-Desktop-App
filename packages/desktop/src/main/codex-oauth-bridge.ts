@@ -27,6 +27,59 @@ print(json.dumps({"token": t, "base_url": c.get("base_url", ""), "account_id": a
 type Credentials = { token: string; base_url: string; account_id?: string }
 export type CodexOAuthModel = { id: string; contextWindow?: number }
 
+/**
+ * ChatGPT's Codex endpoint occasionally emits internal SSE event types that
+ * the Rust Responses decoder used by Grok Build does not know about. In
+ * particular, `response.metadata` is valid upstream traffic but causes the
+ * CLI to abort the whole task with an "unknown variant" serialization error.
+ * Keep the bridge compatible by dropping only that non-content event.
+ */
+export function shouldForwardCodexSseFrame(frame: string): boolean {
+  const event = frame.match(/(?:^|\r?\n)event:\s*([^\r\n\s]+)/)?.[1]
+  if (event === "response.metadata") return false
+  for (const line of frame.split(/\r?\n/)) {
+    if (!line.startsWith("data:")) continue
+    const payload = line.slice(5).trim()
+    if (!payload || payload === "[DONE]") continue
+    try {
+      const parsed = JSON.parse(payload) as { type?: unknown }
+      if (parsed.type === "response.metadata") return false
+    } catch {
+      // Non-JSON SSE data is forwarded unchanged; the upstream decoder owns
+      // validation for those frames.
+    }
+  }
+  return true
+}
+
+async function pipeCodexSse(body: ReadableStream<Uint8Array>, response: ServerResponse): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  const emitFrames = (flush = false) => {
+    while (true) {
+      const match = buffer.match(/\r?\n\r?\n/)
+      if (!match || match.index === undefined) break
+      const end = match.index + match[0].length
+      const frame = buffer.slice(0, match.index)
+      buffer = buffer.slice(end)
+      if (shouldForwardCodexSseFrame(frame)) response.write(frame + match[0])
+    }
+    if (flush && buffer) {
+      if (shouldForwardCodexSseFrame(buffer)) response.write(buffer)
+      buffer = ""
+    }
+  }
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    emitFrames()
+  }
+  buffer += decoder.decode()
+  emitFrames(true)
+}
+
 function hermesPython(): string {
   const candidates = [
     join(homedir(), ".hermes", "hermes-agent", "venv", "bin", "python"),
@@ -175,11 +228,15 @@ export class CodexOAuthBridge {
       }
       response.writeHead(upstream.status, Object.fromEntries([...upstream.headers].filter(([name]) => !["content-encoding", "content-length", "transfer-encoding", "connection"].includes(name.toLowerCase()))))
       if (!upstream.body) { response.end(); return }
-      const reader = upstream.body.getReader()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (!response.write(Buffer.from(value))) await new Promise<void>((resolve) => response.once("drain", resolve))
+      if (String(upstream.headers.get("content-type") || "").includes("text/event-stream")) {
+        await pipeCodexSse(upstream.body, response)
+      } else {
+        const reader = upstream.body.getReader()
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          if (!response.write(Buffer.from(value))) await new Promise<void>((resolve) => response.once("drain", resolve))
+        }
       }
       response.end()
     } catch (error) {

@@ -4,7 +4,7 @@ import { homedir } from "os"
 import { join } from "path"
 import { app } from "electron"
 
-const SKILL_NAMES = ["search-providers", "browser-automation", "source-verification", "tool-discovery"]
+const SKILL_NAMES = ["search-providers", "browser-automation", "desktop-control-lobster", "source-verification", "tool-discovery"]
 
 /** Install only our marked skills; never overwrite a user-created skill. */
 export async function installBundledSkills(): Promise<number> {

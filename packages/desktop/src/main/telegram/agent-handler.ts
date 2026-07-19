@@ -25,6 +25,7 @@ import { getStore } from "../store"
 import type { TelegramBridge } from "../telegram"
 import type { GrokBuildBackend, RunTaskInput, GrokBuildEvent } from "../grok-build-backend"
 import { nemoConfig, nemoStatus, recordNemoAudit, taskApprovalReason } from "../nemoclaw-security"
+import { listGrokSkills } from "../grok-skills"
 
 export type TelegramQueueEntry = { chatId: string; text: string; queuedAt: number }
 export type TelegramAgentSession = {
@@ -268,6 +269,21 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       return "🔄 Restarting Grok Build Desktop and its Telegram agent. I’ll resume polling automatically when it is back."
     }
     if (name === "workspace") return `Active working directory: ${deps.session(chatId).workspace || (getStore().get("workspace.last") as string | undefined) || "Scratch"}`
+    if (name === "skills") {
+      const workspace = deps.session(chatId).workspace || (getStore().get("workspace.last") as string | undefined)
+      const skills = listGrokSkills(workspace)
+      if (!skills.length) return "No Grok Build skills are loaded yet. Restart the desktop app or add a SKILL.md under .grok/skills."
+      return `🧰 Loaded Grok Build skills (${skills.length}):\n${skills.slice(0, 80).map((skill) => `• ${skill.name} — ${skill.description || "available"} [${skill.scope}]`).join("\n")}`
+    }
+    if (name === "tools") {
+      return "🔧 Agent tool surfaces:\n• Grok Build native tools, MCP servers, plugins, skills, memory, sessions, traces, and subagents\n• Multi-provider search: native Grok, Tavily, Brave, authenticated X, private SearXNG, and BrowserOS/browser-control\n• Desktop control: Lobster MCP when configured, plus verified browser/desktop preflight helpers\n• Telegram controls: queues, approvals, schedules, MoA, session recovery, and per-chat workspaces\n\nUse /skills to inspect loaded skills and /status for backend health."
+    }
+    if (name === "repair") {
+      const status = await backend.status()
+      const workspace = deps.session(chatId).workspace || (getStore().get("workspace.last") as string | undefined)
+      const skills = listGrokSkills(workspace)
+      return `${status.available ? "🟢" : "🔴"} Grok Build: ${status.available ? `${status.version || "available"}` : status.error}\n🧰 Skills discovered: ${skills.length}\n${nemoStatus()}\n\nRead-only repair checks complete. No sessions, credentials, or project files were changed.`
+    }
     if (name === "status" || name === "health") {
       const status = await backend.status()
       const catalog = await backend.models()

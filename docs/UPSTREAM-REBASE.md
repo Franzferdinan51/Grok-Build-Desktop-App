@@ -1,5 +1,12 @@
 # Upstream rebase: OpenClaw + Hermes + Z.ai ZCode
 
+The Telegram agent also adapts the MIT-licensed
+[desktop-control-lobster-edition-skill](https://github.com/Franzferdinan51/desktop-control-lobster-edition-skill)
+as a bundled Grok Build skill. Its upstream copyright notice is retained in
+that project's license; only the safety guidance and integration boundary are
+adapted here. The MCP gateway is optional and is never installed or configured
+with private endpoints by the desktop app.
+
 ## Correct source classification
 
 | Product | Source status | What this project may use |

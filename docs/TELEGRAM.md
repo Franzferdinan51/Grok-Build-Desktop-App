@@ -43,6 +43,9 @@ The Agent tab is the desktop control plane for the same persistent agent. Runtim
 - `/security on|off` — enable or disable the policy layer
 - `/security approvals on|off` — control approval gating for sensitive tasks
 - `/approve` / `/deny` — resolve a held destructive, external, network, or credential-related task
+- `/skills` — list the Grok Build skills loaded for the active workspace
+- `/tools` — show native, search, browser, desktop-control, and Telegram tool surfaces
+- `/repair` — run safe read-only backend, skill, and policy health checks
 
 The Agent tab can optionally reset remote sessions after a configured number of idle hours. A retry, undo, compaction, or idle reset starts a clean native Grok session and supplies only the retained visible context, preventing removed replies or private reasoning from returning through native session state.
 - `/menu`, `/help` — show controls

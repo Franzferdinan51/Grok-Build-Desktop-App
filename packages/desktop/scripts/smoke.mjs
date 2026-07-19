@@ -29,6 +29,7 @@ import { validateAppAction, validateAppActions } from "../src/main/app-actions.t
 import { validateAppAction as validateAppActionRenderer } from "../src/renderer/app-actions.ts"
 import { buildManagedModelsBlock, spliceManagedModels } from "../src/main/model-config-block.ts"
 import { buildBaseArgs, compatibleCliArgs, promptArgsFor, KNOWN_FLAG_NAMES } from "../src/main/grok-args.ts"
+import { shouldForwardCodexSseFrame } from "../src/main/codex-oauth-bridge.ts"
 
 const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
@@ -258,6 +259,14 @@ assert.equal(normalizeBackendStderr("permission denied for /usr/local/bin/grok")
 // Empty / whitespace-only stderr stays empty.
 assert.equal(normalizeBackendStderr(""), "")
 assert.equal(normalizeBackendStderr("   \n  "), "")
+
+// The ChatGPT Codex stream can include an internal response.metadata SSE
+// event that Grok Build's Rust Responses decoder does not understand. The
+// local OAuth bridge must remove that event while preserving content events.
+assert.equal(shouldForwardCodexSseFrame('event: response.metadata\ndata: {"type":"response.metadata"}'), false)
+assert.equal(shouldForwardCodexSseFrame('data: {"type":"response.metadata","id":"internal"}'), false)
+assert.equal(shouldForwardCodexSseFrame('event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"hello"}'), true)
+assert.equal(shouldForwardCodexSseFrame('data: [DONE]'), true)
 // Garbage that looks JSON-ish but isn't must not crash and must pass through.
 assert.equal(normalizeBackendStderr("prefix { not json }"), "prefix { not json }")
 
