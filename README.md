@@ -14,7 +14,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - **Research-ready skills:** Bundled skills install into the local Grok skill directory for Tavily, Brave, X search via `xurl`, private SearXNG, BrowserOS/browser-control, source verification, and tool discovery. Private endpoints and credentials stay local and are never committed.
 - **Hybrid durable memory:** OpenClaw/Hermes-style `SOUL.md`, `USER.md`, `AGENTS.md`, and curated `MEMORY.md` files provide identity and policy, while the optional local [duckbot-rag-memory](https://github.com/Franzferdinan51/duckbot-rag-memory) layer recalls only relevant long-term context and captures successful turns episodically.
 - **Provider choice:** xAI, OpenAI Codex OAuth, MiniMax OAuth/API, NVIDIA Build/NIM, OpenRouter, LM Studio, ODS, and OpenAI-compatible endpoints.
-- **Built and tested cross-platform:** signed local macOS DMG/ZIP artifacts and Windows x64 NSIS installers are produced by the release workflow.
+- **Built and tested cross-platform:** macOS arm64 DMG/ZIP artifacts and Windows x64 NSIS installers are produced by the release workflow. macOS signing depends on the machine's configured Apple identity.
 
 ## What is included
 
