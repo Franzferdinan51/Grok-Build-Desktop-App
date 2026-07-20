@@ -1,6 +1,6 @@
 {
   "name": "@grok-build/desktop",
-  "version": "0.1.9",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "package": "electron-builder --config electron-builder.config.ts",
-    "package:mac": "electron-builder --mac --config electron-builder.config.ts",
+    "package:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --config electron-builder.config.ts",
     "package:win": "electron-builder --win --x64 --config electron-builder.config.ts",
     "package:linux": "electron-builder --linux --config electron-builder.config.ts"
   },
@@ -39,11 +39,14 @@
     "solid-js": "^1.9.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.10.0",
+    "chromium-bidi": "^11.0.0",
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
     "electron-builder-squirrel-windows": "^26.15.3",
     "electron-vite": "^3.0.0",
+    "playwright": "^1.61.1",
     "tailwindcss": "^3.4.17",
     "typescript": "~5.7.2",
     "vite": "^6.0.6",

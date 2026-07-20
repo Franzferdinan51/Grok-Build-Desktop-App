@@ -11,7 +11,7 @@
  *  - Grok Build execution backend lifecycle
  */
 
-import { app, BrowserWindow, Menu } from "electron"
+import { app, BrowserWindow, Menu, session } from "electron"
 import { registerIpcHandlers } from "./ipc"
 import { GrokBuildBackend } from "./grok-build-backend"
 import { TelegramBridge } from "./telegram"
@@ -24,7 +24,7 @@ import { getStore } from "./store"
 import { recoverInterruptedGrokRuns } from "./grok-runs"
 import { createAgentHandler, saveAgentSession } from "./telegram/agent-handler"
 import { buildAgentInput } from "./telegram/agent-input"
-import { acquireSingleInstanceLock, createMainWindow, loadRenderer, APP_NAME } from "./window-factory"
+import { acquireSingleInstanceLock, appIconPath, createMainWindow, loadRenderer, APP_NAME } from "./window-factory"
 import { installBundledSkills } from "./bundled-skills"
 
 let mainWindow: BrowserWindow | null = null
@@ -39,11 +39,40 @@ let telegramTaskCancelled = false
 let telegramRunningChat = ""
 let telegramTaskReserved = false
 const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
+const BROWSER_AGENT_PARTITION = "persist:grok-browser-agent"
+const BROWSER_AGENT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
+function configureBrowserAgentSession(): void {
+  session.fromPartition(BROWSER_AGENT_PARTITION).setUserAgent(BROWSER_AGENT_USER_AGENT)
+  app.on("web-contents-created", (_event, contents) => {
+    if (contents.getType() !== "webview") return
+    contents.setWindowOpenHandler(({ url }) => {
+      if (!/^https?:\/\//i.test(url)) return { action: "deny" }
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          title: "Sign in — Grok Browser",
+          width: 560,
+          height: 760,
+          minWidth: 420,
+          minHeight: 560,
+          backgroundColor: "#0d0d0f",
+          webPreferences: {
+            partition: BROWSER_AGENT_PARTITION,
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true,
+          },
+        },
+      }
+    })
+  })
+}
 
 // Single-instance lock: a second launch would start a second Telegram polling
 // loop on the same bot token (Telegram allows only one getUpdates owner) and
 // race on the same settings file. Focus the existing window instead.
-if (!acquireSingleInstanceLock(() => {
+if (process.env.GROK_BUILD_UI_SMOKE !== "1" && !acquireSingleInstanceLock(() => {
   // Focus the existing window on the second launch.
   const windows = BrowserWindow.getAllWindows()
   if (windows.length) {
@@ -88,6 +117,8 @@ app.whenReady().then(async () => {
   writeLog("info", `${APP_NAME} starting — pid=${process.pid}`)
   try { const installedSkills = await installBundledSkills(); if (installedSkills) writeLog("info", `Installed ${installedSkills} bundled Grok skills`) } catch (error) { writeLog("warn", `Bundled skill install skipped: ${String(error)}`) }
   try { recoverInterruptedGrokRuns() } catch (error) { writeLog("error", `Interrupted run recovery failed: ${String(error)}`) }
+  if (process.platform === "darwin" && app.dock) app.dock.setIcon(appIconPath())
+  configureBrowserAgentSession()
 
   // Register all IPC handlers before window creation
   registerIpcHandlers({

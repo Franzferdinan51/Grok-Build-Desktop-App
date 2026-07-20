@@ -76,6 +76,7 @@ export type RunTaskInput = {
   promptFile?: string
   promptJson?: string
   sessionId?: string
+  fallbackModel?: string
   noPlan?: boolean
   resumeFallbackPrompt?: string
   longTermMemory?: boolean
@@ -540,6 +541,28 @@ ${referenceSection}
       if (input.longTermMemory !== false) void this.longTermMemory.remember(input.prompt, visibleAssistant, input.cwd)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      const transientSerializationFailure = !input.resume && /serialization error: missing field [`']?created|error decoding response body/i.test(message)
+      if (transientSerializationFailure) {
+        onEvent({ type: "thought", data: "The model provider returned a malformed streaming event. Retrying this clean turn once…\n" })
+        try {
+          await runChild(compatibleArgs)
+          if (input.longTermMemory !== false) void this.longTermMemory.remember(input.prompt, visibleAssistant, input.cwd)
+          return
+        } catch (retryError) {
+          const retryMessage = retryError instanceof Error ? retryError.message : String(retryError)
+          const fallbackModel = input.fallbackModel?.trim()
+          const canFailOver = Boolean(fallbackModel && fallbackModel !== input.model && /serialization error: missing field [`']?created|error decoding response body/i.test(retryMessage))
+          if (!canFailOver) throw retryError
+          onEvent({ type: "thought", data: `The selected model returned malformed events twice. Finishing this browser step with ${fallbackModel} instead…\n` })
+          const fallbackArgs = [...compatibleArgs]
+          const modelIndex = fallbackArgs.indexOf("--model")
+          if (modelIndex >= 0) fallbackArgs.splice(modelIndex, 2, "--model", fallbackModel!)
+          else if (supportedFlags.has("--model")) fallbackArgs.push("--model", fallbackModel!)
+          await runChild(fallbackArgs)
+          if (input.longTermMemory !== false) void this.longTermMemory.remember(input.prompt, visibleAssistant, input.cwd)
+          return
+        }
+      }
       const aggregatorProviderFailed = Boolean(input.moa && input.model && effectiveModel && input.model !== effectiveModel && /no output for \d+ minutes|auth|unauthorized|forbidden|rate.?limit|serialization|connection|timed? ?out/i.test(message))
       if (aggregatorProviderFailed) {
         onEvent({ type: "thought", data: `The configured MoA aggregator (${effectiveModel}) was unavailable. Retrying once with the session model (${input.model}).\n` })

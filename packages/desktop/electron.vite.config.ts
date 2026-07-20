@@ -6,6 +6,10 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
+        // Playwright loads optional protocol helpers with CommonJS `require`.
+        // Keeping it external lets Electron run Playwright's supported Node
+        // package directly instead of bundling that loader into our ESM main.
+        external: ["playwright", "playwright-core", "chromium-bidi"],
         input: {
           index: resolve(__dirname, "src/main/index.ts"),
         },

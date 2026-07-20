@@ -19,6 +19,10 @@ export type MainWindowOptions = {
   onClosed?: () => void
 }
 
+export const appIconPath = (): string => app.isPackaged
+  ? join(process.resourcesPath, "icon.png")
+  : join(__dirname, "../../resources/icon.png")
+
 export function createMainWindow(opts: MainWindowOptions = {}): BrowserWindow {
   const state = windowStateKeeper({
     defaultWidth: 1280,
@@ -33,6 +37,7 @@ export function createMainWindow(opts: MainWindowOptions = {}): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     title: APP_NAME,
+    icon: appIconPath(),
     backgroundColor: "#0d0d0f",
     show: false, // show after ready-to-show
     webPreferences: {
@@ -40,6 +45,10 @@ export function createMainWindow(opts: MainWindowOptions = {}): BrowserWindow {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      // The Browser Agent owns its embedded browsing surface. It remains
+      // sandboxed with Node disabled; navigation is still mediated by the
+      // Browser Agent's separate Playwright/BrowserOS control channel.
+      webviewTag: true,
     },
   })
 

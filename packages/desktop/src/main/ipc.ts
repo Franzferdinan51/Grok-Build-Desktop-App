@@ -11,6 +11,7 @@ import { addProject, inspectProject, listProjects, removeProject } from "./proje
 import { GrokBuildBackend, type GrokBuildEvent, type RunTaskInput } from "./grok-build-backend"
 import { classifyRunError, finishGrokRun, listGrokRuns, startGrokRun, usageMetrics } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
+import { BrowserManager } from "./browser-manager"
 import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
@@ -27,7 +28,10 @@ type Deps = {
   preview: () => PreviewServer
 }
 
+const browserManager = new BrowserManager()
+
 let previousPreviewScreenshot: string | undefined
+let previousBrowserAgentScreenshot: string | undefined
 
 export function registerIpcHandlers(deps: Deps): void {
   const memory = new DuckbotMemory()
@@ -239,5 +243,25 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("dialog:open-file", async (_event, options?: { filters?: { name: string; extensions: string[] }[] }) =>
     dialog.showOpenDialog({ properties: ["openFile"], filters: options?.filters }))
   ipcMain.handle("dialog:open-directory", async () => dialog.showOpenDialog({ properties: ["openDirectory"] }))
+
+  // Browser Agent IPC handlers
+  ipcMain.handle("browser:status", async () => browserManager.status())
+  ipcMain.handle("browser:nav", async (_event, url: string) => browserManager.nav(url))
+  ipcMain.handle("browser:snapshot", async () => browserManager.snapshot())
+  ipcMain.handle("browser:click", async (_event, selector: string) => browserManager.click(selector))
+  ipcMain.handle("browser:type", async (_event, selector: string, text: string) => browserManager.type(selector, text))
+  ipcMain.handle("browser:screenshot", async () => browserManager.screenshot())
+  ipcMain.handle("browser:save-screenshot", async (_event, dataUrl: string) => {
+    if (typeof dataUrl !== "string" || dataUrl.length > 20_000_000) throw new Error("Invalid browser screenshot")
+    const encoded = dataUrl.match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/)?.[1]
+    if (!encoded) throw new Error("Browser screenshot must be a PNG data URL")
+    const screenshotPath = join(app.getPath("temp"), `grok-browser-agent-${Date.now()}.png`)
+    await writeFile(screenshotPath, Buffer.from(encoded, "base64"))
+    if (previousBrowserAgentScreenshot && previousBrowserAgentScreenshot !== screenshotPath) await unlink(previousBrowserAgentScreenshot).catch(() => {})
+    previousBrowserAgentScreenshot = screenshotPath
+    return screenshotPath
+  })
+  ipcMain.handle("browser:stop", async () => browserManager.stop())
+
   writeLog("info", "IPC handlers registered")
 }

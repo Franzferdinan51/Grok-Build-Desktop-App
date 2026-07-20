@@ -3,6 +3,7 @@
  */
 
 import type { Configuration } from "electron-builder"
+import { execFileSync } from "node:child_process"
 
 const config: Configuration = {
   appId: "ai.grokbuild.desktop",
@@ -18,9 +19,13 @@ const config: Configuration = {
   ],
   extraResources: [
     { from: "resources/grok-skills", to: "grok-skills" },
+    { from: "resources/icon.png", to: "icon.png" },
   ],
   extraMetadata: {
     main: "out/main/index.js",
+  },
+  afterPack: async (context) => {
+    if (context.electronPlatformName === "darwin") execFileSync("xattr", ["-cr", context.appOutDir])
   },
   mac: {
     icon: "icon.icns",
