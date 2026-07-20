@@ -55,10 +55,22 @@ try {
   const composer = window.locator(".grok-browser-composer textarea")
   await composer.fill(`Open ${testUrl}`)
   await window.locator(".grok-browser-composer button", { hasText: "Send" }).click()
-  await window.waitForFunction(() => {
-    const view = document.querySelector(".embedded-browser webview")
-    return typeof view?.getURL === "function" && view.getURL().includes("127.0.0.1")
-  }, undefined, { timeout: 180_000 })
+  try {
+    await window.waitForFunction(() => {
+      const view = document.querySelector(".embedded-browser webview")
+      const navigated = typeof view?.getURL === "function" && view.getURL().includes("127.0.0.1")
+      const agentStoppedWithoutNavigating = !document.querySelector(".grok-browser-composer textarea[disabled]")
+        && document.querySelectorAll(".grok-browser-message").length >= 3
+      return navigated || agentStoppedWithoutNavigating
+    }, undefined, { timeout: 180_000 })
+    const currentUrl = await window.locator(".embedded-browser webview").evaluate((view) => typeof view.getURL === "function" ? view.getURL() : "unavailable")
+    assert.match(currentUrl, /127\.0\.0\.1/, `Browser Agent stopped before blank-tab navigation: ${await window.locator(".grok-browser-chat__messages").innerText()}`)
+  } catch (error) {
+    const transcript = await window.locator(".grok-browser-chat__messages").innerText().catch(() => "Browser transcript unavailable")
+    const currentUrl = await window.locator(".embedded-browser webview").evaluate((view) => typeof view.getURL === "function" ? view.getURL() : "unavailable").catch(() => "unavailable")
+    console.error(`Blank-tab navigation failed at ${currentUrl}\n${transcript}`)
+    throw error
+  }
   await window.locator(".grok-browser-composer textarea:not([disabled])").waitFor({ state: "visible", timeout: 180_000 })
   await modelSelector.selectOption("minimax-m2-7")
   assert.equal(await modelSelector.inputValue(), "minimax-m2-7")
@@ -84,6 +96,9 @@ try {
     return hasTask && finished
   }, undefined, { timeout: 180_000 })
   const guestResult = await window.locator(".embedded-browser webview").evaluate(async (view) => view.executeJavaScript(`({ message: document.querySelector('#message').textContent, result: document.querySelector('#result').textContent })`))
+  if (guestResult.message !== "Agent worked" || guestResult.result !== "Applied: DuckBot") {
+    console.error(`Agentic interaction did not complete:\n${await window.locator(".grok-browser-chat__messages").innerText()}`)
+  }
   assert.deepEqual(guestResult, { message: "Agent worked", result: "Applied: DuckBot" })
   const transcript = await window.locator(".grok-browser-chat__messages").innerText()
   assert.doesNotMatch(transcript, /Browser task failed|already running another task/i)

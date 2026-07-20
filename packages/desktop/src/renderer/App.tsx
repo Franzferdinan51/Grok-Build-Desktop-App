@@ -12,6 +12,7 @@ import { createConversationWriter } from "./conversation-save"
 import { STORE_KEYS } from "./store-keys"
 import { RunsPanel } from "./views/RunsPanel"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
+import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
 import "./branding.css"
@@ -651,7 +652,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const mixedModelMoA = references.length >= 2 && new Set(references).size > 1
       const advancedRun = advanced()
       const selectedRunModel = options?.modelOverride?.trim() || model() || undefined
-      const browserFallbackModel = ["minimax-m2-7", catalog().defaultModel || "", ...catalog().models]
+      // Prefer the catalog default for browser failover. MiniMax M3 currently
+      // emits malformed streaming events, while M2.7 often spends its only
+      // constrained turn trying to invoke coding tools instead of returning
+      // the required browser directive.
+      const browserFallbackModel = [catalog().defaultModel || "", "nemotron-3-ultra-550b", "grok-4.5", ...catalog().models]
         .find((candidate) => candidate && candidate !== selectedRunModel)
       const result = await window.api.backend.run(ephemeral
         ? {
@@ -660,14 +665,18 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             model: selectedRunModel,
             fallbackModel: browserFallbackModel || undefined,
             thinking: thinking(),
-            autoApprove: true,
+            autoApprove: false,
             maxTurns: 1,
             disableWebSearch: true,
             subagents: false,
-            permissionMode: "auto",
+            permissionMode: "plan",
             memory: "disabled",
-            noPlan: true,
+            systemPrompt: BROWSER_AGENT_SYSTEM_PROMPT,
+            verbatim: true,
+            jsonSchema: BROWSER_AGENT_DIRECTIVE_SCHEMA,
+            noPlan: false,
             longTermMemory: false,
+            hostControls: false,
           }
         : { prompt: executionPrompt, cwd: runWorkspace, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, resumeFallbackPrompt: resumeSession && recentContext ? withRecentContext(executionPrompt) : undefined, bestOfN: moaEnabled() && !mixedModelMoA ? moaCandidates() : undefined, moa: moaEnabled() && mixedModelMoA ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined, referenceReasoningEffort: moaReferenceEffort(), aggregatorReasoningEffort: moaAggregatorEffort(), referenceTokenBudget: moaReferenceTokenBudget(), context: recentContext || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled(), agent: advancedRun.agent || undefined, agents: advancedRun.agents || undefined, permissionMode: advancedRun.permissionMode, allow: advancedRun.allow.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), deny: advancedRun.deny.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), tools: advancedRun.tools || undefined, disallowedTools: advancedRun.disallowedTools || undefined, memory: advancedRun.memory, sandbox: advancedRun.sandbox || undefined, rules: advancedRun.rules || undefined, systemPrompt: advancedRun.systemPrompt || undefined, verbatim: advancedRun.verbatim, forkSession: advancedRun.forkSession, restoreCode: advancedRun.restoreCode, worktree: advancedRun.worktree, worktreeName: advancedRun.worktreeName || undefined, worktreeRef: advancedRun.worktreeRef || undefined, jsonSchema: advancedRun.jsonSchema || undefined, promptFile: advancedRun.promptFile || undefined, promptJson: advancedRun.promptJson || undefined, sessionId: advancedRun.sessionId || undefined, noPlan: advancedRun.noPlan })
       if (!ephemeral && result.grokSessionId) await persistSessionId(result.grokSessionId)
@@ -692,7 +701,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     } finally {
       flushBackendEvents()
       setRunning(false)
-      const completed = ensurePublicCompletion(events())
+      // Browser planning uses a JSON envelope that can itself contain
+      // provider reasoning tags inside a quoted `text` field. Running that
+      // envelope through the coding chat's reasoning splitter corrupts the
+      // JSON and triggers the generic "applied changes" fallback. Preserve
+      // browser payloads byte-for-byte and keep provider thoughts separate.
+      const completed = ephemeral
+        ? events().filter((entry) => entry.kind === "text" || entry.kind === "error")
+        : ensurePublicCompletion(events())
       completedLogs = completed
       if (!ephemeral && agentAppControls()) {
         const text = completed.map((entry) => entry.content).join("\n")

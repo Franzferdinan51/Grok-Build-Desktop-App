@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, Show, onCleanup } from "solid-js"
 import type { WebviewTag } from "electron"
 import type { TaskLog } from "../chat-utils"
+import { parseBrowserDirective, type BrowserAction } from "../browser-agent-protocol"
 
 type Props = {
   model?: string
@@ -32,21 +33,6 @@ type BrowserPageState = {
   webMcpAvailable: boolean
 }
 
-type BrowserAction =
-  | { type: "navigate"; url: string }
-  | { type: "click"; selector: string }
-  | { type: "type"; selector: string; text: string }
-  | { type: "hover"; selector: string }
-  | { type: "select"; selector: string; value: string }
-  | { type: "click_at"; x: number; y: number }
-  | { type: "scroll"; pixels: number }
-  | { type: "press"; selector?: string; key: string }
-  | { type: "webmcp"; name: string; arguments: Record<string, unknown> }
-  | { type: "screenshot" }
-  | { type: "back" | "forward" | "reload" }
-  | { type: "wait"; ms: number }
-
-type BrowserDirective = { kind: "action"; action: BrowserAction } | { kind: "done"; summary: string }
 type BrowserChatEntry = { id: string; role: "user" | "assistant" | "action"; text: string }
 
 const MAX_AGENT_STEPS = 15
@@ -57,38 +43,6 @@ const asUrl = (input: string) => {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`
 }
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-const isBrowserAction = (value: unknown): value is BrowserAction => {
-  if (!value || typeof value !== "object") return false
-  const action = value as Record<string, unknown>
-  if (action.type === "navigate") return typeof action.url === "string"
-  if (action.type === "click") return typeof action.selector === "string"
-  if (action.type === "type") return typeof action.selector === "string" && typeof action.text === "string"
-  if (action.type === "hover") return typeof action.selector === "string"
-  if (action.type === "select") return typeof action.selector === "string" && typeof action.value === "string"
-  if (action.type === "click_at") return typeof action.x === "number" && typeof action.y === "number"
-  if (action.type === "scroll") return typeof action.pixels === "number"
-  if (action.type === "press") return typeof action.key === "string" && (action.selector === undefined || typeof action.selector === "string")
-  if (action.type === "webmcp") return typeof action.name === "string" && Boolean(action.arguments) && typeof action.arguments === "object"
-  if (action.type === "wait") return typeof action.ms === "number"
-  return action.type === "back" || action.type === "forward" || action.type === "reload" || action.type === "screenshot"
-}
-
-export const parseBrowserDirective = (text: string): BrowserDirective | undefined => {
-  const done = text.match(/<browser_done>([\s\S]*?)<\/browser_done>/i)
-  if (done) {
-    try {
-      const value = JSON.parse(done[1]!) as { summary?: unknown }
-      return { kind: "done", summary: typeof value.summary === "string" ? value.summary : "Task complete." }
-    } catch { return { kind: "done", summary: done[1]!.trim() || "Task complete." } }
-  }
-  const action = text.match(/<browser_action>([\s\S]*?)<\/browser_action>/i)
-  if (!action) return undefined
-  try {
-    const value: unknown = JSON.parse(action[1]!)
-    return isBrowserAction(value) ? { kind: "action", action: value } : undefined
-  } catch { return undefined }
-}
 
 const publicText = (text: string) => text
   .replace(/<browser_action>[\s\S]*?<\/browser_action>/gi, "")
@@ -215,24 +169,14 @@ This is step ${step} of ${MAX_AGENT_STEPS} in a Browser Use-style plan/action/ob
 
 If the current URL is about:blank, infer a safe initial destination from the user's task and make navigate your first action. You do not need the user to open a page first.
 
-Return a short natural-language status followed by exactly one machine-readable tag:
-<browser_action>{"type":"navigate","url":"https://example.com"}</browser_action>
-<browser_action>{"type":"click","selector":"#search"}</browser_action>
-<browser_action>{"type":"type","selector":"input[name=q]","text":"query"}</browser_action>
-<browser_action>{"type":"hover","selector":"#menu"}</browser_action>
-<browser_action>{"type":"select","selector":"select[name=country]","value":"US"}</browser_action>
-<browser_action>{"type":"click_at","x":420,"y":315}</browser_action>
-<browser_action>{"type":"scroll","pixels":850}</browser_action>
-<browser_action>{"type":"press","selector":"input[name=q]","key":"Enter"}</browser_action>
-<browser_action>{"type":"webmcp","name":"tool-name","arguments":{"key":"value"}}</browser_action>
-<browser_action>{"type":"screenshot"}</browser_action>
-<browser_action>{"type":"back"}</browser_action>
-<browser_action>{"type":"forward"}</browser_action>
-<browser_action>{"type":"reload"}</browser_action>
-<browser_action>{"type":"wait","ms":1000}</browser_action>
+Return exactly one JSON object and nothing else:
+{"kind":"action","action":{"type":"navigate","url":"https://example.com"}}
+{"kind":"action","action":{"type":"click","selector":"#search"}}
+{"kind":"action","action":{"type":"type","selector":"input[name=q]","text":"query"}}
+{"kind":"action","action":{"type":"webmcp","name":"tool-name","arguments":{"key":"value"}}}
 
 When the task is verifiably finished, return:
-<browser_done>{"summary":"what was accomplished and what the page now shows"}</browser_done>`
+{"kind":"done","summary":"what was accomplished and what the page now shows"}`
 
 export function BrowserAgentTab(props: Props) {
   let browserView: WebviewTag | undefined
@@ -433,14 +377,33 @@ export function BrowserAgentTab(props: Props) {
     setAgentStep(0)
     appendChat("user", userTask)
     const history: string[] = []
+    let planningModel = agentModel() || props.model
     try {
       for (let step = 1; step <= MAX_AGENT_STEPS && !stopRequested(); step += 1) {
         setAgentStep(step)
         const page = await inspectPage()
-        const logs = await props.onRunAgent(buildAgentPrompt(userTask, page, history, step), agentModel() || props.model)
+        const instruction = buildAgentPrompt(userTask, page, history, step)
+        let logs = await props.onRunAgent(instruction, planningModel)
         if (stopRequested()) break
-        const raw = logs.map((entry) => entry.content).join("\n").trim()
-        const directive = parseBrowserDirective(raw)
+        // Thoughts are provider-internal planning and may contain coding-agent
+        // narration. Only the schema-constrained public payload is protocol.
+        let raw = logs.filter((entry) => entry.kind === "text").map((entry) => entry.content).join("\n").trim()
+        let directive = parseBrowserDirective(raw)
+        let failure = logs.find((entry) => entry.kind === "error")
+        if (!directive) {
+          const fallback = ["nemotron-3-ultra-550b", "grok-4.5", ...props.models]
+            .find((candidate) => candidate && candidate !== planningModel)
+          if (fallback) {
+            appendChat("action", `${planningModel || "The selected model"} did not return a browser action. Retrying this step with ${fallback}.`)
+            planningModel = fallback
+            logs = await props.onRunAgent(instruction, planningModel)
+            if (stopRequested()) break
+            raw = logs.filter((entry) => entry.kind === "text").map((entry) => entry.content).join("\n").trim()
+            directive = parseBrowserDirective(raw)
+            failure = logs.find((entry) => entry.kind === "error")
+          }
+        }
+        if (failure && !directive) throw new Error(failure.content)
         const status = publicText(raw)
         if (!directive) {
           appendChat("assistant", status || "I couldn't determine a safe next browser action.")

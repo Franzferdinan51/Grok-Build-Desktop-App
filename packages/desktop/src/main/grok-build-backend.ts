@@ -80,6 +80,7 @@ export type RunTaskInput = {
   noPlan?: boolean
   resumeFallbackPrompt?: string
   longTermMemory?: boolean
+  hostControls?: boolean
   moa?: {
     referenceModels: string[]
     aggregatorModel?: string
@@ -330,11 +331,11 @@ export class GrokBuildBackend {
     const browserControl = hostConfig?.browser || "/Users/duckets/.openclaw/workspace/tools/browser-control.sh"
     const desktopControl = hostConfig?.desktop || "/Users/duckets/.openclaw/workspace/tools/desktop-control.sh"
     const searchHelper = process.env.GROK_SEARCH_HELPER || `${homedir()}/.openclaw/workspace/tools/web-search-fallback.sh`
-    const hostControlsEnabled = !hostConfig?.disabled && (existsSync(browserControl) || existsSync(desktopControl))
+    const hostControlsEnabled = input.hostControls !== false && !hostConfig?.disabled && (existsSync(browserControl) || existsSync(desktopControl))
     const hostControls = hostControlsEnabled
       ? `\n\n## Verified host browser and computer-use controls\n${existsSync(browserControl) ? `Browser: ${browserControl} status | ${browserControl} open <https-url>` : ""}\n${existsSync(desktopControl) ? `macOS CuA preflight: ${desktopControl} status. After a successful preflight, use the installed Peekaboo/Lobster desktop-control workflow for native UI actions.` : ""}\nTreat only exit code 0 plus JSON ok:true and observed state as success. Empty output, daemon startup, shell open commands, or an unverified tool call are failures. If permission_required is true, report the exact missing permission and never claim the action completed. Never kill or replace the user's normal Chrome profile.`
       : ""
-    const searchControls = existsSync(searchHelper)
+    const searchControls = input.hostControls !== false && existsSync(searchHelper)
       ? `\n\n## Verified multi-provider search helper\nSearch fallback: ${searchHelper} search <query>. It uses configured local provider credentials without exposing them. Prefer the bundled search-providers skill, cross-check important claims, and never print private endpoint values or API keys.`
       : ""
     let effectivePrompt = `${memoryContext}\n\n## Current instruction\n${input.prompt}${hostControls}${searchControls}`
@@ -541,7 +542,7 @@ ${referenceSection}
       if (input.longTermMemory !== false) void this.longTermMemory.remember(input.prompt, visibleAssistant, input.cwd)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      const transientSerializationFailure = !input.resume && /serialization error: missing field [`']?created|error decoding response body/i.test(message)
+      const transientSerializationFailure = !input.resume && /serialization error:|error decoding response body/i.test(message)
       if (transientSerializationFailure) {
         onEvent({ type: "thought", data: "The model provider returned a malformed streaming event. Retrying this clean turn once…\n" })
         try {
@@ -551,7 +552,7 @@ ${referenceSection}
         } catch (retryError) {
           const retryMessage = retryError instanceof Error ? retryError.message : String(retryError)
           const fallbackModel = input.fallbackModel?.trim()
-          const canFailOver = Boolean(fallbackModel && fallbackModel !== input.model && /serialization error: missing field [`']?created|error decoding response body/i.test(retryMessage))
+          const canFailOver = Boolean(fallbackModel && fallbackModel !== input.model && /serialization error:|error decoding response body/i.test(retryMessage))
           if (!canFailOver) throw retryError
           onEvent({ type: "thought", data: `The selected model returned malformed events twice. Finishing this browser step with ${fallbackModel} instead…\n` })
           const fallbackArgs = [...compatibleArgs]
@@ -562,6 +563,23 @@ ${referenceSection}
           if (input.longTermMemory !== false) void this.longTermMemory.remember(input.prompt, visibleAssistant, input.cwd)
           return
         }
+      }
+      const browserFallbackModel = input.fallbackModel?.trim()
+      const browserPlannerFailed = Boolean(
+        input.jsonSchema?.trim()
+        && browserFallbackModel
+        && browserFallbackModel !== input.model
+        && /max turns reached|structured output|model did not produce|invalid json/i.test(message)
+      )
+      if (browserPlannerFailed) {
+        onEvent({ type: "thought", data: `The selected model did not produce a valid browser directive. Finishing this browser step with ${browserFallbackModel} instead…\n` })
+        const fallbackArgs = [...compatibleArgs]
+        const modelIndex = fallbackArgs.indexOf("--model")
+        if (modelIndex >= 0) fallbackArgs.splice(modelIndex, 2, "--model", browserFallbackModel!)
+        else if (supportedFlags.has("--model")) fallbackArgs.push("--model", browserFallbackModel!)
+        await runChild(fallbackArgs)
+        if (input.longTermMemory !== false) void this.longTermMemory.remember(input.prompt, visibleAssistant, input.cwd)
+        return
       }
       const aggregatorProviderFailed = Boolean(input.moa && input.model && effectiveModel && input.model !== effectiveModel && /no output for \d+ minutes|auth|unauthorized|forbidden|rate.?limit|serialization|connection|timed? ?out/i.test(message))
       if (aggregatorProviderFailed) {

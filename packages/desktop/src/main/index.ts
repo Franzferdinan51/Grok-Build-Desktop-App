@@ -163,7 +163,6 @@ app.whenReady().then(async () => {
     }
   }
   telegram.setMessageHandler(agentHandler.handleMessage)
-  telegram.start()
   writeLog("info", "Creating main window")
 
   mainWindow = await createAndLoadMainWindow()
@@ -172,6 +171,10 @@ app.whenReady().then(async () => {
   // Set up app menu
   const menu = createMenu(mainWindow)
   Menu.setApplicationMenu(menu)
+  // safeStorage may trigger a macOS Keychain approval dialog when an ad-hoc
+  // development build gets a new signature. Start Telegram only after the
+  // main window is visible so that prompt can never make the app appear dead.
+  telegram.start()
   scheduler.start()
   // Auto-update is now single-flight: a 6h `setInterval` and the 30s
   // warmup `setTimeout` can land in either order, and `installUpdate`
