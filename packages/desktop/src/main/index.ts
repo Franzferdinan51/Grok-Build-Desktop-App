@@ -147,6 +147,7 @@ app.whenReady().then(async () => {
     scheduleNextTask: () => queueMicrotask(() => void processNextTelegramTask()),
     buildInput: async (chatId, taskText, agent) => buildAgentInput(chatId, taskText, agent),
   })
+  writeLog("info", "Telegram agent handler ready")
   const processNextTelegramTask = async (): Promise<void> => {
     if (backend.isRunning() || telegramTaskReserved) return
     const next = telegramQueue.shift()
@@ -163,8 +164,10 @@ app.whenReady().then(async () => {
   }
   telegram.setMessageHandler(agentHandler.handleMessage)
   telegram.start()
+  writeLog("info", "Creating main window")
 
   mainWindow = await createAndLoadMainWindow()
+  writeLog("info", "Main window renderer loaded")
 
   // Set up app menu
   const menu = createMenu(mainWindow)
