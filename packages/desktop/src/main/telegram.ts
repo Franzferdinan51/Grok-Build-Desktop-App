@@ -342,19 +342,26 @@ export class TelegramBridge {
     const token = this.token()
     if (!token) return
     try {
-      await telegramPayload(`https://api.telegram.org/bot${token}/setMyCommands`, {
+      const response = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/setMyCommands`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commands: [
           { command: "start", description: "Show setup and available commands" },
           { command: "help", description: "Show command help" },
+          { command: "commands", description: "List all Telegram commands" },
           { command: "run", description: "Run a Grok Build task" },
+          { command: "learn", description: "Draft a reusable skill" },
+          { command: "goal", description: "Manage the persistent goal" },
           { command: "new", description: "Start a fresh agent session" },
           { command: "status", description: "Show backend and workspace status" },
           { command: "health", description: "Quick agent health check" },
+          { command: "diagnostics", description: "Show local bridge diagnostics" },
           { command: "models", description: "List available models" },
           { command: "model", description: "Select a model" },
           { command: "project", description: "Choose a project" },
           { command: "mode", description: "Choose fast, balanced, or deep responses" },
+          { command: "fast", description: "Toggle fast mode" },
+          { command: "think", description: "Set session reasoning" },
           { command: "queue", description: "Show queued agent work" },
+          { command: "tasks", description: "Show active and queued tasks" },
           { command: "steer", description: "Prioritize the next instruction" },
           { command: "interrupt", description: "Stop and redirect the active task" },
           { command: "retry", description: "Retry the previous instruction" },
@@ -363,13 +370,38 @@ export class TelegramBridge {
           { command: "reasoning", description: "Control reasoning for this session" },
           { command: "history", description: "Show recent conversation" },
           { command: "schedules", description: "Show scheduled agent work" },
+          { command: "tools", description: "Show available agent tools" },
+          { command: "skills", description: "List loaded skills" },
+          { command: "skill", description: "Run a named skill" },
+          { command: "login", description: "Start provider login" },
+          { command: "whoami", description: "Show this chat id" },
           { command: "menu", description: "Open the control menu" },
           { command: "workspace", description: "Show the active workspace" },
           { command: "cancel", description: "Cancel the active task" },
           { command: "restart", description: "Restart the desktop agent" },
+          { command: "session", description: "Show session settings" },
+          { command: "usage", description: "Show recent usage" },
+          { command: "context", description: "Show session context" },
+          { command: "allowlist", description: "Show or edit allowed chats" },
+          { command: "stop", description: "Stop the active task" },
+          { command: "verbose", description: "Grok compatibility command" },
+          { command: "trace", description: "Grok compatibility command" },
+          { command: "elevated", description: "Grok compatibility command" },
+          { command: "exec", description: "Grok compatibility command" },
+          { command: "config", description: "Grok compatibility command" },
+          { command: "mcp", description: "Grok compatibility command" },
+          { command: "plugins", description: "Grok compatibility command" },
+          { command: "subagents", description: "Grok compatibility command" },
+          { command: "acp", description: "Grok compatibility command" },
+          { command: "focus", description: "Grok compatibility command" },
+          { command: "unfocus", description: "Grok compatibility command" },
+          { command: "agents", description: "Grok compatibility command" },
+          { command: "bash", description: "Grok compatibility command" },
         ] }),
       })
-    } catch { /* Command-menu setup is retried on the next app start. */ }
+      if (!response.ok) throw new Error(response.description || "Telegram rejected the command menu")
+      writeLog("info", "Telegram command menu registered: /learn, /goal, and compatibility commands")
+    } catch (error) { writeLog("error", `Telegram command-menu registration failed: ${error instanceof Error ? error.message : String(error)}`) }
   }
 
   private async answerCallback(id: string): Promise<void> {

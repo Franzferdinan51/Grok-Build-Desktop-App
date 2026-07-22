@@ -33,6 +33,14 @@ export type ScheduledGrokTask = {
   lastRunAt?: number; nextRunAt: number; lastStatus?: "completed" | "failed"
 }
 
+export type TelegramGoal = {
+  objective: string
+  status: "active" | "paused" | "completed" | "blocked"
+  note?: string
+  createdAt: number
+  updatedAt: number
+}
+
 type StoreSchema = {
   runs: GrokRunRecord[]
   ui: {
@@ -64,6 +72,7 @@ type StoreSchema = {
       pendingApproval?: { task: string; reason: string; requestedAt: number }; approvedTask?: string; moaPreset?: "balanced" | "deep"
     }>
   }
+  goal?: TelegramGoal
   nemoclaw: {
     enabled?: boolean; requireApproval?: boolean; networkAllowlist?: string[]; filesystemRoots?: string[]; maxTurns?: number
     audit?: { id: string; at: number; chatId: string; action: string; decision: "allowed" | "blocked" | "pending"; detail?: string }[]

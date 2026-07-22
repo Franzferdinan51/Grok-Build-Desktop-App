@@ -18,10 +18,10 @@ import { app } from "electron"
 import { publicTelegramResponse } from "../telegram-output"
 import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, buildTelegramMoaMenu, buildTelegramMoaReferencePicker, buildTelegramMoaAggregatorPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "./commands"
 import { addSchedule, listSchedules } from "../scheduled-tasks"
-import { finishGrokRun, startGrokRun } from "../grok-runs"
+import { finishGrokRun, listGrokRuns, startGrokRun } from "../grok-runs"
 import { validateAppActions } from "../app-actions"
 import { write as writeLog } from "../logging"
-import { getStore } from "../store"
+import { getStore, type TelegramGoal } from "../store"
 import type { TelegramBridge } from "../telegram"
 import type { GrokBuildBackend, RunTaskInput, GrokBuildEvent } from "../grok-build-backend"
 import { nemoConfig, nemoStatus, recordNemoAudit, taskApprovalReason } from "../nemoclaw-security"
@@ -165,6 +165,86 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     const argument = parsed?.argument || ""
     const menu = buildTelegramMenuReply()
     if (name === "start" || name === "help" || name === "menu") return menu
+    if (name === "commands") return TELEGRAM_HELP_TEXT
+    if (name === "whoami" || name === "id") return `Telegram chat id: ${chatId}`
+    if (name === "goal") {
+      const raw = argument.trim()
+      const [actionToken, ...rest] = raw.split(/\s+/)
+      const action = (actionToken || "status").toLowerCase()
+      const note = rest.join(" ").trim()
+      const current = getStore().get("goal") as TelegramGoal | undefined
+      if (action === "status" || !raw) {
+        if (!current) return "No persistent goal is set. Use /goal start <objective>."
+        return `🎯 Goal: ${current.objective}\nStatus: ${current.status}${current.note ? `\nNote: ${current.note}` : ""}\nUpdated: ${new Date(current.updatedAt).toLocaleString()}`
+      }
+      if (action === "clear") {
+        getStore().delete("goal")
+        return "🎯 Persistent goal cleared."
+      }
+      if (action === "start") {
+        if (!note) return "Usage: /goal start <objective>"
+        const now = Date.now()
+        getStore().set("goal", { objective: note.slice(0, 4_000), status: "active", createdAt: now, updatedAt: now })
+        return `🎯 Goal started: ${note}`
+      }
+      if (["edit", "note"].includes(action)) {
+        if (!current) return "No goal exists. Use /goal start <objective>."
+        if (!note) return "Usage: /goal edit <new objective>"
+        getStore().set("goal", { ...current, objective: note.slice(0, 4_000), updatedAt: Date.now() })
+        return `🎯 Goal updated: ${note}`
+      }
+      if (["pause", "resume", "complete", "block"].includes(action)) {
+        if (!current) return "No goal exists. Use /goal start <objective>."
+        const status = action === "pause" ? "paused" : action === "resume" ? "active" : action === "complete" ? "completed" : "blocked"
+        getStore().set("goal", { ...current, status, note: note || current.note, updatedAt: Date.now() })
+        return `🎯 Goal ${status}: ${current.objective}`
+      }
+      return "Usage: /goal status|start <objective>|edit <objective>|pause|resume|complete|block|clear"
+    }
+    if (name === "learn") {
+      const agent = deps.session(chatId)
+      const context = (agent.transcript || []).slice(-6).map((entry) => `${entry.role === "user" ? "User" : "Agent"}: ${entry.text}`).join("\n\n")
+      const request = argument || "Extract the reusable workflow, decisions, and verification steps from the recent Telegram work and draft a SKILL.md for it."
+      return runAgentTask(deps, chatId, `Create or improve a reusable Grok Build skill. ${request}\n\nRecent context:\n${context.slice(-12_000)}`, agent)
+    }
+    if (name === "skill") {
+      const [skillName, ...skillArgs] = argument.split(/\s+/).filter(Boolean)
+      if (!skillName) return "Usage: /skill <name> [request]"
+      const workspace = deps.session(chatId).workspace || (getStore().get("workspace.last") as string | undefined)
+      const skill = listGrokSkills(workspace).find((entry) => entry.name.toLowerCase() === skillName.toLowerCase())
+      if (!skill) return `Skill not found: ${skillName}\nUse /skills to list available skills.`
+      const request = skillArgs.join(" ") || "Apply this skill to the current request."
+      return runAgentTask(deps, chatId, `Use the skill at ${skill.path}. ${request}`, deps.session(chatId))
+    }
+    if (name === "login") {
+      const provider = (argument || "xai").trim().toLowerCase()
+      if (!["xai", "openai", "minimax"].includes(provider)) return "Usage: /login xai|openai|minimax"
+      const result = await backend.startOAuth(provider as "xai" | "openai" | "minimax")
+      return result.message
+    }
+    if (name === "diagnostics") {
+      const status = await backend.status()
+      const runs = listGrokRuns()
+      return `Diagnostics\nBackend: ${status.available ? `ready (${status.version || status.command})` : status.error}\nTelegram: authorized chat ${chatId}\nRuns stored: ${runs.length}\nActive task: ${backend.isRunning() ? "yes" : "no"}\n${nemoStatus()}`
+    }
+    if (name === "tasks") {
+      const queued = queue.filter((entry) => entry.chatId === chatId)
+      return `${backend.isRunning() ? "Active task is running." : "No active task."}\nQueued for this chat: ${queued.length}${queued.length ? `\n${queued.map((entry, index) => `${index + 1}. ${entry.text.slice(0, 160)}`).join("\n")}` : ""}`
+    }
+    if (name === "allowlist") {
+      const values = deps.telegram.allowedChats()
+      if (!argument) return `Allowed Telegram chats: ${values.length ? values.join(", ") : "none"}\nUsage: /allowlist add <chat id>|remove <chat id>`
+      const [operation, value] = argument.trim().split(/\s+/, 2)
+      if (!value || !/^\-?\d+$/.test(value)) return "Usage: /allowlist add <chat id>|remove <chat id>"
+      const next = operation === "add" ? [...new Set([...values, value])] : operation === "remove" ? values.filter((id) => id !== value) : undefined
+      if (!next) return "Usage: /allowlist add <chat id>|remove <chat id>"
+      await deps.telegram.setAllowedChats(next)
+      return `Allowed Telegram chats: ${next.length ? next.join(", ") : "none"}`
+    }
+    if (name === "context") {
+      const agent = deps.session(chatId)
+      return `Session context\nVisible turns: ${agent.transcript?.length || 0}\nCheckpoint: ${agent.compressedSummary ? "available" : "none"}\nSession: ${agent.sessionId ? "resumable" : "fresh"}\nWorkspace: ${agent.workspace || "Scratch"}`
+    }
     if (name === "security" || name === "sandbox") {
       if (!argument) return `${nemoStatus()}\n\nUse /security on|off or /security approvals on|off.`
       const setting = argument.toLowerCase()
@@ -278,6 +358,28 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     }
     if (name === "tools") {
       return "🔧 Agent tool surfaces:\n• Grok Build native tools, MCP servers, plugins, skills, memory, sessions, traces, and subagents\n• Multi-provider search: native Grok, Tavily, Brave, authenticated X, private SearXNG, and BrowserOS/browser-control\n• Desktop control: Lobster MCP when configured, plus verified browser/desktop preflight helpers\n• Telegram controls: queues, approvals, schedules, MoA, session recovery, and per-chat workspaces\n\nUse /skills to inspect loaded skills and /status for backend health."
+    }
+    if (name === "usage") {
+      const runs = listGrokRuns().slice(0, 10)
+      if (!runs.length) return "No Grok Build runs recorded yet."
+      const totalIn = runs.reduce((sum, run) => sum + (run.tokensIn || 0), 0)
+      const totalOut = runs.reduce((sum, run) => sum + (run.tokensOut || 0), 0)
+      return `Recent usage (${runs.length} runs)\nInput tokens: ${totalIn || "not reported"}\nOutput tokens: ${totalOut || "not reported"}\nLatest: ${runs[0]?.status} — ${new Date(runs[0]!.startedAt).toLocaleString()}`
+    }
+    if (name === "fast") {
+      if (!argument || argument === "status") return `Fast mode: ${deps.session(chatId).mode === "fast" ? "on" : "off"}\nUse /fast on|off.`
+      if (!["on", "off", "auto", "default"].includes(argument.toLowerCase())) return "Usage: /fast on|off|status"
+      deps.saveSession(chatId, { mode: argument.toLowerCase() === "on" ? "fast" : "balanced" })
+      return `Fast mode ${argument.toLowerCase() === "on" ? "enabled" : "disabled"}.`
+    }
+    if (name === "think" || name === "thinking") return handleMessage(chatId, argument ? `/reasoning ${argument}` : "/reasoning")
+    if (name === "session") {
+      const agent = deps.session(chatId)
+      return `Telegram session\nStatus: ${agent.sessionId ? "resumable" : "fresh"}\nMode: ${agent.mode || "balanced"}\nReasoning: ${agent.thinking === false ? "off" : "on"}\nUse /new, /mode, /reasoning, or /goal to control this session.`
+    }
+    const unsupportedCommands = new Set(["btw", "side", "export", "export-session", "export-trajectory", "trajectory", "tts", "subagents", "acp", "focus", "unfocus", "agents", "config", "mcp", "plugins", "plugin", "debug", "verbose", "trace", "reasoning", "elevated", "exec", "activation", "send", "bash"])
+    if (name && unsupportedCommands.has(name)) {
+      return `/${name} is recognized, but that command belongs to the full Grok Build/OpenClaw runtime and is not implemented by this standalone desktop Telegram bridge yet. Use /run to ask the agent to perform the equivalent task, or /commands for the supported bridge surface.`
     }
     if (name === "repair") {
       const status = await backend.status()
