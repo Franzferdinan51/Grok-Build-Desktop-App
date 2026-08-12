@@ -2,7 +2,8 @@
   width: 30px;
   height: 30px;
   object-fit: contain;
-  filter: drop-shadow(0 0 8px rgba(65, 175, 255, 0.35));
+  border-radius: 7px;
+  filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.42));
 }
 
 .settings-brand {

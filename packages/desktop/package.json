@@ -1,6 +1,6 @@
 {
   "name": "@grok-build/desktop",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -13,7 +13,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test:smoke": "node --experimental-strip-types scripts/smoke.mjs",
-    "test:unit": "node --test --experimental-strip-types src/**/*.test.ts",
+    "test:unit": "node --test --experimental-strip-types src/main/*.test.ts src/renderer/*.test.ts src/main/telegram/*.test.ts",
     "predev": "node scripts/predev.js",
     "dev": "electron-vite dev",
     "prebuild": "node scripts/prebuild.js",

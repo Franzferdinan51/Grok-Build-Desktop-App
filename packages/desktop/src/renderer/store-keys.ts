@@ -45,7 +45,12 @@ export const STORE_KEYS = {
   previewUrl: "preview.url",
   layoutSidebarCollapsed: "layout.sidebarCollapsed",
   layoutPreviewCollapsed: "layout.previewCollapsed",
+  hostBrowserScript: "host.browserScript",
+  hostDesktopScript: "host.desktopScript",
+  hostDisabled: "host.disabled",
 } as const
+
+export const queueStoreKey = (threadId: string) => `chat.queue.${threadId}`
 
 export type StoreKey = (typeof STORE_KEYS)[keyof typeof STORE_KEYS]
 
@@ -90,4 +95,7 @@ export interface StoreShape {
   [STORE_KEYS.previewUrl]: string
   [STORE_KEYS.layoutSidebarCollapsed]: boolean
   [STORE_KEYS.layoutPreviewCollapsed]: boolean
+  [STORE_KEYS.hostBrowserScript]: string | undefined
+  [STORE_KEYS.hostDesktopScript]: string | undefined
+  [STORE_KEYS.hostDisabled]: boolean
 }

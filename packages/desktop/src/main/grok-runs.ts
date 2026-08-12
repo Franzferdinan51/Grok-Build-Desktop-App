@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto"
 import { getStore, type GrokRunRecord } from "./store"
+import { classifyBackendError } from "./backend-error"
 import { reconcileInterruptedRuns } from "./grok-run-utils"
 
 const MAX_RUNS = 100
@@ -62,10 +63,5 @@ export function usageMetrics(usage: unknown): Pick<GrokRunRecord, "tokensIn" | "
 }
 
 export function classifyRunError(message: string): string {
-  if (/no output|timed? ?out|timeout/i.test(message)) return "timeout"
-  if (/unauthorized|forbidden|auth/i.test(message)) return "authentication"
-  if (/rate.?limit|429/i.test(message)) return "rate_limit"
-  if (/network|connection|econn/i.test(message)) return "network"
-  if (/cancel/i.test(message)) return "cancelled"
-  return "runtime"
+  return classifyBackendError(message).class
 }

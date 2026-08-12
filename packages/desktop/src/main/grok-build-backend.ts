@@ -13,6 +13,7 @@ import { promisify } from "util"
 import { existsSync } from "fs"
 import { homedir } from "os"
 import { write as writeLog } from "./logging"
+import { buildHostControlsPromptBlock, buildSearchControlsPromptBlock, resolveHostControls } from "./host-control-paths"
 import { resolveGrokBuild } from "./grok-build-resolver"
 import { normalizeBackendStderr } from "./backend-error"
 import { tokenizeCommandLine, ShellQuoteError } from "./shell-quote"
@@ -24,6 +25,7 @@ import { CodexOAuthBridge } from "./codex-oauth-bridge"
 import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeMoaReferenceBudget } from "./moa-utils"
 import { DuckbotMemory } from "./duckbot-memory"
 import { buildBaseArgs, compatibleCliArgs, promptArgsFor } from "./grok-args"
+import { StreamingJsonParser } from "./streaming-json"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -327,17 +329,14 @@ export class GrokBuildBackend {
     // bridge is opt-in (Telegram), preventing duplicate context and startup
     // work for ordinary desktop runs.
     const memoryContext = input.longTermMemory ? await this.longTermMemory.context(input.prompt) : ""
-    const hostConfig = getStore().get("host") as { browser?: string; desktop?: string; disabled?: boolean } | undefined
-    const browserControl = hostConfig?.browser || "/Users/duckets/.openclaw/workspace/tools/browser-control.sh"
-    const desktopControl = hostConfig?.desktop || "/Users/duckets/.openclaw/workspace/tools/desktop-control.sh"
-    const searchHelper = process.env.GROK_SEARCH_HELPER || `${homedir()}/.openclaw/workspace/tools/web-search-fallback.sh`
-    const hostControlsEnabled = input.hostControls !== false && !hostConfig?.disabled && (existsSync(browserControl) || existsSync(desktopControl))
-    const hostControls = hostControlsEnabled
-      ? `\n\n## Verified host browser and computer-use controls\n${existsSync(browserControl) ? `Browser: ${browserControl} status | ${browserControl} open <https-url>` : ""}\n${existsSync(desktopControl) ? `macOS CuA preflight: ${desktopControl} status. After a successful preflight, use the installed Peekaboo/Lobster desktop-control workflow for native UI actions.` : ""}\nTreat only exit code 0 plus JSON ok:true and observed state as success. Empty output, daemon startup, shell open commands, or an unverified tool call are failures. If permission_required is true, report the exact missing permission and never claim the action completed. Never kill or replace the user's normal Chrome profile.`
-      : ""
-    const searchControls = input.hostControls !== false && existsSync(searchHelper)
-      ? `\n\n## Verified multi-provider search helper\nSearch fallback: ${searchHelper} search <query>. It uses configured local provider credentials without exposing them. Prefer the bundled search-providers skill, cross-check important claims, and never print private endpoint values or API keys.`
-      : ""
+    const hostResolved = resolveHostControls({
+      config: getStore().get("host"),
+      env: process.env,
+      home: homedir(),
+      exists: existsSync,
+    })
+    const hostControls = input.hostControls !== false ? buildHostControlsPromptBlock(hostResolved) : ""
+    const searchControls = input.hostControls !== false ? buildSearchControlsPromptBlock(hostResolved) : ""
     let effectivePrompt = `${memoryContext}\n\n## Current instruction\n${input.prompt}${hostControls}${searchControls}`
     let effectiveModel = input.model
     let visibleAssistant = ""
@@ -463,7 +462,6 @@ ${referenceSection}
       const child = spawn(command, childArgs, { stdio: ["ignore", "pipe", "pipe"], env: this.environment(), detached: process.platform !== "win32" })
       this.current = child
       this.cancelRequested = false
-      let buffer = ""
       let stderr = ""
       let settled = false
       let inactivityTimeout = ""
@@ -497,36 +495,31 @@ ${referenceSection}
         if (this.current === child) this.current = null
         callback()
       }
+      const stream = new StreamingJsonParser(structuredOutput)
+      const emitParsed = (events: ReturnType<StreamingJsonParser["push"]>) => {
+        for (const parsed of events) {
+          onEvent(parsed)
+          if (parsed.type === "end" && !completionTimer) {
+            protocolEnded = true
+            // The protocol has declared the run complete. Give Grok a short
+            // cleanup window, then close a backend that remains alive due to
+            // an MCP transport or provider socket that failed to shut down.
+            completionTimer = setTimeout(() => {
+              if (this.current === child && child.exitCode === null) this.terminateProcessTree(child, "SIGTERM")
+            }, 5_000)
+            completionTimer.unref()
+          }
+        }
+      }
       const emitLines = (chunk: Buffer) => {
         armInactivityTimer()
-        buffer += chunk.toString()
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            if (structuredOutput) { onEvent({ type: "text", data: `${JSON.stringify(JSON.parse(line), null, 2)}\n` }); continue }
-            const parsed = JSON.parse(line) as GrokBuildEvent & { sessionId?: string; session_id?: string }
-            if (!parsed.sessionId && typeof parsed.session_id === "string") parsed.sessionId = parsed.session_id
-            onEvent(parsed)
-            if (parsed.type === "end" && !completionTimer) {
-              protocolEnded = true
-              // The protocol has declared the run complete. Give Grok a short
-              // cleanup window, then close a backend that remains alive due to
-              // an MCP transport or provider socket that failed to shut down.
-              completionTimer = setTimeout(() => {
-                if (this.current === child && child.exitCode === null) this.terminateProcessTree(child, "SIGTERM")
-              }, 5_000)
-              completionTimer.unref()
-            }
-          } catch { onEvent({ type: "text", data: line + "\n" }) }
-        }
+        emitParsed(stream.push(chunk.toString()))
       }
       child.stdout?.on("data", emitLines)
       child.stderr?.on("data", (chunk: Buffer) => { armInactivityTimer(); stderr = (stderr + chunk.toString()).slice(-1_000_000) })
       child.on("error", (error) => finish(() => reject(error)))
       child.on("exit", (code, signal) => {
-        if (buffer.trim()) emitLines(Buffer.from("\n"))
+        emitParsed(stream.flush())
         const cancelled = this.cancelRequested && (signal === "SIGTERM" || signal === "SIGKILL" || code === null)
         this.cancelRequested = false
         if (cancelled) {

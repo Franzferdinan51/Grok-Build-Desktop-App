@@ -5,6 +5,7 @@ import solid from "vite-plugin-solid"
 export default defineConfig({
   main: {
     build: {
+      emptyOutDir: false,
       rollupOptions: {
         // Playwright loads optional protocol helpers with CommonJS `require`.
         // Keeping it external lets Electron run Playwright's supported Node
@@ -24,6 +25,7 @@ export default defineConfig({
   },
   preload: {
     build: {
+      emptyOutDir: false,
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/preload/index.ts"),
@@ -38,6 +40,7 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, "src/renderer"),
     build: {
+      emptyOutDir: false,
       rollupOptions: {
         input: {
           main: resolve(__dirname, "src/renderer/index.html"),

@@ -2,6 +2,8 @@ import { app } from "electron"
 import { randomUUID } from "crypto"
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "fs/promises"
 import { join } from "path"
+import { rankConversationMatches } from "./conversation-search"
+import { conversationToMarkdown } from "./conversation-markdown"
 
 export type StoredChatLog = { kind: "text" | "thought" | "error"; content: string }
 export type StoredChatMessage = { id: string; role: "user" | "assistant"; logs: StoredChatLog[]; createdAt: number }
@@ -54,15 +56,12 @@ export async function getConversation(id: string): Promise<StoredChatThread | un
 }
 
 export async function searchConversations(query: string, workspace?: string): Promise<StoredChatThread[]> {
-  const needle = query.trim().toLowerCase()
   const threads = await listConversations(workspace)
-  if (!needle) return threads
-  return threads.filter((thread) => `${thread.title}\n${thread.summary || ""}\n${thread.model || ""}\n${thread.messages.map((message) => message.logs.filter((log) => log.kind === "text").map((log) => log.content).join(" ")).join("\n")}`.toLowerCase().includes(needle))
+  return rankConversationMatches(threads, query)
 }
 
 export async function exportConversation(id: string): Promise<string> {
   const thread = await getConversation(id)
   if (!thread) throw new Error("Conversation not found")
-  const body = thread.messages.map((message) => `## ${message.role === "user" ? "User" : "Assistant"}\n\n${message.logs.filter((log) => log.kind !== "thought").map((log) => log.content).join("\n\n")}`).join("\n\n")
-  return `# ${thread.title}\n\n- Workspace: ${thread.workspace}\n- Updated: ${new Date(thread.updatedAt).toISOString()}\n- Model: ${thread.model || "Default"}\n\n${thread.summary ? `> ${thread.summary}\n\n` : ""}${body}\n`
+  return conversationToMarkdown(thread)
 }

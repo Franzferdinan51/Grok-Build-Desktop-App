@@ -10,5 +10,10 @@ test("parses slash commands and arguments", () => {
 test("filters the command palette", () => {
   assert.equal(matchingSlashCommands("/pre")[0]?.name, "preview")
   assert.equal(matchingSlashCommands("/lea").some((command) => command.name === "learn"), true)
+  assert.equal(matchingSlashCommands("/ret")[0]?.name, "retry")
+  assert.equal(matchingSlashCommands("/und")[0]?.name, "undo")
+  assert.equal(matchingSlashCommands("/rew").some((command) => command.name === "undo"), true)
+  assert.equal(matchingSlashCommands("/exp")[0]?.name, "export")
+  assert.equal(matchingSlashCommands("/que")[0]?.name, "queue")
   assert.equal(matchingSlashCommands("/model grok").length, 0)
 })

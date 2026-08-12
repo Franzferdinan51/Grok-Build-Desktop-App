@@ -23,6 +23,12 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommand[] = [
   { name: "scheduled", description: "Open scheduled tasks" },
   { name: "settings", description: "Open settings" },
   { name: "stop", description: "Stop the active Grok task" },
+  { name: "retry", description: "Rerun the previous user instruction" },
+  { name: "undo", aliases: ["rewind"], description: "Remove the last completed turn" },
+  { name: "export", description: "Save this conversation as Markdown" },
+  { name: "copy", description: "Copy the last assistant reply" },
+  { name: "queue", description: "Inspect or clear queued prompts", usage: "/queue [clear]" },
+  { name: "compress", description: "Checkpoint older conversation context" },
   { name: "restart", description: "Restart Grok Build Desktop" },
 ]
 

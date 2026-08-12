@@ -8,5 +8,5 @@ export function visibleConversationContext(items: ContextMessage[], summary?: st
 }
 export function checkpointFor(items: ContextMessage[]): string | undefined {
   if (items.length < 12) return undefined
-  return items.slice(-20).map((message) => message.logs.filter((log) => log.kind === "text").map((log) => log.content).join(" ").replace(/\s+/g, " ").trim()).filter(Boolean).join(" ").slice(-4_000)
+  return items.slice(-20).map((message) => message.logs.filter((log) => log.kind === "text").map((log) => log.content.replace(/<app_action>[\s\S]*?<\/app_action>/g, "")).join(" ").replace(/\s+/g, " ").trim()).filter(Boolean).join(" ").slice(-4_000)
 }

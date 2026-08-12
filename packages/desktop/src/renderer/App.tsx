@@ -2,14 +2,18 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, DuckbotMemoryStatus } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, DuckbotMemoryStatus, HostControlsSnapshot, HostHelperResolution } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
 import { checkpointFor, visibleConversationContext } from "./chat-context"
 import { validateAppActions } from "./app-actions"
 import { createConversationWriter } from "./conversation-save"
-import { STORE_KEYS } from "./store-keys"
+import { STORE_KEYS, queueStoreKey } from "./store-keys"
+import { dequeuePrompt, describePromptQueue, enqueuePrompt, parsePromptQueue, removeQueuedPrompt, type QueuedPrompt } from "./prompt-queue"
+import { lastUserInstruction, rewindLastTurn } from "./conversation-lifecycle"
+import { buildPaletteItems, filterPaletteItems } from "./command-palette"
+import { catalogModelOptions } from "./provider-availability"
 import { RunsPanel } from "./views/RunsPanel"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
@@ -21,7 +25,6 @@ import * as eventBuffer from "./event-buffer"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
 type ChatThread = StoredChatThread & { messages: ChatMessage[] }
-type QueuedPrompt = { id: string; text: string }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type AdvancedSettings = { agent: string; agents: string; permissionMode: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow: string; deny: string; tools: string; disallowedTools: string; memory: "default" | "experimental" | "disabled"; sandbox: string; rules: string; systemPrompt: string; verbatim: boolean; forkSession: boolean; restoreCode: boolean; worktree: boolean; worktreeName: string; worktreeRef: string; jsonSchema: string; promptFile: string; promptJson: string; sessionId: string; noPlan: boolean }
 const ADVANCED_DEFAULTS: AdvancedSettings = { agent: "", agents: "", permissionMode: "auto", allow: "", deny: "", tools: "", disallowedTools: "", memory: "default", sandbox: "", rules: "", systemPrompt: "", verbatim: false, forkSession: false, restoreCode: false, worktree: false, worktreeName: "", worktreeRef: "", jsonSchema: "", promptFile: "", promptJson: "", sessionId: "", noPlan: true }
@@ -29,6 +32,12 @@ const MAX_LIVE_LOG_CHARS = eventBuffer.MAX_LIVE_LOG_CHARS
 const MAX_LIVE_LOG_ENTRIES = eventBuffer.MAX_LIVE_LOG_ENTRIES
 void MAX_LIVE_LOG_CHARS
 void MAX_LIVE_LOG_ENTRIES
+
+function hostHelperStatus(helper?: HostHelperResolution) {
+  if (!helper) return "Resolving helper path…"
+  const source = helper.source === "settings" ? "Saved override" : helper.source === "env" ? "Environment" : helper.source === "discovered" ? "Discovered" : "Not found"
+  return `${source}${helper.exists ? " · ready" : " · missing"}: ${helper.path}`
+}
 
 function RichText(props: { content: string }) {
   const html = () => DOMPurify.sanitize(marked.parse(props.content, { async: false }) as string)
@@ -71,6 +80,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [historyAllWorkspaces, setHistoryAllWorkspaces] = createSignal(false)
   const [historyResults, setHistoryResults] = createSignal<ChatThread[]>([])
   const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
+  const [paletteOpen, setPaletteOpen] = createSignal(false)
+  const [paletteQuery, setPaletteQuery] = createSignal("")
+  const [paletteSelection, setPaletteSelection] = createSignal(0)
   const [historyIndex, setHistoryIndex] = createSignal(-1)
   const [historyDraft, setHistoryDraft] = createSignal("")
   const [telegram, setTelegram] = createSignal<TelegramStatus>({ connected: false })
@@ -128,6 +140,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false)
   const [previewCollapsed, setPreviewCollapsed] = createSignal(false)
   const [agentAppControls, setAgentAppControls] = createSignal(false)
+  const [hostControls, setHostControls] = createSignal<HostControlsSnapshot | null>(null)
+  const [hostBrowserDraft, setHostBrowserDraft] = createSignal("")
+  const [hostDesktopDraft, setHostDesktopDraft] = createSignal("")
+  const [hostNotice, setHostNotice] = createSignal("")
   const [subagentsEnabled, setSubagentsEnabled] = createSignal(true)
   const [delegationMode, setDelegationMode] = createSignal<"balanced" | "aggressive">("balanced")
   const [slashSelection, setSlashSelection] = createSignal(0)
@@ -224,6 +240,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (changed) await conversationWriter.save(changed as unknown as StoredChatThread)
     await window.api.store.set(activeThreadKey(root), activeId)
   }
+  const persistQueue = async (queue: QueuedPrompt[], threadId = activeThreadId()) => {
+    if (!threadId) return
+    if (queue.length) await window.api.store.set(queueStoreKey(threadId), queue)
+    else await window.api.store.delete(queueStoreKey(threadId))
+  }
+  const restoreQueue = async (threadId?: string) => {
+    if (!threadId) { setQueuedPrompts([]); return }
+    setQueuedPrompts(parsePromptQueue(await window.api.store.get(queueStoreKey(threadId))))
+  }
+  const replaceQueue = async (queue: QueuedPrompt[]) => {
+    setQueuedPrompts(queue)
+    await persistQueue(queue)
+  }
   const loadConversation = async (root: string) => {
     let stored = await window.api.conversations.list(root) as ChatThread[]
     const settingsThreads = (await window.api.store.get<ChatThread[]>(threadsKey(root))) ?? []
@@ -245,7 +274,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setMessages(selected?.messages || legacyMessages)
     setSessionId(selected?.sessionId || legacySession)
     if (stored.length) await persistThreads(root, stored, selected?.id || stored[0].id)
-    setQueuedPrompts([]); setHistoryIndex(-1); setHistoryDraft("")
+    await restoreQueue(selected?.id)
+    setHistoryIndex(-1); setHistoryDraft("")
   }
   const saveConversation = async (next: ChatMessage[]) => {
     setMessages(next)
@@ -279,7 +309,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setMessages([])
     setSessionId("")
     if (root) { await window.api.store.set(conversationKey(root), []); await window.api.store.delete(sessionKey(root)) }
-    setEvents([]); setQueuedPrompts([])
+    setEvents([])
+    await replaceQueue([])
     setHistoryOpen(false)
   }
   const openConversation = async (thread: ChatThread) => {
@@ -291,7 +322,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
     setMessages(thread.messages)
     setSessionId(thread.sessionId)
-    setQueuedPrompts([]); setEvents([]); setHistoryOpen(false)
+    await restoreQueue(thread.id)
+    setEvents([]); setHistoryOpen(false)
     const root = thread.workspace || workspace()
     if (root) {
       const workspaceThreads = await window.api.conversations.list(root) as ChatThread[]
@@ -332,6 +364,24 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     ...catalog().models,
     ...providerSecrets().map((provider) => provider.modelId).filter(Boolean),
   ])]
+  const modelOptions = () => catalogModelOptions(selectableModels(), providerSecrets(), catalog().defaultModel)
+  const paletteItems = () => filterPaletteItems(buildPaletteItems({
+    commands: DESKTOP_SLASH_COMMANDS,
+    views: NAV.map((item) => ({ id: item.id, label: item.label })),
+    chats: chatThreads().filter((thread) => !thread.archived).map((thread) => ({ id: thread.id, title: thread.title })),
+    models: selectableModels(),
+  }), paletteQuery())
+  const runPaletteItem = async (id: string) => {
+    setPaletteOpen(false); setPaletteQuery(""); setPaletteSelection(0)
+    if (id.startsWith("command:")) { setActive("new-task"); setPrompt(`/${id.slice(8)} `); return }
+    if (id.startsWith("view:")) { await navigate(id.slice(5)); return }
+    if (id.startsWith("chat:")) {
+      const thread = chatThreads().find((entry) => entry.id === id.slice(5))
+      if (thread) await openConversation(thread)
+      return
+    }
+    if (id.startsWith("model:")) await selectModelValue(id.slice(6))
+  }
   const refreshModelCatalog = async () => setCatalog(await window.api.backend.models())
   const signInProvider = async (provider: "xai" | "openai" | "minimax") => {
     try {
@@ -418,6 +468,41 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const next = setToggle(parsed.args, previewOpen()); setPreviewEnabled(true); setPreviewOpen(next)
       await window.api.store.set(STORE_KEYS.previewEnabled, true); setSlashNotice(`Preview ${next ? "opened" : "closed"}`)
     } else if (command.name === "stop") { await window.api.backend.cancel(); setSlashNotice("Stop requested") }
+    else if (command.name === "retry") {
+      const instruction = lastUserInstruction(messages())
+      if (!instruction) setSlashNotice("No previous user instruction to retry")
+      else { setSlashNotice("Retrying the previous instruction…"); queueMicrotask(() => void run(instruction)) }
+    } else if (command.name === "undo") {
+      const rewound = rewindLastTurn(messages())
+      if (!rewound.removed.length) setSlashNotice("Nothing to undo")
+      else {
+        await saveConversation(rewound.remaining)
+        setSessionId("")
+        if (workspace()) await window.api.store.delete(sessionKey())
+        const thread = chatThreads().find((entry) => entry.id === activeThreadId())
+        if (thread) await updateThreadMeta(thread, { sessionId: "", sessionStatus: "new" })
+        setSlashNotice("Removed the last turn. The next run starts a fresh Grok session from the visible transcript.")
+      }
+    } else if (command.name === "export") {
+      if (!activeThreadId()) setSlashNotice("No conversation to export")
+      else {
+        const result = await window.api.conversations.export(activeThreadId())
+        setSlashNotice(result.saved && result.path ? `Saved conversation to ${result.path}` : "Export cancelled")
+      }
+    } else if (command.name === "copy") {
+      const lastAssistant = [...messages()].reverse().find((message) => message.role === "assistant")
+      const text = lastAssistant?.logs.filter((log) => log.kind !== "thought").map((log) => log.content).join("\n").trim() || ""
+      if (!text) setSlashNotice("No assistant reply to copy")
+      else { await navigator.clipboard.writeText(text); setSlashNotice("Copied the last assistant reply") }
+    } else if (command.name === "queue") {
+      if (parsed.args === "clear") { await replaceQueue([]); setSlashNotice("Prompt queue cleared") }
+      else setSlashNotice(describePromptQueue(queuedPrompts()))
+    } else if (command.name === "compress") {
+      const checkpoint = checkpointFor(messages())
+      const thread = chatThreads().find((entry) => entry.id === activeThreadId())
+      if (!checkpoint || !thread) setSlashNotice("Not enough visible conversation to compress yet")
+      else { await updateThreadMeta(thread, { summary: checkpoint }); setSlashNotice("Stored a visible-only conversation checkpoint") }
+    }
     else {
       const destinations: Record<string, string> = { workspace: "workspace", terminal: "terminal", review: "review", skills: "skills", runs: "runs", scheduled: "scheduled", settings: "settings" }
       const destination = destinations[command.name]
@@ -488,6 +573,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setAutoLearnStatus((await window.api.store.get<string>(STORE_KEYS.autoLearnLastStatus)) || "No review has run yet")
     setWebSearchEnabled((await window.api.store.get<boolean>(STORE_KEYS.defaultsWebSearch)) ?? true)
     setAgentAppControls((await window.api.store.get<boolean>(STORE_KEYS.agentAppControls)) ?? false)
+    const host = await window.api.hostControls.resolve()
+    setHostControls(host)
+    setHostBrowserDraft(host.browser.source === "settings" ? host.browser.path : "")
+    setHostDesktopDraft(host.desktop.source === "settings" ? host.desktop.path : "")
     setSubagentsEnabled((await window.api.store.get<boolean>(STORE_KEYS.agentSubagents)) ?? true)
     setDelegationMode((await window.api.store.get<"balanced" | "aggressive">(STORE_KEYS.agentDelegationMode)) ?? "balanced")
     // Older builds enabled high reasoning, self-verification, and subagents at
@@ -528,6 +617,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
       if (event.type === "cancelled") queueBackendEvent({ kind: "text", content: event.data || "Task cancelled." })
     })
+    const onGlobalKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+        setPaletteQuery("")
+        setPaletteSelection(0)
+      } else if (event.key === "Escape" && paletteOpen()) {
+        event.preventDefault()
+        setPaletteOpen(false)
+      }
+    }
+    window.addEventListener("keydown", onGlobalKey)
+    onCleanup(() => window.removeEventListener("keydown", onGlobalKey))
     unsubscribeMenu = window.api.onMenuCommand((command) => {
       if (command === "new-task") {
         setActive("new-task")
@@ -600,7 +702,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (!ephemeral && await executeSlashCommand(submitted)) return []
     if (running()) {
       if (ephemeral) return [{ kind: "error", content: "Grok is already running another task." }]
-      setQueuedPrompts((old) => [...old, { id: crypto.randomUUID(), text: submitted }])
+      await replaceQueue(enqueuePrompt(queuedPrompts(), submitted, crypto.randomUUID()))
       setPrompt(""); setHistoryIndex(-1)
       return []
     }
@@ -753,10 +855,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setRuns(await window.api.grokRuns.list())
     setSkills(await window.api.skills.list(workspace()))
     if (!ephemeral && !submitted.startsWith("[/learn]")) await maybeAutoLearn()
-    const next = ephemeral ? undefined : queuedPrompts()[0]
-    if (next) {
-      setQueuedPrompts((old) => old.slice(1))
-      queueMicrotask(() => void run(next.text))
+    const next = ephemeral ? undefined : dequeuePrompt(queuedPrompts())
+    if (next.next) {
+      await replaceQueue(next.remaining)
+      queueMicrotask(() => void run(next.next!.text))
     }
     return completedLogs
   }
@@ -860,7 +962,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setOpenFile(""); setFileContent(""); setFileNotice(""); setSelectedDiff(""); setDiffContent("")
     // Switching workspaces must never leak in-flight event buffers, queued
     // prompts, or a half-finished typing indicator from the previous one.
-    if (project.path !== workspace()) { setEvents([]); setQueuedPrompts([]) }
+    if (project.path !== workspace()) { setEvents([]); await replaceQueue([]) }
     if (active() === "workspace") await refreshFiles(project.path)
     if (active() === "review") await refreshDiff(project.path)
     if (active() === "skills") setSkills(await window.api.skills.list(project.path))
@@ -899,6 +1001,26 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
 
   return <div class={`app-root ${sidebarCollapsed() ? "app-root--sidebar-collapsed" : ""}`}>
+    <Show when={paletteOpen()}>
+      <div class="command-palette" role="dialog" aria-label="Command palette">
+        <input
+          autofocus
+          value={paletteQuery()}
+          placeholder="Search commands, chats, models…"
+          onInput={(event) => { setPaletteQuery(event.currentTarget.value); setPaletteSelection(0) }}
+          onKeyDown={(event) => {
+            const items = paletteItems()
+            if (event.key === "ArrowDown") { event.preventDefault(); setPaletteSelection((value) => items.length ? (value + 1) % items.length : 0) }
+            else if (event.key === "ArrowUp") { event.preventDefault(); setPaletteSelection((value) => items.length ? (value - 1 + items.length) % items.length : 0) }
+            else if (event.key === "Enter") { event.preventDefault(); const item = items[paletteSelection()]; if (item) void runPaletteItem(item.id) }
+            else if (event.key === "Escape") { event.preventDefault(); setPaletteOpen(false) }
+          }}
+        />
+        <For each={paletteItems()} fallback={<p>No matches.</p>}>
+          {(item, index) => <button class={index() === paletteSelection() ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); void runPaletteItem(item.id) }}><strong>{item.label}</strong><span>{item.hint}</span></button>}
+        </For>
+      </div>
+    </Show>
     <aside class={`sidebar ${sidebarCollapsed() ? "sidebar--collapsed" : ""}`}>
       <div class="brand"><img class="brand__logo" src={grokBuildLogo} alt="" /><span>Grok Build</span><button class="sidebar-collapse" onClick={async () => { const next = !sidebarCollapsed(); setSidebarCollapsed(next); await window.api.store.set(STORE_KEYS.layoutSidebarCollapsed, next) }} title={sidebarCollapsed() ? "Expand sidebar" : "Collapse sidebar"}>{sidebarCollapsed() ? "›" : "‹"}</button></div>
       <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => void navigate(item.id)}><span>{item.icon}</span>{item.label}</button>}</For></nav>
@@ -935,11 +1057,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           </div>
         </section>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
-        <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => setQueuedPrompts((old) => old.filter((item) => item.id !== entry.id))}>×</button></div>}</For></section></Show>
+        <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For></section></Show>
         <section class="chat-composer chat-composer--docked" aria-label="Grok Build task composer">
           <div class="chat-composer__context">
             <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
-            <span class="composer-hint">Grok Build can read and edit this workspace</span>
+            <span class="composer-hint">⌘K palette · / commands · Grok Build edits this workspace</span>
           </div>
           <Show when={slashMatches().length}><div class="slash-palette"><For each={slashMatches()}>{(command, index) => <button class={index() === slashSelection() ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); setPrompt(`/${command.name}${command.usage?.includes("<") ? " " : ""}`); setSlashSelection(0) }}><code>/{command.name}</code><span>{command.description}</span><Show when={command.usage}><small>{command.usage}</small></Show></button>}</For></div></Show>
           <Show when={slashNotice()}><pre class="slash-notice">{slashNotice()}</pre></Show>
@@ -953,7 +1075,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
               <optgroup label="Mixture of Agents"><option value="__moa__:2">MoA · Fast ×2</option><option value="__moa__:3">MoA · Balanced ×3</option><option value="__moa__:5">MoA · Thorough ×5</option><option value="__moa__:8">MoA · Exhaustive ×8</option><Show when={![2,3,5,8].includes(moaCandidates())}><option value={`__moa__:${moaCandidates()}`}>MoA · Custom ×{moaCandidates()}</option></Show></optgroup>
               <optgroup label="Single model">
               <option value="">{catalog().defaultModel || "Default model"}</option>
-              <For each={selectableModels()}>{(entry) => <option value={entry}>{entry}</option>}</For>
+              <For each={modelOptions()}>{(entry) => <option value={entry.id} disabled={!entry.available}>{entry.available ? entry.label : `${entry.label} — ${entry.reason}`}</option>}</For>
               </optgroup>
             </select>
             <button class="composer-send" disabled={!prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (Enter)" : "Send (Enter)"}>{running() ? "+" : "↑"}</button>
@@ -998,6 +1120,32 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <div class="settings-card"><div><strong>Delegation and MoA</strong><span>Native Grok subagents plus private Hermes-style advisor fan-out.</span></div><div class="agent-defaults-grid"><label class="settings-switch"><input type="checkbox" checked={subagentsEnabled()} onChange={async (event) => { setSubagentsEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.agentSubagents, event.currentTarget.checked) }} /><span />Enable subagents</label><label>Delegation style<select value={delegationMode()} disabled={!subagentsEnabled()} onChange={async (event) => { const value = event.currentTarget.value as "balanced" | "aggressive"; setDelegationMode(value); await window.api.store.set(STORE_KEYS.agentDelegationMode, value) }}><option value="balanced">Balanced</option><option value="aggressive">Proactive parallel</option></select></label><label class="settings-switch"><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} /><span />Enable Mixture of Agents</label><label>Advisor budget<input type="number" min="200" max="2000" step="100" disabled={!moaEnabled()} value={moaReferenceTokenBudget()} onInput={async (event) => { const value = Math.min(2000, Math.max(200, Number(event.currentTarget.value) || 600)); setMoaReferenceTokenBudget(value); await window.api.store.set(STORE_KEYS.moaReferenceTokenBudget, value) }} /><small>tokens · fluid default 600</small></label></div><p class="provider-notice">Advisors remain private and read-only. One acting aggregator owns implementation and verification, while independent subagents can research, inspect, and test without overlapping edits.</p></div>
 
           <div class="settings-card"><div><strong>Agent authority</strong><span>Typed, allowlisted controls for the app and preview.</span></div><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={agentAppControls()} onChange={async (event) => { setAgentAppControls(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.agentAppControls, event.currentTarget.checked) }} /><span />Allow safe app controls</label><p class="provider-notice">When enabled, the agent may inspect the rendered preview, open it, and create validated schedules. It cannot read credentials, click arbitrary UI, silently broaden permissions, or escape the selected workspace.</p></div>
+
+          <div class="settings-card">
+            <div><strong>Host control scripts</strong><span>Optional browser and computer-use helpers. Discovered from your home directory; no machine-specific path is shipped.</span></div>
+            <label class="settings-switch"><input type="checkbox" checked={hostControls()?.disabled ?? false} onChange={async (event) => { try { const next = await window.api.hostControls.save({ disabled: event.currentTarget.checked }); setHostControls(next); setHostNotice(next.disabled ? "Host helpers disabled for this machine." : "Host helpers enabled.") } catch (error) { setHostNotice(error instanceof Error ? error.message : String(error)) } }} /><span />Disable host browser/desktop helpers</label>
+            <div class="host-helper-row">
+              <label>Browser helper<input value={hostBrowserDraft()} onInput={(event) => setHostBrowserDraft(event.currentTarget.value)} placeholder={hostControls()?.browser.path || "browser-control.sh"} disabled={hostControls()?.disabled} /></label>
+              <div class="token-row">
+                <button disabled={hostControls()?.disabled} onClick={async () => { const picked = await window.api.dialog.openFile({ filters: [{ name: "Control scripts", extensions: ["sh", "command", "cmd", "ps1", "bat"] }] }); if (!picked.canceled && picked.filePaths[0]) { setHostBrowserDraft(picked.filePaths[0]); const next = await window.api.hostControls.save({ browserScript: picked.filePaths[0] }); setHostControls(next); setHostNotice("Saved browser helper override.") } }}>Browse</button>
+                <button class="primary" disabled={hostControls()?.disabled} onClick={async () => { try { const next = await window.api.hostControls.save({ browserScript: hostBrowserDraft() }); setHostControls(next); setHostBrowserDraft(next.browser.source === "settings" ? next.browser.path : ""); const status = await window.api.hostControls.browserStatus(); setHostNotice(status.ok ? `Browser helper ready · ${status.backend}` : status.error || "Browser helper test failed") } catch (error) { setHostNotice(error instanceof Error ? error.message : String(error)) } }}>Save + test</button>
+                <button disabled={hostControls()?.disabled || hostControls()?.browser.source !== "settings"} onClick={async () => { const next = await window.api.hostControls.save({ browserScript: "" }); setHostControls(next); setHostBrowserDraft(""); setHostNotice("Cleared browser override. Discovery will be used.") }}>Use default</button>
+              </div>
+              <p class={`host-helper-status ${hostControls()?.browser.exists ? "host-helper-status--ready" : "host-helper-status--missing"}`}>{hostHelperStatus(hostControls()?.browser)}</p>
+            </div>
+            <div class="host-helper-row">
+              <label>Desktop helper<input value={hostDesktopDraft()} onInput={(event) => setHostDesktopDraft(event.currentTarget.value)} placeholder={hostControls()?.desktop.path || "desktop-control.sh"} disabled={hostControls()?.disabled} /></label>
+              <div class="token-row">
+                <button disabled={hostControls()?.disabled} onClick={async () => { const picked = await window.api.dialog.openFile({ filters: [{ name: "Control scripts", extensions: ["sh", "command", "cmd", "ps1", "bat"] }] }); if (!picked.canceled && picked.filePaths[0]) { setHostDesktopDraft(picked.filePaths[0]); const next = await window.api.hostControls.save({ desktopScript: picked.filePaths[0] }); setHostControls(next); setHostNotice("Saved desktop helper override.") } }}>Browse</button>
+                <button class="primary" disabled={hostControls()?.disabled} onClick={async () => { try { const next = await window.api.hostControls.save({ desktopScript: hostDesktopDraft() }); setHostControls(next); setHostDesktopDraft(next.desktop.source === "settings" ? next.desktop.path : ""); const status = await window.api.hostControls.desktopStatus(); setHostNotice(status.ok ? `Desktop helper ready · ${status.backend}` : status.error || "Desktop helper test failed") } catch (error) { setHostNotice(error instanceof Error ? error.message : String(error)) } }}>Save + test</button>
+                <button disabled={hostControls()?.disabled || hostControls()?.desktop.source !== "settings"} onClick={async () => { const next = await window.api.hostControls.save({ desktopScript: "" }); setHostControls(next); setHostDesktopDraft(""); setHostNotice("Cleared desktop override. Discovery will be used.") }}>Use default</button>
+              </div>
+              <p class={`host-helper-status ${hostControls()?.desktop.exists ? "host-helper-status--ready" : "host-helper-status--missing"}`}>{hostHelperStatus(hostControls()?.desktop)}</p>
+            </div>
+            <p class={`host-helper-status ${hostControls()?.search.exists ? "host-helper-status--ready" : ""}`}>Search helper {hostHelperStatus(hostControls()?.search)}</p>
+            <Show when={hostNotice()}><p class="provider-notice">{hostNotice()}</p></Show>
+            <p class="provider-notice">Helpers are injected into Grok Build only when the script exists. Override with Settings, or set GROK_BROWSER_CONTROL, GROK_DESKTOP_CONTROL, and GROK_SEARCH_HELPER.</p>
+          </div>
 
           <div class="settings-card"><div><strong>Hermes-style session lifecycle</strong><span>Recovery, rewinds, compaction, and optional idle resets for remote agent sessions.</span></div><div class="agent-defaults-grid"><label>Idle reset<input type="number" min="0" max="168" value={sessionIdleHours()} onInput={async (event) => { const value = Math.min(168, Math.max(0, Number(event.currentTarget.value) || 0)); setSessionIdleHours(value); await window.api.store.set(STORE_KEYS.agentSessionIdleHours, value) }} /><small>hours · 0 keeps sessions indefinitely</small></label><div class="agent-lifecycle-list"><span>✓ Crash-safe session resume</span><span>✓ Visible transcript recovery</span><span>✓ Retry and turn rewind</span><span>✓ Bounded context checkpoints</span></div></div><p class="provider-notice">Use <code>/retry</code>, <code>/undo</code>, <code>/compress</code>, and <code>/reasoning</code> from Telegram. Rewinds intentionally start a fresh native Grok session and recover from the corrected visible transcript so removed output cannot leak back in.</p></div>
 

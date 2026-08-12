@@ -24,6 +24,6 @@
     },
     "types": ["node"]
   },
-  "include": ["src/**/*", "scripts/**/*", "electron.vite.config.ts", "electron-builder.config.ts"],
-  "exclude": ["node_modules", "out", "dist"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "out", "dist", "**/*.app"]
 }

@@ -16,7 +16,18 @@ import { telegramHtml, telegramTextChunks } from "../src/main/telegram-text.ts"
 import { telegramTaskNeedsMoa } from "../src/main/telegram-agent-policy.ts"
 import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeMoaReferenceBudget, MAX_MOA_CONTEXT_CHARS } from "../src/main/moa-utils.ts"
 import { listGrokSkills } from "../src/main/grok-skills.ts"
-import { normalizeBackendStderr } from "../src/main/backend-error.ts"
+import { classifyBackendError, normalizeBackendStderr } from "../src/main/backend-error.ts"
+import { StreamingJsonParser, parseStreamLine } from "../src/main/streaming-json.ts"
+import { conversationToMarkdown } from "../src/main/conversation-markdown.ts"
+import { rankConversationMatches } from "../src/main/conversation-search.ts"
+import { enqueuePrompt, dequeuePrompt, parsePromptQueue } from "../src/renderer/prompt-queue.ts"
+import { lastUserInstruction, rewindLastTurn } from "../src/renderer/conversation-lifecycle.ts"
+import { matchingSlashCommands } from "../src/renderer/slash-commands.ts"
+import { buildPaletteItems, filterPaletteItems } from "../src/renderer/command-palette.ts"
+import { catalogModelOptions } from "../src/renderer/provider-availability.ts"
+import { statSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { dirname } from "node:path"
 import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
 import { withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
 import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
@@ -24,6 +35,7 @@ import { mergeLogs, LiveEventBuffer, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } 
 import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, buildTelegramMoaMenu, buildTelegramMoaReferencePicker, buildTelegramMoaAggregatorPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
 import { parseGrokModels } from "../src/main/grok-models.ts"
 import { parseGrokSubcommands, parseGrokSubcommandNames } from "../src/main/grok-subcommands.ts"
+import { buildHostControlsPromptBlock, buildSearchControlsPromptBlock, resolveHostControls, sanitizeHostHelperPath } from "../src/main/host-control-paths.ts"
 import { isSafeExternalUrl } from "../src/shared/url-safety.ts"
 import { validateAppAction, validateAppActions } from "../src/main/app-actions.ts"
 import { validateAppAction as validateAppActionRenderer } from "../src/renderer/app-actions.ts"
@@ -813,4 +825,122 @@ assert.equal(isSafeExternalUrl("  https://example.com/  "), true)
   const r3 = compatibleCliArgs(["--model", "gpt-x", "literal"], new Set(), () => {})
   assert.deepEqual(r3, ["literal"])
 }
-console.log("Smoke test passed: CLI, chat parsing, Telegram keyboards, workspace, preview, containment, terminal, and Git review")
+
+// Imagine-generated icon and in-app logo must occupy the packager and
+// renderer slots the desktop actually loads.
+{
+  const here = dirname(fileURLToPath(import.meta.url))
+  const icon = statSync(join(here, "../resources/icon.png"))
+  const icns = statSync(join(here, "../resources/icon.icns"))
+  const resourceLogo = statSync(join(here, "../resources/grok-build-logo.png"))
+  const rendererLogo = statSync(join(here, "../src/renderer/assets/grok-build-logo.png"))
+  assert.ok(icon.size > 20_000, "packager icon.png must be a real image")
+  assert.ok(icns.size > 20_000, "packager icon.icns must be a real image")
+  assert.ok(resourceLogo.size > 20_000, "resource logo must be a real image")
+  assert.ok(rendererLogo.size > 20_000, "renderer logo must be a real image")
+}
+
+// Streaming-json parser: split chunks, SSE wrappers, and concatenated
+// objects must still become Grok Build events — never a second agent loop.
+{
+  const parser = new StreamingJsonParser()
+  assert.deepEqual(parser.push('{"type":"text","da'), [])
+  const events = parser.push('ta":"hello","session_id":"s1"}\n')
+  assert.equal(events[0]?.type, "text")
+  assert.equal(events[0]?.data, "hello")
+  assert.equal(events[0]?.sessionId, "s1")
+  const sse = parseStreamLine('data: {"type":"end","session_id":"s1"}')
+  assert.equal(sse[0]?.type, "end")
+  assert.equal(sse[0]?.sessionId, "s1")
+}
+
+// Durable prompt queue and desktop lifecycle helpers.
+{
+  const queued = enqueuePrompt([], "  retry the parser  ", "q1", 1)
+  assert.equal(queued[0]?.text, "retry the parser")
+  assert.equal(dequeuePrompt(queued).next?.id, "q1")
+  assert.equal(parsePromptQueue([{ id: "q1", text: "ok", createdAt: 1 }])[0]?.text, "ok")
+  const messages = [
+    { id: "u1", role: "user", createdAt: 1, logs: [{ kind: "text", content: "keep" }] },
+    { id: "a1", role: "assistant", createdAt: 2, logs: [{ kind: "text", content: "ok" }] },
+    { id: "u2", role: "user", createdAt: 3, logs: [{ kind: "text", content: "retry me" }] },
+    { id: "a2", role: "assistant", createdAt: 4, logs: [{ kind: "text", content: "done" }] },
+  ]
+  assert.equal(lastUserInstruction(messages), "retry me")
+  assert.deepEqual(rewindLastTurn(messages).remaining.map((entry) => entry.id), ["u1", "a1"])
+  assert.equal(matchingSlashCommands("/ret")[0]?.name, "retry")
+  assert.equal(matchingSlashCommands("/exp")[0]?.name, "export")
+  const palette = filterPaletteItems(buildPaletteItems({
+    commands: [{ name: "retry", description: "Rerun" }],
+    views: [{ id: "settings", label: "Settings" }],
+    chats: [{ id: "c1", title: "Parser" }],
+    models: ["grok-4.5"],
+  }), "retry")
+  assert.equal(palette[0]?.id, "command:retry")
+  const options = catalogModelOptions(["grok-4.5", "codex-gpt-5"], [], "grok-4.5")
+  assert.equal(options[0]?.available, true)
+}
+
+// Ranked search + markdown export stay thought/action-free.
+{
+  const threads = [
+    { id: "hit", title: "Streaming parser", updatedAt: 5, messages: [{ logs: [{ kind: "text", content: "unrelated" }] }] },
+    { id: "secret", title: "Notes", updatedAt: 9, messages: [{ logs: [{ kind: "thought", content: "streaming parser secret" }] }] },
+  ]
+  const ranked = rankConversationMatches(threads, "streaming parser")
+  assert.equal(ranked[0]?.id, "hit")
+  assert.equal(ranked.some((thread) => thread.id === "secret"), false)
+  const markdown = conversationToMarkdown({
+    title: "Export",
+    workspace: "/tmp/demo",
+    updatedAt: Date.parse("2026-08-12T00:00:00.000Z"),
+    messages: [{ role: "assistant", logs: [{ kind: "thought", content: "hidden" }, { kind: "text", content: "Visible <app_action>{\"type\":\"preview.open\"}</app_action>" }] }],
+  })
+  assert.match(markdown, /Visible/)
+  assert.doesNotMatch(markdown, /hidden|preview\.open/)
+}
+
+// Error classification is shared with grok run history.
+{
+  const rate = classifyBackendError("HTTP 429 rate limit")
+  assert.equal(rate.class, "rate_limit")
+  assert.equal(rate.retryable, true)
+  const auth = classifyBackendError("unauthorized token")
+  assert.equal(auth.class, "authentication")
+  assert.equal(auth.retryable, false)
+}
+
+// Checkpoints must not store app-action payloads.
+{
+  const items = Array.from({ length: 12 }, (_, index) => ({
+    role: index % 2 ? "assistant" : "user",
+    logs: [{ kind: "text", content: `decision ${index} <app_action>{"type":"preview.open"}</app_action>` }],
+  }))
+  const checkpoint = checkpointFor(items)
+  assert.match(checkpoint || "", /decision/)
+  assert.doesNotMatch(checkpoint || "", /app_action|preview\.open/)
+}
+
+// Host-control helpers must resolve from the current home directory, never a
+// hardcoded developer username. Settings and env win; missing helpers stay
+// out of the agent prompt.
+{
+  const home = "/Users/example"
+  const browserPath = join(home, ".openclaw", "workspace", "tools", "browser-control.sh")
+  const resolved = resolveHostControls({
+    home,
+    exists: (path) => path === browserPath,
+  })
+  assert.equal(resolved.browser.path, browserPath)
+  assert.equal(resolved.browser.source, "discovered")
+  assert.doesNotMatch(resolved.browser.path, /\/Users\/duckets\//)
+  const prompt = buildHostControlsPromptBlock(resolved)
+  assert.match(prompt, /browser-control\.sh status/)
+  assert.doesNotMatch(prompt, /desktop-control\.sh/)
+  assert.doesNotMatch(prompt, /\/Users\/duckets\//)
+  assert.equal(buildSearchControlsPromptBlock(resolved), "")
+  assert.equal(buildHostControlsPromptBlock({ ...resolved, disabled: true }), "")
+  assert.throws(() => sanitizeHostHelperPath("/tmp/bad;rm"), /shell metacharacters/)
+}
+
+console.log("Smoke test passed: CLI, chat parsing, Telegram keyboards, workspace, preview, containment, terminal, Git review, streaming-json, queue, and search")
