@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, DuckbotMemoryStatus } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -84,9 +84,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [historySearch, setHistorySearch] = createSignal("")
   const [historyAllWorkspaces, setHistoryAllWorkspaces] = createSignal(false)
   const [historyResults, setHistoryResults] = createSignal<ChatThread[]>([])
-  const [sessionIndex, setSessionIndex] = createSignal<ChatThread[]>([])
+  const [sessionIndex, setSessionIndex] = createSignal<StoredChatSummary[]>([])
   const [sessionSwitcherOpen, setSessionSwitcherOpen] = createSignal(false)
   const [sessionSwitcherIndex, setSessionSwitcherIndex] = createSignal(0)
+  const [sessionSwitcherNotice, setSessionSwitcherNotice] = createSignal("")
   const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
   const [paletteOpen, setPaletteOpen] = createSignal(false)
   const [paletteQuery, setPaletteQuery] = createSignal("")
@@ -353,8 +354,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await replaceQueue([])
     setHistoryOpen(false)
   }
-  const openConversation = async (thread: ChatThread) => {
+  const openConversation = async (entry: ChatThread | StoredChatSummary) => {
     if (running()) return
+    const thread = "messageCount" in entry ? await window.api.conversations.get(entry.id) : entry
+    if (!thread) return
     if (thread.workspace && thread.workspace !== workspace()) {
       setWorkspace(thread.workspace)
       setSelectedProject(projects().find((project) => project.path === thread.workspace) || null)
@@ -416,13 +419,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     chats: chatThreads().filter((thread) => !thread.archived).map((thread) => ({ id: thread.id, title: thread.title })),
     models: selectableModels(),
   }), paletteQuery())
-  const refreshSessionIndex = async () => setSessionIndex(await window.api.conversations.search("", undefined) as ChatThread[])
-  const switcherThreads = () => sessionIndex().filter((thread) => !thread.archived && thread.messages.length)
+  const refreshSessionIndex = async () => setSessionIndex(await window.api.conversations.summaries(undefined))
+  const switcherThreads = () => sessionIndex().filter((thread) => !thread.archived && thread.messageCount > 0)
     .sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || right.updatedAt - left.updatedAt)
   const sessionWorkspaceLabel = (root: string) => projects().find((project) => project.path === root)?.name || root.split(/[\\/]+/).filter(Boolean).at(-1) || "Workspace"
+  createEffect(() => {
+    const count = switcherThreads().length
+    if (!count) { setSessionSwitcherIndex(0); setSessionSwitcherOpen(false) }
+    else if (sessionSwitcherIndex() >= count) setSessionSwitcherIndex(count - 1)
+  })
   const advanceSessionSwitcher = (direction: 1 | -1) => {
     const threads = switcherThreads()
     if (threads.length < 2) return
+    setSessionSwitcherNotice("")
     const current = threads.findIndex((thread) => thread.id === activeThreadId())
     if (!sessionSwitcherOpen()) {
       setSessionSwitcherIndex((current + direction + threads.length) % threads.length)
@@ -432,8 +441,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setSessionSwitcherIndex((index) => (index + direction + threads.length) % threads.length)
   }
   const commitSessionSwitcher = async () => {
+    if (running()) { setSessionSwitcherNotice("Stop the active task before switching conversations."); return }
     const target = switcherThreads()[sessionSwitcherIndex()]
     setSessionSwitcherOpen(false)
+    setSessionSwitcherNotice("")
     if (target) await openConversation(target)
   }
   const runPaletteItem = async (id: string) => {
@@ -1141,11 +1152,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     <Show when={sessionSwitcherOpen()}>
       <div class="session-switcher" role="dialog" aria-label="Conversation switcher">
         <header><strong>Switch conversation</strong><span>Ctrl+Tab to move · Enter to open · Esc to close</span></header>
+        <Show when={sessionSwitcherNotice()}><p class="session-switcher__notice">{sessionSwitcherNotice()}</p></Show>
         <div class="session-switcher__list">
           <For each={switcherThreads()}>
             {(thread, index) => <button class={index() === sessionSwitcherIndex() ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); setSessionSwitcherIndex(index()); void commitSessionSwitcher() }}>
               <span class="session-switcher__icon">{thread.id === activeThreadId() ? "●" : "○"}</span>
-              <span class="session-switcher__copy"><strong>{thread.title}</strong><small>{sessionWorkspaceLabel(thread.workspace)} · {thread.messages.length} messages · {new Date(thread.updatedAt).toLocaleString()}</small></span>
+              <span class="session-switcher__copy"><strong>{thread.title}</strong><small>{sessionWorkspaceLabel(thread.workspace)} · {thread.messageCount} messages · {new Date(thread.updatedAt).toLocaleString()}</small></span>
               <kbd>{index() + 1}</kbd>
             </button>}
           </For>

@@ -16,7 +16,7 @@ import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSched
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
 import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
 import { PreviewServer } from "./preview-server"
-import { exportConversation, getConversation, listConversations, saveConversation, searchConversations, type StoredChatThread } from "./conversation-store"
+import { exportConversation, getConversation, listConversationSummaries, listConversations, saveConversation, searchConversations, type StoredChatThread } from "./conversation-store"
 import { DuckbotMemory } from "./duckbot-memory"
 import { hostBrowserOpen, hostBrowserStatus, hostDesktopStatus } from "./host-controls"
 
@@ -140,6 +140,7 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.handle("grok-runs:list", () => listGrokRuns())
   ipcMain.handle("conversations:list", (_event, workspace?: string) => listConversations(workspace))
+  ipcMain.handle("conversations:summaries", (_event, workspace?: string) => listConversationSummaries(workspace))
   ipcMain.handle("conversations:get", (_event, id: string) => getConversation(id))
   ipcMain.handle("conversations:save", (_event, thread: StoredChatThread) => saveConversation(thread))
   ipcMain.handle("conversations:search", (_event, query: string, workspace?: string) => searchConversations(query, workspace))

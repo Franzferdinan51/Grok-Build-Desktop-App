@@ -12,6 +12,7 @@ export type StoredChatThread = {
   messages: StoredChatMessage[]; sessionId: string; model?: string; summary?: string
   pinned?: boolean; archived?: boolean; sessionStatus?: "new" | "resumable" | "recovered" | "broken"
 }
+export type StoredChatSummary = Omit<StoredChatThread, "messages"> & { messageCount: number }
 
 const directory = () => join(app.getPath("userData"), "conversations")
 const fileFor = (id: string) => join(directory(), `${id.replace(/[^a-zA-Z0-9-]/g, "")}.json`)
@@ -48,6 +49,11 @@ export async function listConversations(workspace?: string): Promise<StoredChatT
   }))
   return threads.filter((thread): thread is StoredChatThread => Boolean(thread && (!workspace || thread.workspace === workspace)))
     .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt)
+}
+
+export async function listConversationSummaries(workspace?: string): Promise<StoredChatSummary[]> {
+  const threads = await listConversations(workspace)
+  return threads.map(({ messages, ...thread }) => ({ ...thread, messageCount: messages.length }))
 }
 
 export async function getConversation(id: string): Promise<StoredChatThread | undefined> {
