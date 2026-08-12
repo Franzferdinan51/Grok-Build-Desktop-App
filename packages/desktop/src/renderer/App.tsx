@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, DuckbotMemoryStatus, HostControlsSnapshot, HostHelperResolution } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, DuckbotMemoryStatus } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -14,6 +14,8 @@ import { dequeuePrompt, describePromptQueue, enqueuePrompt, parsePromptQueue, re
 import { lastUserInstruction, rewindLastTurn } from "./conversation-lifecycle"
 import { buildPaletteItems, filterPaletteItems } from "./command-palette"
 import { catalogModelOptions } from "./provider-availability"
+import { frameWorkflowPrompt, parseWorkflowName, WORKFLOWS } from "./workflow-presets"
+import { summarizeHarnessDoctor } from "./harness-doctor"
 import { RunsPanel } from "./views/RunsPanel"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
@@ -32,12 +34,6 @@ const MAX_LIVE_LOG_CHARS = eventBuffer.MAX_LIVE_LOG_CHARS
 const MAX_LIVE_LOG_ENTRIES = eventBuffer.MAX_LIVE_LOG_ENTRIES
 void MAX_LIVE_LOG_CHARS
 void MAX_LIVE_LOG_ENTRIES
-
-function hostHelperStatus(helper?: HostHelperResolution) {
-  if (!helper) return "Resolving helper path…"
-  const source = helper.source === "settings" ? "Saved override" : helper.source === "env" ? "Environment" : helper.source === "discovered" ? "Discovered" : "Not found"
-  return `${source}${helper.exists ? " · ready" : " · missing"}: ${helper.path}`
-}
 
 function RichText(props: { content: string }) {
   const html = () => DOMPurify.sanitize(marked.parse(props.content, { async: false }) as string)
@@ -140,10 +136,6 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false)
   const [previewCollapsed, setPreviewCollapsed] = createSignal(false)
   const [agentAppControls, setAgentAppControls] = createSignal(false)
-  const [hostControls, setHostControls] = createSignal<HostControlsSnapshot | null>(null)
-  const [hostBrowserDraft, setHostBrowserDraft] = createSignal("")
-  const [hostDesktopDraft, setHostDesktopDraft] = createSignal("")
-  const [hostNotice, setHostNotice] = createSignal("")
   const [subagentsEnabled, setSubagentsEnabled] = createSignal(true)
   const [delegationMode, setDelegationMode] = createSignal<"balanced" | "aggressive">("balanced")
   const [slashSelection, setSlashSelection] = createSignal(0)
@@ -476,7 +468,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const rewound = rewindLastTurn(messages())
       if (!rewound.removed.length) setSlashNotice("Nothing to undo")
       else {
-        await saveConversation(rewound.remaining)
+        await saveConversation(rewound.remaining as ChatMessage[])
         setSessionId("")
         if (workspace()) await window.api.store.delete(sessionKey())
         const thread = chatThreads().find((entry) => entry.id === activeThreadId())
@@ -502,6 +494,19 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const thread = chatThreads().find((entry) => entry.id === activeThreadId())
       if (!checkpoint || !thread) setSlashNotice("Not enough visible conversation to compress yet")
       else { await updateThreadMeta(thread, { summary: checkpoint }); setSlashNotice("Stored a visible-only conversation checkpoint") }
+    } else if (command.name === "workflow") {
+      const [name, ...rest] = parsed.args.split(/\s+/)
+      const workflow = parseWorkflowName(name || "")
+      if (!workflow) setSlashNotice(`Workflows: ${Object.keys(WORKFLOWS).join(", ")}`)
+      else {
+        const goal = rest.join(" ").trim()
+        setSlashNotice(`Starting Duck-Agent ${workflow} workflow through Grok Build…`)
+        queueMicrotask(() => void run(frameWorkflowPrompt(workflow, goal)))
+      }
+    } else if (command.name === "doctor") {
+      const status = props.backendStatus()
+      const report = summarizeHarnessDoctor({ available: status.available, command: status.command, version: status.version, error: status.error })
+      setSlashNotice(report.lines.join("\n"))
     }
     else {
       const destinations: Record<string, string> = { workspace: "workspace", terminal: "terminal", review: "review", skills: "skills", runs: "runs", scheduled: "scheduled", settings: "settings" }
@@ -573,10 +578,6 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setAutoLearnStatus((await window.api.store.get<string>(STORE_KEYS.autoLearnLastStatus)) || "No review has run yet")
     setWebSearchEnabled((await window.api.store.get<boolean>(STORE_KEYS.defaultsWebSearch)) ?? true)
     setAgentAppControls((await window.api.store.get<boolean>(STORE_KEYS.agentAppControls)) ?? false)
-    const host = await window.api.hostControls.resolve()
-    setHostControls(host)
-    setHostBrowserDraft(host.browser.source === "settings" ? host.browser.path : "")
-    setHostDesktopDraft(host.desktop.source === "settings" ? host.desktop.path : "")
     setSubagentsEnabled((await window.api.store.get<boolean>(STORE_KEYS.agentSubagents)) ?? true)
     setDelegationMode((await window.api.store.get<"balanced" | "aggressive">(STORE_KEYS.agentDelegationMode)) ?? "balanced")
     // Older builds enabled high reasoning, self-verification, and subagents at
@@ -855,10 +856,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setRuns(await window.api.grokRuns.list())
     setSkills(await window.api.skills.list(workspace()))
     if (!ephemeral && !submitted.startsWith("[/learn]")) await maybeAutoLearn()
-    const next = ephemeral ? undefined : dequeuePrompt(queuedPrompts())
-    if (next.next) {
-      await replaceQueue(next.remaining)
-      queueMicrotask(() => void run(next.next!.text))
+    const drained = ephemeral ? undefined : dequeuePrompt(queuedPrompts())
+    const queued = drained?.next
+    if (queued) {
+      await replaceQueue(drained.remaining)
+      queueMicrotask(() => void run(queued.text))
     }
     return completedLogs
   }
@@ -1121,31 +1123,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
           <div class="settings-card"><div><strong>Agent authority</strong><span>Typed, allowlisted controls for the app and preview.</span></div><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={agentAppControls()} onChange={async (event) => { setAgentAppControls(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.agentAppControls, event.currentTarget.checked) }} /><span />Allow safe app controls</label><p class="provider-notice">When enabled, the agent may inspect the rendered preview, open it, and create validated schedules. It cannot read credentials, click arbitrary UI, silently broaden permissions, or escape the selected workspace.</p></div>
 
-          <div class="settings-card">
-            <div><strong>Host control scripts</strong><span>Optional browser and computer-use helpers. Discovered from your home directory; no machine-specific path is shipped.</span></div>
-            <label class="settings-switch"><input type="checkbox" checked={hostControls()?.disabled ?? false} onChange={async (event) => { try { const next = await window.api.hostControls.save({ disabled: event.currentTarget.checked }); setHostControls(next); setHostNotice(next.disabled ? "Host helpers disabled for this machine." : "Host helpers enabled.") } catch (error) { setHostNotice(error instanceof Error ? error.message : String(error)) } }} /><span />Disable host browser/desktop helpers</label>
-            <div class="host-helper-row">
-              <label>Browser helper<input value={hostBrowserDraft()} onInput={(event) => setHostBrowserDraft(event.currentTarget.value)} placeholder={hostControls()?.browser.path || "browser-control.sh"} disabled={hostControls()?.disabled} /></label>
-              <div class="token-row">
-                <button disabled={hostControls()?.disabled} onClick={async () => { const picked = await window.api.dialog.openFile({ filters: [{ name: "Control scripts", extensions: ["sh", "command", "cmd", "ps1", "bat"] }] }); if (!picked.canceled && picked.filePaths[0]) { setHostBrowserDraft(picked.filePaths[0]); const next = await window.api.hostControls.save({ browserScript: picked.filePaths[0] }); setHostControls(next); setHostNotice("Saved browser helper override.") } }}>Browse</button>
-                <button class="primary" disabled={hostControls()?.disabled} onClick={async () => { try { const next = await window.api.hostControls.save({ browserScript: hostBrowserDraft() }); setHostControls(next); setHostBrowserDraft(next.browser.source === "settings" ? next.browser.path : ""); const status = await window.api.hostControls.browserStatus(); setHostNotice(status.ok ? `Browser helper ready · ${status.backend}` : status.error || "Browser helper test failed") } catch (error) { setHostNotice(error instanceof Error ? error.message : String(error)) } }}>Save + test</button>
-                <button disabled={hostControls()?.disabled || hostControls()?.browser.source !== "settings"} onClick={async () => { const next = await window.api.hostControls.save({ browserScript: "" }); setHostControls(next); setHostBrowserDraft(""); setHostNotice("Cleared browser override. Discovery will be used.") }}>Use default</button>
-              </div>
-              <p class={`host-helper-status ${hostControls()?.browser.exists ? "host-helper-status--ready" : "host-helper-status--missing"}`}>{hostHelperStatus(hostControls()?.browser)}</p>
-            </div>
-            <div class="host-helper-row">
-              <label>Desktop helper<input value={hostDesktopDraft()} onInput={(event) => setHostDesktopDraft(event.currentTarget.value)} placeholder={hostControls()?.desktop.path || "desktop-control.sh"} disabled={hostControls()?.disabled} /></label>
-              <div class="token-row">
-                <button disabled={hostControls()?.disabled} onClick={async () => { const picked = await window.api.dialog.openFile({ filters: [{ name: "Control scripts", extensions: ["sh", "command", "cmd", "ps1", "bat"] }] }); if (!picked.canceled && picked.filePaths[0]) { setHostDesktopDraft(picked.filePaths[0]); const next = await window.api.hostControls.save({ desktopScript: picked.filePaths[0] }); setHostControls(next); setHostNotice("Saved desktop helper override.") } }}>Browse</button>
-                <button class="primary" disabled={hostControls()?.disabled} onClick={async () => { try { const next = await window.api.hostControls.save({ desktopScript: hostDesktopDraft() }); setHostControls(next); setHostDesktopDraft(next.desktop.source === "settings" ? next.desktop.path : ""); const status = await window.api.hostControls.desktopStatus(); setHostNotice(status.ok ? `Desktop helper ready · ${status.backend}` : status.error || "Desktop helper test failed") } catch (error) { setHostNotice(error instanceof Error ? error.message : String(error)) } }}>Save + test</button>
-                <button disabled={hostControls()?.disabled || hostControls()?.desktop.source !== "settings"} onClick={async () => { const next = await window.api.hostControls.save({ desktopScript: "" }); setHostControls(next); setHostDesktopDraft(""); setHostNotice("Cleared desktop override. Discovery will be used.") }}>Use default</button>
-              </div>
-              <p class={`host-helper-status ${hostControls()?.desktop.exists ? "host-helper-status--ready" : "host-helper-status--missing"}`}>{hostHelperStatus(hostControls()?.desktop)}</p>
-            </div>
-            <p class={`host-helper-status ${hostControls()?.search.exists ? "host-helper-status--ready" : ""}`}>Search helper {hostHelperStatus(hostControls()?.search)}</p>
-            <Show when={hostNotice()}><p class="provider-notice">{hostNotice()}</p></Show>
-            <p class="provider-notice">Helpers are injected into Grok Build only when the script exists. Override with Settings, or set GROK_BROWSER_CONTROL, GROK_DESKTOP_CONTROL, and GROK_SEARCH_HELPER.</p>
-          </div>
+          <div class="settings-card"><div><strong>Host control scripts</strong><span>Optional browser and computer-use helpers.</span></div><p class="provider-notice">Helpers are injected into Grok Build only when the script exists. Set GROK_BROWSER_CONTROL, GROK_DESKTOP_CONTROL, and GROK_SEARCH_HELPER, or keep the discovered local tools.</p></div>
 
           <div class="settings-card"><div><strong>Hermes-style session lifecycle</strong><span>Recovery, rewinds, compaction, and optional idle resets for remote agent sessions.</span></div><div class="agent-defaults-grid"><label>Idle reset<input type="number" min="0" max="168" value={sessionIdleHours()} onInput={async (event) => { const value = Math.min(168, Math.max(0, Number(event.currentTarget.value) || 0)); setSessionIdleHours(value); await window.api.store.set(STORE_KEYS.agentSessionIdleHours, value) }} /><small>hours · 0 keeps sessions indefinitely</small></label><div class="agent-lifecycle-list"><span>✓ Crash-safe session resume</span><span>✓ Visible transcript recovery</span><span>✓ Retry and turn rewind</span><span>✓ Bounded context checkpoints</span></div></div><p class="provider-notice">Use <code>/retry</code>, <code>/undo</code>, <code>/compress</code>, and <code>/reasoning</code> from Telegram. Rewinds intentionally start a fresh native Grok session and recover from the corrected visible transcript so removed output cannot leak back in.</p></div>
 

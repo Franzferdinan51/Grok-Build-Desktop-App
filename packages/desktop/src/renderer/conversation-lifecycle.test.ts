@@ -2,11 +2,11 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { lastUserInstruction, rewindLastTurn } from "./conversation-lifecycle.ts"
 
-const message = (role: "user" | "assistant", content: string, id = role) => ({
+const message = (role: "user" | "assistant", content: string, id: string) => ({
   id,
   role,
   createdAt: 1,
-  logs: [{ kind: "text", content }],
+  logs: [{ kind: "text" as const, content }],
 })
 
 test("lastUserInstruction returns the most recent visible user turn", () => {

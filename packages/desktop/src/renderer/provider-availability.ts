@@ -30,7 +30,7 @@ export function catalogModelOptions(models: string[], secrets: ProviderSecretLik
   return [...new Set(models.filter(Boolean))].map((id) => {
     const family = providerFamily(id)
     const needsSecret = family === "openai" || family === "minimax" || family === "nvidia" || family === "compatible"
-    const available = !needsSecret || configuredIds.has(id) || configuredFamilies.has(family) || family === "xai" || id === defaultModel
+    const available = !needsSecret || configuredIds.has(id) || configuredFamilies.has(family) || id === defaultModel
     return {
       id,
       label: id === defaultModel ? `${id} (default)` : id,

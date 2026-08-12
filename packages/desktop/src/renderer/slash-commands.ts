@@ -29,6 +29,8 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommand[] = [
   { name: "copy", description: "Copy the last assistant reply" },
   { name: "queue", description: "Inspect or clear queued prompts", usage: "/queue [clear]" },
   { name: "compress", description: "Checkpoint older conversation context" },
+  { name: "workflow", description: "Run a Duck-Agent plan/research/code/operate workflow through Grok Build", usage: "/workflow <plan|research|code|operate> [goal]" },
+  { name: "doctor", description: "Check the Grok Build harness" },
   { name: "restart", description: "Restart Grok Build Desktop" },
 ]
 

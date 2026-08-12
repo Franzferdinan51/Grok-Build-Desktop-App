@@ -20,7 +20,8 @@
     "baseUrl": ".",
     "paths": {
       "@backend/*": ["../../backend/src/*"],
-      "@types/*": ["../../types/src/*"]
+      "@types/*": ["../../types/src/*"],
+      "electron-store": ["./src/shims/electron-store.ts"]
     },
     "types": ["node"]
   },

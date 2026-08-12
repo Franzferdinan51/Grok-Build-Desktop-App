@@ -43,7 +43,7 @@ export async function addCustomProvider(label: string, baseUrl: string, modelId:
 
 export async function removeCustomProvider(id: string): Promise<void> {
   if (!id.startsWith("custom-")) throw new Error("Built-in providers cannot be removed")
-  getStore().set("grok.customProviders", getStore().get("grok.customProviders", []).filter((entry) => entry.id !== id))
+  getStore().set("grok.customProviders", getStore().get("grok.customProviders", []).filter((entry: { id: string }) => entry.id !== id))
   removeProviderSecret(id)
   const settings = getStore().get("grok.providerSettings", {}); delete settings[id]; getStore().set("grok.providerSettings", settings); await writeManagedModels(settings)
 }

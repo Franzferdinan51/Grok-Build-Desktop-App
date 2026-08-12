@@ -25,6 +25,8 @@ import { lastUserInstruction, rewindLastTurn } from "../src/renderer/conversatio
 import { matchingSlashCommands } from "../src/renderer/slash-commands.ts"
 import { buildPaletteItems, filterPaletteItems } from "../src/renderer/command-palette.ts"
 import { catalogModelOptions } from "../src/renderer/provider-availability.ts"
+import { frameWorkflowPrompt, parseWorkflowName } from "../src/renderer/workflow-presets.ts"
+import { summarizeHarnessDoctor } from "../src/renderer/harness-doctor.ts"
 import { statSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname } from "node:path"
@@ -879,6 +881,9 @@ assert.equal(isSafeExternalUrl("  https://example.com/  "), true)
   assert.equal(palette[0]?.id, "command:retry")
   const options = catalogModelOptions(["grok-4.5", "codex-gpt-5"], [], "grok-4.5")
   assert.equal(options[0]?.available, true)
+  assert.equal(parseWorkflowName("research links"), "research")
+  assert.match(frameWorkflowPrompt("code", "fix parser"), /Duck-Agent code workflow/)
+  assert.equal(summarizeHarnessDoctor({ available: true, command: "grok", version: "1" }).ok, true)
 }
 
 // Ranked search + markdown export stay thought/action-free.

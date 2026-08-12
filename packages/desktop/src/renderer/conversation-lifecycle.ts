@@ -5,7 +5,7 @@
  * would leave a poisoned native id.
  */
 
-export type LifecycleMessage = { id: string; role: "user" | "assistant"; logs: { kind: string; content: string }[]; createdAt: number }
+export type LifecycleMessage = { id: string; role: "user" | "assistant"; logs: { kind: "text" | "thought" | "error"; content: string }[]; createdAt: number }
 
 export function lastUserInstruction(messages: LifecycleMessage[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
