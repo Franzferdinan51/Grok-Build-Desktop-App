@@ -19,12 +19,14 @@ import { summarizeHarnessDoctor } from "./harness-doctor"
 import { RunsPanel } from "./views/RunsPanel"
 import { ProjectFileTree } from "./ProjectFileTree"
 import { TaskInspector } from "./TaskInspector"
+import { NotificationStack, type DesktopNotification } from "./NotificationStack"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
 import "./project-files.css"
 import "./task-inspector.css"
+import "./notifications.css"
 import "./branding.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
 import * as eventBuffer from "./event-buffer"
@@ -142,6 +144,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [filesOpen, setFilesOpen] = createSignal(false)
   const [filesRailCollapsed, setFilesRailCollapsed] = createSignal(false)
   const [inspectorOpen, setInspectorOpen] = createSignal(false)
+  const [notifications, setNotifications] = createSignal<DesktopNotification[]>([])
   const [agentAppControls, setAgentAppControls] = createSignal(false)
   const [subagentsEnabled, setSubagentsEnabled] = createSignal(true)
   const [delegationMode, setDelegationMode] = createSignal<"balanced" | "aggressive">("balanced")
@@ -177,6 +180,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   let unsubscribeMenu = () => {}
   let backendWasAvailable = false
   let userNearBottom = true
+  let notificationId = 0
+  const announce = (kind: DesktopNotification["kind"], title: string, message: string) => {
+    const id = ++notificationId
+    setNotifications((current) => [...current.slice(-2), { id, kind, title, message }])
+    window.setTimeout(() => setNotifications((current) => current.filter((notice) => notice.id !== id)), 5000)
+  }
   // Per-thread + 250ms-debounced saves. Replaces the unbounded
   // `saveChain = saveChain.then(...)` that previously rewrote every
   // thread through IPC for every keystroke. `flush` runs in `onCleanup`
@@ -712,9 +721,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (ephemeral) return [{ kind: "error", content: "Grok is already running another task." }]
       await replaceQueue(enqueuePrompt(queuedPrompts(), submitted, crypto.randomUUID()))
       setPrompt(""); setHistoryIndex(-1)
+      announce("info", "Task queued", "Grok Build will start this instruction when the active run finishes.")
       return []
     }
     setPrompt(""); setEvents([]); setRunning(true)
+    if (!ephemeral) announce("info", "Task started", "Grok Build is working in the selected workspace.")
     let completedLogs: TaskLog[] = []
     try {
       let runWorkspace = workspace()
@@ -792,7 +803,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (!ephemeral && result.grokSessionId) await persistSessionId(result.grokSessionId)
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
-      queueBackendEvent({ kind: "error", content: (error as Error).message })
+      const message = (error as Error).message
+      queueBackendEvent({ kind: "error", content: message })
       if (sessionId()) {
         const thread = chatThreads().find((entry) => entry.id === activeThreadId())
         if (thread) await updateThreadMeta(thread, { sessionStatus: "broken" })
@@ -820,6 +832,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         ? events().filter((entry) => entry.kind === "text" || entry.kind === "error")
         : ensurePublicCompletion(events())
       completedLogs = completed
+      if (!ephemeral && completed.length) {
+        const failed = completed.some((entry) => entry.kind === "error")
+        announce(failed ? "error" : "success", failed ? "Task needs attention" : "Task finished", failed ? "Review the latest error in the transcript." : "Grok Build completed the current instruction.")
+      }
       if (!ephemeral && agentAppControls()) {
         const text = completed.map((entry) => entry.content).join("\n")
         // Centralised validator enforces the same schema the Telegram agent
@@ -1018,6 +1034,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
 
   return <div class={`app-root ${sidebarCollapsed() ? "app-root--sidebar-collapsed" : ""}`}>
+    <NotificationStack notifications={notifications()} onDismiss={(id) => setNotifications((current) => current.filter((notice) => notice.id !== id))} />
     <Show when={paletteOpen()}>
       <div class="command-palette" role="dialog" aria-label="Command palette">
         <input
