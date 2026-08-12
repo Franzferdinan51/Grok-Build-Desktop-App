@@ -101,7 +101,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+ (or 22.12+; Node 22.22+ is recommended for the desktop toolchain)
 - pnpm 9+
 - Grok Build CLI
 - Optional: Hermes Agent for OpenAI Codex subscription OAuth

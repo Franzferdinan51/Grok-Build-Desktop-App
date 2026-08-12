@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20.19+ (or 22.12+; Node 22.22+ is recommended for the desktop toolchain)
 - pnpm 9+
 - Grok Build installed from [xAI’s official instructions](https://github.com/xai-org/grok-build#installing-the-released-binary)
 
@@ -26,6 +26,10 @@ pnpm typecheck
 pnpm build
 pnpm package
 ```
+
+The desktop build uses Electron-Vite 5 and Vite 7. If a shell selects an older
+Node runtime from another tool installation, check `node --version` before
+building; the supported minimum is Node 20.19 (or Node 22.12+).
 
 `test:smoke` validates the installed Grok CLI/model catalog, streamed reasoning parser, project file policies, traversal blocking, symlink exclusion, terminal working directory, and Git status/diff behavior in a temporary workspace.
 

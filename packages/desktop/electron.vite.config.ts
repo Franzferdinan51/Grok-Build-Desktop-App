@@ -1,9 +1,10 @@
-import { defineConfig } from "electron-vite"
+import { defineConfig, externalizeDepsPlugin } from "electron-vite"
 import { resolve } from "path"
 import solid from "vite-plugin-solid"
 
 export default defineConfig({
   main: {
+    plugins: [externalizeDepsPlugin()],
     build: {
       emptyOutDir: false,
       rollupOptions: {
@@ -24,6 +25,7 @@ export default defineConfig({
     },
   },
   preload: {
+    plugins: [externalizeDepsPlugin()],
     build: {
       emptyOutDir: false,
       rollupOptions: {

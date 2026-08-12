@@ -11,6 +11,11 @@ pnpm build
 pnpm package
 ```
 
+The release gate is intended to run with the supported Node runtime and the
+locked pnpm workspace. Electron-Vite builds the main process, preload, and Solid
+renderer as separate production outputs; a passing typecheck or smoke test alone
+does not replace the production build check.
+
 The smoke suite covers:
 
 - Grok Build CLI discovery and model catalog.
