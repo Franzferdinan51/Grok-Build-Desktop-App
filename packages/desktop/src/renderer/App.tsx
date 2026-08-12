@@ -1181,5 +1181,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">GIT REVIEW</span><strong>{selectedProject()?.branch || "Selected project"}</strong></div><button onClick={() => void refreshDiff()}>Refresh changes</button></div><div class="ide-grid"><aside class="file-tree"><Show when={gitChanges().length} fallback={<button onClick={() => void refreshDiff()}>Load changed files</button>}><For each={gitChanges()}>{(change) => <button class={selectedDiff() === change.path ? "active" : ""} onClick={async () => { setSelectedDiff(change.path); setDiffContent(await window.api.workspace.gitDiff(workspace(), change.path)) }}><span class="change-code">{change.status}</span> {change.path}</button>}</For></Show></aside><div class="code-editor"><Show when={selectedDiff()} fallback={<div class="editor-empty">Select a changed file to review its diff.</div>}><pre class="diff-view">{diffContent()}</pre></Show></div></div></section>
       </Show>
     </main>
+    <footer class="app-status">
+      <b>{props.backendStatus().available ? `Grok Build ${props.backendStatus().version || "ready"}` : "Grok Build offline"}</b>
+      <span>{model() || catalog().defaultModel || "default model"}</span>
+      <span>{selectedProject()?.name || "no project"}</span>
+      <span>⌘K palette</span>
+    </footer>
   </div>
 }
