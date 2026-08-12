@@ -9,6 +9,7 @@ import Store from "electron-store"
 
 export type GrokRunRecord = {
   id: string
+  threadId?: string
   cwd: string
   prompt: string
   model?: string

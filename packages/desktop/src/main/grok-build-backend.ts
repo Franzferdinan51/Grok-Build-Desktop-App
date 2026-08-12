@@ -48,6 +48,7 @@ export type GrokBuildEvent =
 export type RunTaskInput = {
   prompt: string
   cwd: string
+  threadId?: string
   model?: string
   thinking?: boolean
   autoApprove?: boolean

@@ -15,9 +15,10 @@ export function listGrokRuns(): GrokRunRecord[] {
   return getStore().get("runs")
 }
 
-export function startGrokRun(input: { cwd: string; prompt: string; model?: string; advisorCount?: number }): GrokRunRecord {
+export function startGrokRun(input: { cwd: string; prompt: string; model?: string; threadId?: string; advisorCount?: number }): GrokRunRecord {
   const record: GrokRunRecord = {
     id: randomUUID(),
+    threadId: input.threadId,
     cwd: input.cwd,
     prompt: input.prompt.length > MAX_STORED_PROMPT ? `${input.prompt.slice(0, MAX_STORED_PROMPT)}\n… [execution context omitted]` : input.prompt,
     model: input.model,
