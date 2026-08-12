@@ -24,6 +24,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 - **Duck-Agent integration boundary:** the Project Files rail is intentionally a focused UI integration. It reuses the app's existing workspace file listing and editor handoff, so the desktop remains Grok Build-primary and does not import Duck-Agent's separate React runtime.
 - **Live task visibility:** the Task Inspector summarizes the current Grok Build run, goal, queue, and streamed activity without inventing a second approval or execution system.
 - **Transient feedback:** lifecycle notifications are emitted by the existing run/queue path and auto-dismiss; the transcript and inspector remain the durable source of truth.
+- **Session continuity:** history entries can now be forked into a fresh Grok session while preserving the visible transcript as context.
 
 ## Sources checked but not selected as a base
 
