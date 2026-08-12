@@ -1,0 +1,6 @@
+import { Show } from "solid-js"
+
+export function ChatTerminalRail(props: { workspace: string; command: string; output: string; running: boolean; onCommand: (value: string) => void; onRun: () => void; onClear: () => void }) {
+  return <aside class="chat-terminal-rail" aria-label="Workspace terminal"><header><div><strong>Workspace terminal</strong><span>{props.workspace || "Choose a project"}</span></div><button onClick={props.onClear}>Clear</button></header><pre class="chat-terminal-rail__output">{props.output || "Run a command inside the selected workspace.\n\nThis terminal uses the same scoped workspace bridge as the full Terminal view."}</pre><div class="chat-terminal-rail__input"><span>$</span><input value={props.command} onInput={(event) => props.onCommand(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); props.onRun() } }} disabled={!props.workspace || props.running} placeholder="pnpm test" aria-label="Workspace terminal command" /><button class="primary" disabled={!props.workspace || !props.command.trim() || props.running} onClick={props.onRun}>{props.running ? "Running…" : "Run"}</button></div><Show when={props.running}><div class="chat-terminal-rail__status"><i />Command running in workspace</div></Show></aside>
+}
+
