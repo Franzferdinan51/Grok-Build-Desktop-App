@@ -1221,6 +1221,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <section class="chat-composer chat-composer--docked" aria-label="Grok Build task composer">
           <div class="chat-composer__context">
             <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
+            <Show when={selectedProject()?.isGit}>
+              <div class="coding-status-row" aria-label="Workspace coding status">
+                <button class="coding-status-row__branch" onClick={() => void navigate("review")} title="Open Git Review">⑂ {selectedProject()?.branch || "detached"}</button>
+                <span class="coding-status-row__changes">{selectedProject()?.diffStat || `${selectedProject()?.changedFiles || 0} changed`}</span>
+                <button class="coding-status-row__action" onClick={() => void navigate("review")} title="Review changed files">Review</button>
+                <button class="coding-status-row__action" onClick={() => void toggleFilesRail()} title="Browse project files">Files</button>
+              </div>
+            </Show>
             <span class="composer-hint">⌘K palette · / commands · Grok Build edits this workspace</span>
           </div>
           <Show when={slashMatches().length}><div class="slash-palette"><For each={slashMatches()}>{(command, index) => <button class={index() === slashSelection() ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); setPrompt(`/${command.name}${command.usage?.includes("<") ? " " : ""}`); setSlashSelection(0) }}><code>/{command.name}</code><span>{command.description}</span><Show when={command.usage}><small>{command.usage}</small></Show></button>}</For></div></Show>
