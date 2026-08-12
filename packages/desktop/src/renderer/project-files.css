@@ -15,8 +15,12 @@
 .project-files-search input{width:100%;height:29px;border:1px solid #2d3441;border-radius:6px;background:#0f1218;color:#b9c1d0;padding:0 9px;font-size:10px;outline:0}
 .project-files-search input:focus{border-color:#536383}
 .project-files-list{flex:1;overflow:auto;padding:7px}
+.project-files-list>.project-file{display:none}
+.project-files-tree{display:grid;gap:1px}
 .project-file{width:100%;display:flex;align-items:center;gap:7px;border:0;border-radius:6px;background:transparent;color:#9ea8bb;text-align:left;padding:7px 8px;cursor:pointer}
 .project-file:hover,.project-file.active{background:#1d2637;color:#fff}
+.project-file--folder{font-weight:600}
+.project-file__chevron{width:10px;color:#7f8ca8;font-size:14px}
 .project-file__icon{color:#7289c4;font-size:12px}
 .project-file__path{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10px ui-monospace,SFMono-Regular,Menlo,monospace}
 .project-file small{color:#657188;font-size:9px;white-space:nowrap}
