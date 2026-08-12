@@ -51,6 +51,7 @@ export const STORE_KEYS = {
 } as const
 
 export const queueStoreKey = (threadId: string) => `chat.queue.${threadId}`
+export const artifactContextKey = (workspace: string, threadId: string) => `artifact.context.${encodeURIComponent(workspace)}.${threadId}`
 
 export type StoreKey = (typeof STORE_KEYS)[keyof typeof STORE_KEYS]
 

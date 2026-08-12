@@ -18,6 +18,7 @@
 .project-files-list>.project-file{display:none}
 .project-files-tree{display:grid;gap:1px}
 .project-file{width:100%;display:flex;align-items:center;gap:7px;border:0;border-radius:6px;background:transparent;color:#9ea8bb;text-align:left;padding:7px 8px;cursor:pointer}
+.project-file-row{display:flex;align-items:center;gap:2px;border-radius:6px}.project-file-row:hover,.project-file-row.active{background:#1d2637}.project-file-row .project-file{flex:1}.project-file__preview{width:25px;height:25px;border:0;border-radius:5px;background:transparent;color:#7289c4;opacity:0;cursor:pointer}.project-file-row:hover .project-file__preview,.project-file-row.active .project-file__preview{opacity:1}.project-file__preview:hover{background:#303d5c;color:#fff}
 .project-file:hover,.project-file.active{background:#1d2637;color:#fff}
 .project-file--folder{font-weight:600}
 .project-file__chevron{width:10px;color:#7f8ca8;font-size:14px}
