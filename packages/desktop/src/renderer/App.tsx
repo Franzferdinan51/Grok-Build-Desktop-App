@@ -84,6 +84,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [historySearch, setHistorySearch] = createSignal("")
   const [historyAllWorkspaces, setHistoryAllWorkspaces] = createSignal(false)
   const [historyResults, setHistoryResults] = createSignal<ChatThread[]>([])
+  const [sessionIndex, setSessionIndex] = createSignal<ChatThread[]>([])
+  const [sessionSwitcherOpen, setSessionSwitcherOpen] = createSignal(false)
+  const [sessionSwitcherIndex, setSessionSwitcherIndex] = createSignal(0)
   const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
   const [paletteOpen, setPaletteOpen] = createSignal(false)
   const [paletteQuery, setPaletteQuery] = createSignal("")
@@ -323,6 +326,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const thread: ChatThread = { ...current, id, workspace: root, title: current?.title && current.title !== "New chat" ? current.title : threadTitle(next), createdAt: current?.createdAt || now, updatedAt: now, messages: next, sessionId: sessionId(), model: model() || current?.model, sessionStatus: sessionId() ? "resumable" : current?.sessionStatus || "new" }
     const updated = [thread, ...chatThreads().filter((entry) => entry.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt)
     await persistThreads(root, updated, id)
+    void refreshSessionIndex()
     await window.api.store.set(conversationKey(root), next)
   }
   const persistSessionId = async (nextSessionId: string) => {
@@ -355,6 +359,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setWorkspace(thread.workspace)
       setSelectedProject(projects().find((project) => project.path === thread.workspace) || null)
       await window.api.store.set(STORE_KEYS.workspaceLast, thread.workspace)
+      await refreshFiles(thread.workspace)
+      await loadGoal(thread.workspace)
     }
     setMessages(thread.messages)
     setSessionId(thread.sessionId)
@@ -369,6 +375,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await window.api.store.set(conversationKey(root), thread.messages)
       if (thread.sessionId) await window.api.store.set(sessionKey(root), thread.sessionId); else await window.api.store.delete(sessionKey(root))
       await restoreArtifactContext(root, thread.id)
+      await refreshSessionIndex()
     }
   }
   const _forkConversation = async (thread: ChatThread) => {
@@ -383,6 +390,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const updated = { ...thread, ...patch, updatedAt: Date.now() }
     await window.api.conversations.save(updated)
     setChatThreads((current) => current.map((entry) => entry.id === updated.id ? updated : entry))
+    void refreshSessionIndex()
     await refreshHistory()
   }
   const goalKey = (root = workspace()) => `goal.${encodeURIComponent(root)}`
@@ -408,6 +416,26 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     chats: chatThreads().filter((thread) => !thread.archived).map((thread) => ({ id: thread.id, title: thread.title })),
     models: selectableModels(),
   }), paletteQuery())
+  const refreshSessionIndex = async () => setSessionIndex(await window.api.conversations.search("", undefined) as ChatThread[])
+  const switcherThreads = () => sessionIndex().filter((thread) => !thread.archived && thread.messages.length)
+    .sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || right.updatedAt - left.updatedAt)
+  const sessionWorkspaceLabel = (root: string) => projects().find((project) => project.path === root)?.name || root.split(/[\\/]+/).filter(Boolean).at(-1) || "Workspace"
+  const advanceSessionSwitcher = (direction: 1 | -1) => {
+    const threads = switcherThreads()
+    if (threads.length < 2) return
+    const current = threads.findIndex((thread) => thread.id === activeThreadId())
+    if (!sessionSwitcherOpen()) {
+      setSessionSwitcherIndex((current + direction + threads.length) % threads.length)
+      setSessionSwitcherOpen(true)
+      return
+    }
+    setSessionSwitcherIndex((index) => (index + direction + threads.length) % threads.length)
+  }
+  const commitSessionSwitcher = async () => {
+    const target = switcherThreads()[sessionSwitcherIndex()]
+    setSessionSwitcherOpen(false)
+    if (target) await openConversation(target)
+  }
   const runPaletteItem = async (id: string) => {
     setPaletteOpen(false); setPaletteQuery(""); setPaletteSelection(0)
     if (id.startsWith("command:")) { setActive("new-task"); setPrompt(`/${id.slice(8)} `); return }
@@ -578,6 +606,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await loadConversation(current.path)
       await loadGoal(current.path)
     }
+    await refreshSessionIndex()
     setTelegram(await window.api.telegram.status())
     setTelegramAllowedChats((await window.api.telegram.allowedChats()).join(", "))
     setTelegramPendingChats(await window.api.telegram.pendingChats())
@@ -669,9 +698,18 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         setPaletteOpen((open) => !open)
         setPaletteQuery("")
         setPaletteSelection(0)
+      } else if (event.ctrlKey && !event.metaKey && event.key === "Tab") {
+        event.preventDefault()
+        advanceSessionSwitcher(event.shiftKey ? -1 : 1)
+      } else if (event.key === "Enter" && sessionSwitcherOpen()) {
+        event.preventDefault()
+        void commitSessionSwitcher()
       } else if (event.key === "Escape" && paletteOpen()) {
         event.preventDefault()
         setPaletteOpen(false)
+      } else if (event.key === "Escape" && sessionSwitcherOpen()) {
+        event.preventDefault()
+        setSessionSwitcherOpen(false)
       }
     }
     window.addEventListener("keydown", onGlobalKey)
@@ -1098,6 +1136,20 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <For each={paletteItems()} fallback={<p>No matches.</p>}>
           {(item, index) => <button class={index() === paletteSelection() ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); void runPaletteItem(item.id) }}><strong>{item.label}</strong><span>{item.hint}</span></button>}
         </For>
+      </div>
+    </Show>
+    <Show when={sessionSwitcherOpen()}>
+      <div class="session-switcher" role="dialog" aria-label="Conversation switcher">
+        <header><strong>Switch conversation</strong><span>Ctrl+Tab to move · Enter to open · Esc to close</span></header>
+        <div class="session-switcher__list">
+          <For each={switcherThreads()}>
+            {(thread, index) => <button class={index() === sessionSwitcherIndex() ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); setSessionSwitcherIndex(index()); void commitSessionSwitcher() }}>
+              <span class="session-switcher__icon">{thread.id === activeThreadId() ? "●" : "○"}</span>
+              <span class="session-switcher__copy"><strong>{thread.title}</strong><small>{sessionWorkspaceLabel(thread.workspace)} · {thread.messages.length} messages · {new Date(thread.updatedAt).toLocaleString()}</small></span>
+              <kbd>{index() + 1}</kbd>
+            </button>}
+          </For>
+        </div>
       </div>
     </Show>
     <aside class={`sidebar ${sidebarCollapsed() ? "sidebar--collapsed" : ""}`}>
