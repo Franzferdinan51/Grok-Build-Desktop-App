@@ -31,7 +31,8 @@ import { statSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname } from "node:path"
 import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
-import { withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
+import { telegramStatusForRenderer, withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
+import { classifyTelegramHttpError, isTelegramControlCommand, telegramPollingDecision } from "../src/main/telegram-connection.ts"
 import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
 import { mergeLogs, LiveEventBuffer, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
 import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, buildTelegramMoaMenu, buildTelegramMoaReferencePicker, buildTelegramMoaAggregatorPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
@@ -355,6 +356,11 @@ const afterForgetHome = withForgottenTokenState({ token: "x", homeChatId: "42", 
 assert.equal(afterForgetHome.token, undefined)
 assert.equal(afterForgetHome.homeChatId, "42")
 assert.equal(afterForgetHome.requireMention, true)
+assert.equal("token" in telegramStatusForRenderer({ connected: true, token: "secret" }), false)
+assert.equal(telegramPollingDecision(classifyTelegramHttpError(409, "Conflict")?.kind, false), "pause")
+assert.equal(telegramPollingDecision(classifyTelegramHttpError(429, "too many")?.kind, false), "backoff")
+assert.equal(isTelegramControlCommand("/cancel"), true)
+assert.equal(isTelegramControlCommand("/run x"), false)
 
 // Shell tokenizer for GrokBuildBackend.runTool: the prior regex split
 // command lines incorrectly on embedded escapes, empty quoted strings,

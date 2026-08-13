@@ -36,6 +36,7 @@ import { WorkflowsPanel } from "./views/WorkflowsPanel"
 import { ScheduledPanel } from "./views/ScheduledPanel"
 import { RuntimePanel } from "./views/RuntimePanel"
 import { TelegramConnectionPanel } from "./views/TelegramConnectionPanel"
+import { rendererTokenAfterSubmit } from "./telegram-secret"
 import { SettingsPanel } from "./views/SettingsPanel"
 import { ArtifactsPanel } from "./views/ArtifactsPanel"
 import { collectArtifacts, type ArtifactRecord } from "./artifact-utils"
@@ -1513,7 +1514,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     try {
       const status = await window.api.telegram.connect(token())
       setTelegram(status)
-      setToken("")
+      setToken(rendererTokenAfterSubmit())
       await refreshTelegram()
       setTelegramNotice(status.connected ? `Connected as @${status.username ?? "bot"}` : status.error ?? "Could not connect")
     } catch (error) { setTelegramNotice(error instanceof Error ? error.message : String(error)) }

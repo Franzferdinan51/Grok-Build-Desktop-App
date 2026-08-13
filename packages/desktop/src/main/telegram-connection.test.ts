@@ -15,8 +15,11 @@ import {
   profileFromTelegramChat,
   routeUnauthorizedMessage,
   shouldAutoApproveFirst,
+  shouldRecordConnectAuthFailure,
   stillWaitingMessage,
+  telegramPollingDecision,
   upsertChatProfile,
+  isTelegramControlCommand,
 } from "./telegram-connection.ts"
 
 test("parseChatIds accepts comma or whitespace lists", () => {
@@ -85,6 +88,34 @@ test("parseTelegramRetryAfterMs prefers Telegram parameters", () => {
   assert.equal(parseTelegramRetryAfterMs({ parameters: { retry_after: 12 } }, 1000), 12_000)
   assert.equal(parseTelegramRetryAfterMs({ description: "Too Many Requests: retry after 8" }, 1000), 8_000)
   assert.equal(parseTelegramRetryAfterMs({}, 2500), 2500)
+})
+
+test("telegramPollingDecision pauses auth and getUpdates conflicts instead of hammering", () => {
+  assert.equal(telegramPollingDecision("auth", false), "pause")
+  assert.equal(telegramPollingDecision("conflict", false), "pause")
+  assert.equal(telegramPollingDecision("rate", false), "backoff")
+  assert.equal(telegramPollingDecision("other", false), "retry")
+  assert.equal(telegramPollingDecision(undefined, false), "retry")
+  assert.equal(telegramPollingDecision(undefined, true), "ok")
+})
+
+test("connect does not treat 429 or 409 as a revoked token", () => {
+  assert.equal(shouldRecordConnectAuthFailure("rate", false), false)
+  assert.equal(shouldRecordConnectAuthFailure("conflict", false), false)
+  assert.equal(shouldRecordConnectAuthFailure("auth", false), true)
+  assert.equal(shouldRecordConnectAuthFailure(undefined, false), true)
+  assert.equal(shouldRecordConnectAuthFailure(undefined, true), false)
+})
+
+test("control commands stay independent of a long agent turn", () => {
+  assert.equal(isTelegramControlCommand("/cancel"), true)
+  assert.equal(isTelegramControlCommand("/stop@MyBot"), true)
+  assert.equal(isTelegramControlCommand("/status"), true)
+  assert.equal(isTelegramControlCommand("/steer do this next"), true)
+  assert.equal(isTelegramControlCommand("/interrupt stop and do X"), true)
+  assert.equal(isTelegramControlCommand("/queue"), true)
+  assert.equal(isTelegramControlCommand("/run fix tests"), false)
+  assert.equal(isTelegramControlCommand("please fix tests"), false)
 })
 
 test("upsertChatProfile merges identity without dropping last preview", () => {

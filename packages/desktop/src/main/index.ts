@@ -19,7 +19,7 @@ import { LocalStudioController } from "./local-studio"
 import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
 import { GrokTaskScheduler, onScheduleEvent } from "./scheduled-tasks"
-import { scheduledHomeNotice } from "./telegram-ux"
+import { scheduledHomeNotice, scheduledHomeTarget } from "./telegram-ux"
 import { PreviewServer } from "./preview-server"
 import { getStore } from "./store"
 import { recoverInterruptedGrokRuns } from "./grok-runs"
@@ -236,7 +236,7 @@ app.whenReady().then(async () => {
   telegram.start()
   scheduler.start()
   onScheduleEvent((event) => {
-    const homeChatId = getStore().get("telegram").homeChatId
+    const homeChatId = scheduledHomeTarget(getStore().get("telegram").homeChatId, telegram.allowedChats())
     if (!homeChatId) return
     const notice = scheduledHomeNotice(event)
     if (!notice) return

@@ -48,6 +48,13 @@ export function withDisconnectedState(previous: TelegramPersistedState): Telegra
   }
 }
 
+/** Renderer-facing status must never carry the BotFather secret. */
+export function telegramStatusForRenderer<T extends Record<string, unknown>>(status: T): Omit<T, "token"> {
+  const { token: _dropped, ...rest } = status as T & { token?: unknown }
+  void _dropped
+  return rest
+}
+
 /**
  * Hard forget: same as the soft disconnect but the encrypted bot token is
  * dropped from disk.

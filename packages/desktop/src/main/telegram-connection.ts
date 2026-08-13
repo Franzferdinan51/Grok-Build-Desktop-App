@@ -88,6 +88,35 @@ export function parseTelegramRetryAfterMs(payload: unknown, fallbackMs: number):
 }
 
 export type TelegramPollErrorKind = "auth" | "rate" | "conflict" | "other"
+export type TelegramPollingDecision = "pause" | "backoff" | "retry" | "ok"
+
+/** Control commands that must stay usable while a Grok Build turn is running. */
+export const TELEGRAM_CONTROL_COMMANDS = new Set(["cancel", "stop", "status", "health", "queue", "steer", "interrupt"])
+
+export function isTelegramControlCommand(text: string): boolean {
+  const name = text.trim().match(/^\/(\w+)(?:@\w+)?(?:\s|$)/)?.[1]?.toLowerCase()
+  return Boolean(name && TELEGRAM_CONTROL_COMMANDS.has(name))
+}
+
+/** After aborting getUpdates, wait before the next poller to avoid a self-409. */
+export const TELEGRAM_RECONNECT_SETTLE_MS = 800
+
+/**
+ * Auth and getUpdates conflicts must stop the poller. Rate limits back off.
+ * Other !ok payloads retry with the existing exponential delay.
+ */
+export function telegramPollingDecision(kind: TelegramPollErrorKind | undefined, ok: boolean): TelegramPollingDecision {
+  if (kind === "auth" || kind === "conflict") return "pause"
+  if (kind === "rate") return "backoff"
+  if (!ok) return "retry"
+  return "ok"
+}
+
+/** Connect must not treat 429 / 409 as a revoked token. */
+export function shouldRecordConnectAuthFailure(kind: TelegramPollErrorKind | undefined, ok: boolean): boolean {
+  if (kind === "rate" || kind === "conflict") return false
+  return kind === "auth" || !ok
+}
 
 export function classifyTelegramHttpError(status: number, description?: string): { kind: TelegramPollErrorKind; message: string } | undefined {
   const desc = (description || "").trim()

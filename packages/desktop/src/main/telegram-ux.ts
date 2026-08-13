@@ -91,13 +91,22 @@ export function groupMessageShouldRun(input: {
   text: string
   mentionsBot?: boolean
   replyToBot?: boolean
+  isCallback?: boolean
 }): boolean {
   if (!input.requireMention) return true
   const type = (input.chatType || "private").toLowerCase()
   if (type === "private") return true
+  if (input.isCallback) return true
   if (input.replyToBot) return true
   if (input.mentionsBot) return true
   return input.text.trim().startsWith("/")
+}
+
+/** Scheduled results only go to an authorized home chat. */
+export function scheduledHomeTarget(homeChatId: string | undefined, allowedChatIds: string[]): string | undefined {
+  const id = homeChatId?.trim()
+  if (!id || !/^-?\d+$/.test(id)) return undefined
+  return allowedChatIds.includes(id) ? id : undefined
 }
 
 export function scheduledHomeNotice(event: { name: string; status: "running" | "completed" | "failed"; detail?: string }): string | undefined {

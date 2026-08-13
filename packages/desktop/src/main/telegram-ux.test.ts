@@ -5,6 +5,7 @@ import {
   inboundMentionsBot,
   normalizeTelegramAgentOptions,
   scheduledHomeNotice,
+  scheduledHomeTarget,
   shouldSilenceTelegramSend,
   telegramPresenceText,
   telegramReactionEmoji,
@@ -33,6 +34,7 @@ test("group mention gate keeps DMs and commands, drops unmentioned chatter", () 
   assert.equal(groupMessageShouldRun({ chatType: "supergroup", requireMention: true, text: "/status" }), true)
   assert.equal(groupMessageShouldRun({ chatType: "group", requireMention: true, text: "hey", mentionsBot: true }), true)
   assert.equal(groupMessageShouldRun({ chatType: "group", requireMention: true, text: "hey", replyToBot: true }), true)
+  assert.equal(groupMessageShouldRun({ chatType: "supergroup", requireMention: true, text: "approve_task", isCallback: true }), true)
 })
 
 test("inbound mention detection uses @username, entities, and bot replies", () => {
@@ -64,4 +66,11 @@ test("scheduled home notices skip running ticks", () => {
   assert.equal(scheduledHomeNotice({ name: "Nightly", status: "running" }), undefined)
   assert.match(scheduledHomeNotice({ name: "Nightly", status: "completed", detail: "ok" }) || "", /Nightly/)
   assert.match(scheduledHomeNotice({ name: "Nightly", status: "failed", detail: "boom" }) || "", /failed/)
+})
+
+test("scheduled home delivery only targets an authorized chat", () => {
+  assert.equal(scheduledHomeTarget("42", ["42", "9"]), "42")
+  assert.equal(scheduledHomeTarget("42", ["9"]), undefined)
+  assert.equal(scheduledHomeTarget(undefined, ["42"]), undefined)
+  assert.equal(scheduledHomeTarget("nope", ["nope"]), undefined)
 })
