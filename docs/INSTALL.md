@@ -43,6 +43,16 @@ building; the supported minimum is Node 20.19 (or Node 22.12+).
 
 Packaged output is written to `packages/desktop/dist`. On macOS, closing the last window keeps the application available in the Dock; activating it recreates and reloads the Grok Build window.
 
+### Install a launchable macOS app
+
+`pnpm dev` is only a development session. To put **Grok Build Desktop** in `/Applications` (Spotlight, Launchpad, Dock):
+
+```bash
+pnpm --filter @grok-build/desktop install:mac
+```
+
+That compiles the current tree, packages an unsigned `.app`, and copies it to `/Applications/Grok Build Desktop.app`. Then open it from Applications or run `open -a "Grok Build Desktop"`.
+
 ## LM Studio
 
 Start its server separately and configure the endpoint in the app. This project does not load or unload LM Studio models automatically.

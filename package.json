@@ -10,6 +10,7 @@
     "dev": "pnpm --filter @grok-build/desktop dev",
     "build": "pnpm --filter @grok-build/desktop build",
     "package": "pnpm --filter @grok-build/desktop package",
+    "install:mac": "pnpm --filter @grok-build/desktop install:mac",
     "typecheck": "pnpm --filter @grok-build/desktop typecheck",
     "test:smoke": "pnpm --filter @grok-build/desktop test:smoke",
     "test:unit": "pnpm --filter @grok-build/desktop test:unit",
