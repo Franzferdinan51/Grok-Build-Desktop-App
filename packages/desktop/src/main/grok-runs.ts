@@ -25,7 +25,7 @@ export function recoverInterruptedGrokRuns(): void {
   })
   if (runs.some((record) => record.status === "running") || journal) {
     getStore().set("runs", recovered)
-    getStore().set("activeRunJournal", undefined)
+    getStore().delete("activeRunJournal")
   }
 }
 
@@ -90,7 +90,7 @@ export function finishGrokRun(
   })
   getStore().set("runs", runs)
   const journal = getStore().get("activeRunJournal")
-  if (journal?.runId === id) getStore().set("activeRunJournal", undefined)
+  if (journal?.runId === id) getStore().delete("activeRunJournal")
   return updated
 }
 

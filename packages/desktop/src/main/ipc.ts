@@ -61,7 +61,7 @@ export function registerIpcHandlers(deps: Deps): void {
     // `grok.cliPath` and the derived `GROK_BUILD_PATH` environment safe.
     const trimmed = typeof path === "string" ? path.trim() : ""
     if (!trimmed) {
-      getStore().set("grok.cliPath", undefined)
+      getStore().delete("grok.cliPath")
       deps.backend().invalidateModelsCache()
       deps.backend().invalidateCliFlagsCache()
       return deps.backend().status()

@@ -426,26 +426,36 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setQueueEdit(null)
   }
   const loadConversation = async (root: string) => {
-    let stored = await window.api.conversations.list(root) as ChatThread[]
+    let stored: ChatThread[] = []
+    let shouldPersistSelected = false
+    const summaries = await window.api.conversations.summaries(root)
+    if (summaries.length) {
+      stored = summaries.map(({ messageCount: _messageCount, ...thread }) => ({ ...thread, messages: [] })) as ChatThread[]
+    }
     const settingsThreads = (await window.api.store.get<ChatThread[]>(threadsKey(root))) ?? []
     if (!stored.length && settingsThreads.length) {
       stored = settingsThreads.map((thread) => ({ ...thread, workspace: root }))
       for (const thread of stored) await window.api.conversations.save(thread)
       await window.api.store.delete(threadsKey(root))
+      shouldPersistSelected = true
     }
     const legacyMessages = (await window.api.store.get<ChatMessage[]>(conversationKey(root))) ?? []
     const legacySession = (await window.api.store.get<string>(sessionKey(root))) ?? ""
     if (!stored.length && (legacyMessages.length || legacySession)) {
       const now = legacyMessages.at(-1)?.createdAt || Date.now()
       stored = [{ id: crypto.randomUUID(), workspace: root, title: threadTitle(legacyMessages), createdAt: legacyMessages[0]?.createdAt || now, updatedAt: now, messages: legacyMessages, sessionId: legacySession, sessionStatus: legacySession ? "resumable" : "new" }]
+      shouldPersistSelected = true
     }
     const preferred = await window.api.store.get<string>(activeThreadKey(root))
     const selected = stored.find((thread) => thread.id === preferred) || stored[0]
+    const selectedFull = selected && selected.messages.length === 0
+      ? await window.api.conversations.get(selected.id) as ChatThread | undefined
+      : selected
     setChatThreads(stored)
     setActiveThreadId(selected?.id || "")
-    setMessages(selected?.messages || legacyMessages)
-    setSessionId(selected?.sessionId || legacySession)
-    if (stored.length) await persistThreads(root, stored, selected?.id || stored[0].id)
+    setMessages(selectedFull?.messages || legacyMessages)
+    setSessionId(selectedFull?.sessionId || legacySession)
+    if (shouldPersistSelected && stored.length) await persistThreads(root, stored, selected?.id || stored[0].id)
     const savedSplitIds = parseDockedSessionIds(await window.api.store.get<string | string[]>(splitThreadKey(root)))
     const savedSplit = savedSplitIds.map((id) => stored.find((thread) => thread.id === id && thread.id !== selected?.id)).filter((thread): thread is ChatThread => Boolean(thread))
     setSplitThreads(savedSplit)

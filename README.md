@@ -9,6 +9,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - **Autonomous by default:** desktop, Telegram, and scheduled turns use Grok Build's real tool loop and can edit, run, test, and verify instead of stopping at a plan.
 - **Project or project-free:** use a repository, temporary Scratch space, or a persistent **Agent (no project)** working directory.
 - **Persistent continuity:** conversations, checkpoints, model/workspace affinity, native session IDs, queues, recovery context, and interrupted work survive relaunches.
+- **Lightweight history loading:** compact conversation metadata sidecars populate session lists, while only the selected transcript is loaded into the workbench.
 - **Remote agent:** Telegram includes pairing, queues, steering, interruption, lifecycle controls, rich formatting, live progress, model/project pickers, and private reasoning.
 - **Telegram security mode:** NemoClaw-inspired host policy with default-deny guidance, sensitive-task approvals, bounded audit events, secret-leak prevention, `/security`, `/sandbox`, `/approve`, and `/deny`—without replacing the Grok Build harness with OpenShell.
 - **Research-ready skills:** Bundled skills install into the local Grok skill directory for Tavily, Brave, X search via `xurl`, private SearXNG, BrowserOS/browser-control, source verification, and tool discovery. Private endpoints and credentials stay local and are never committed.
