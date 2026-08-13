@@ -36,9 +36,11 @@ export function consolidateThoughts(logs: EventLog[]): EventLog[] {
     if (!detail || seenThoughts.has(detail)) continue
     seenThoughts.add(detail)
     thoughtParts.push(detail)
-    if (thoughtParts.length >= MAX_CONSOLIDATED_THOUGHT_UPDATES) break
   }
-  const thought = thoughtParts.join("\n\n")
+  const boundedThoughtParts = thoughtParts.length > MAX_CONSOLIDATED_THOUGHT_UPDATES
+    ? thoughtParts.slice(-MAX_CONSOLIDATED_THOUGHT_UPDATES)
+    : thoughtParts
+  const thought = boundedThoughtParts.join("\n\n")
   const marker = "\n\n[… reasoning condensed …]\n\n"
   const available = MAX_CONSOLIDATED_THOUGHT_CHARS - marker.length
   const headLength = Math.floor(available * 0.7)
