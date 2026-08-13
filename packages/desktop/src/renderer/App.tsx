@@ -45,6 +45,7 @@ import { addDockedSessionId, parseDockedSessionIds, removeDockedSessionId } from
 import { branchConversation } from "./conversation-branch"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import { activeRunLogs } from "./active-run"
+import { runDiagnostics } from "./run-detail"
 import "./styles.css"
 import "./preview-layout.css"
 import "./project-files.css"
@@ -542,6 +543,38 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await openConversation(result.thread)
     setPrompt(result.prompt)
     setSlashNotice("Created a fresh branch from this instruction.")
+  }
+  const threadForRun = async (run: GrokRunRecord) => run.threadId ? await window.api.conversations.get(run.threadId) as ChatThread | undefined : undefined
+  const openRunConversation = async (run: GrokRunRecord) => {
+    const thread = await threadForRun(run)
+    if (!thread) { setSlashNotice("This run no longer has a stored conversation."); return }
+    await openConversation(thread)
+    setActive("new-task")
+  }
+  const resumeRun = async (run: GrokRunRecord) => {
+    const thread = await threadForRun(run)
+    if (!thread || !run.grokSessionId) { setSlashNotice("This run has no resumable Grok session."); return }
+    const next = thread.sessionId === run.grokSessionId ? thread : { ...thread, sessionId: run.grokSessionId, sessionStatus: "resumable" as const }
+    if (next !== thread) await window.api.conversations.save(next)
+    await openConversation(next)
+    setActive("new-task")
+    setSlashNotice("Session restored. Your next instruction will resume this run.")
+  }
+  const forkRun = async (run: GrokRunRecord) => {
+    const thread = await threadForRun(run)
+    if (!thread) { setSlashNotice("This run no longer has a stored conversation to fork."); return }
+    await _forkConversation(thread)
+    setActive("new-task")
+    setSlashNotice("Forked the run into a fresh Grok session.")
+  }
+  const stopRun = async (run: GrokRunRecord) => {
+    if (run.status !== "running" || !running()) return
+    await window.api.backend.cancel()
+    setSlashNotice("Stop requested for the active Grok Build run.")
+  }
+  const copyRunDiagnostics = async (run: GrokRunRecord) => {
+    await navigator.clipboard.writeText(runDiagnostics(run))
+    setSlashNotice("Run diagnostics copied.")
   }
   const persistSplitDock = async (root = workspace(), ids = splitThreads().map((thread) => thread.id)) => {
     if (!root) return
@@ -1794,7 +1827,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         </section>
         </div><Show when={terminalRailOpen()}><ChatTerminalRail workspace={workspace()} command={terminalCommand()} output={terminalOutput()} running={terminalRunning()} onCommand={setTerminalCommand} onRun={() => void runCommand()} onClear={() => setTerminalOutput("")} /></Show><Show when={inspectorOpen()}><TaskInspector running={running()} events={events()} goal={goal()} queuedCount={queuedPrompts().length} model={model() || catalog().defaultModel || ""} workspace={workspace()} approvalMode={autoApprove() && !planMode() ? "Automatic" : planMode() || advanced().permissionMode === "plan" ? "Plan only" : advanced().permissionMode === "dontAsk" ? "No prompts" : "Interactive"} runs={runs()} onStop={() => void window.api.backend.cancel()} onOpenRuns={() => void navigate("runs")} /></Show><Show when={filesOpen()}><aside class={`project-files-rail ${filesRailCollapsed() ? "project-files-rail--collapsed" : ""}`} aria-label="Project files"><header><div><strong>Project files</strong><span>{selectedProject()?.name || "Scratch"} · {files().length} files</span></div><div class="project-files-actions"><button onClick={() => void refreshFiles()} title="Refresh project files">↻</button><button onClick={() => setFilesRailCollapsed((value) => !value)} title={filesRailCollapsed() ? "Expand files" : "Collapse files"}>{filesRailCollapsed() ? "›" : "‹"}</button><button onClick={() => setFilesOpen(false)} title="Close project files">×</button></div></header><Show when={!filesRailCollapsed()}><div class="project-files-search"><input value={fileSearch()} onInput={(event) => setFileSearch(event.currentTarget.value)} placeholder="Filter files…" aria-label="Filter project files" /></div><div class="project-files-list"><Show when={files().length} fallback={<div class="project-files-empty"><span>▤</span><strong>No files loaded</strong><p>Refresh this project to browse its files.</p><button onClick={() => void refreshFiles()}>Load files</button></div>}><div class="project-files-tree"><ProjectFileTree files={files()} query={fileSearch()} activePath={openFile()} onSelect={(path) => { void selectFile(path); setActive("workspace") }} onPreview={previewFile} /></div><For each={files().filter((file) => file.path.toLowerCase().includes(fileSearch().toLowerCase()))}>{(file) => <button class={`project-file ${openFile() === file.path ? "active" : ""}`} onClick={() => { void selectFile(file.path); setActive("workspace") }}><span class="project-file__icon">{file.path.match(/\.(tsx?|jsx?|css|json|md)$/i) ? "◇" : "□"}</span><span class="project-file__path">{file.path}</span><small>{file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`}</small></button>}</For></Show></div><footer><span>Click a file to open it in Workspace</span><button onClick={() => { setFilesOpen(false); setActive("workspace") }}>Open editor</button></footer></Show></aside></Show><Show when={previewEnabled() && previewOpen()}><aside class={`preview-rail ${previewCollapsed() ? "preview-rail--collapsed" : ""}`}><header><div><strong>Preview</strong><span>{previewStatus()}</span></div><div class="preview-actions"><button onClick={async () => { const next = !previewCollapsed(); setPreviewCollapsed(next); await window.api.store.set(STORE_KEYS.layoutPreviewCollapsed, next) }} title={previewCollapsed() ? "Expand preview" : "Collapse preview"}>{previewCollapsed() ? "‹" : "›"}</button><Show when={!previewCollapsed()}><button class={previewDevice() === "desktop" ? "active" : ""} onClick={() => setPreviewDevice("desktop")} title="Desktop">▰</button><button class={previewDevice() === "tablet" ? "active" : ""} onClick={() => setPreviewDevice("tablet")} title="Tablet">▯</button><button class={previewDevice() === "mobile" ? "active" : ""} onClick={() => setPreviewDevice("mobile")} title="Mobile">▯</button><button onClick={() => setPreviewReload((value) => value + 1)} title="Reload">↻</button><button onClick={() => window.api.app.openExternal(previewURL())} title="Open in browser">↗</button></Show><button onClick={() => setPreviewOpen(false)} title="Close preview">×</button></div></header><Show when={!previewCollapsed()}><div class="preview-location"><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} onKeyDown={async (event) => { if (event.key === "Enter") { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set(STORE_KEYS.previewUrl, value) } } }} /><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set(STORE_KEYS.previewUrl, value) } }}>Go</button></div><div class={`preview-viewport preview-viewport--${previewDevice()}`}><iframe src={`${previewURL()}${previewURL().includes("?") ? "&" : "?"}grok-preview-reload=${previewReload()}`} title="Coding preview" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-presentation allow-downloads" onLoad={() => setPreviewStatus("Connected")} /></div></Show></aside></Show></div>
         </>}>
-        <RunsPanel runs={runs} onRefresh={async () => setRuns(await window.api.grokRuns.list())} />
+        <RunsPanel runs={runs} onRefresh={async () => setRuns(await window.api.grokRuns.list())} onOpenConversation={(run) => void openRunConversation(run)} onResume={(run) => void resumeRun(run)} onFork={(run) => void forkRun(run)} onStop={(run) => void stopRun(run)} onCopyDiagnostics={(run) => void copyRunDiagnostics(run)} />
         </Show>
         }>
         <BrowserAgentTab
