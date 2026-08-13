@@ -21,6 +21,7 @@ import { ProjectFileTree } from "./ProjectFileTree"
 import { TaskInspector } from "./TaskInspector"
 import { NotificationStack, type DesktopNotification } from "./NotificationStack"
 import { ChatTerminalRail } from "./ChatTerminalRail"
+import { ConversationSplitPane } from "./ConversationSplitPane"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
 import { WorkspacePanel } from "./views/WorkspacePanel"
 import { TerminalPanel } from "./views/TerminalPanel"
@@ -87,6 +88,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [sessionId, setSessionId] = createSignal("")
   const [chatThreads, setChatThreads] = createSignal<ChatThread[]>([])
   const [activeThreadId, setActiveThreadId] = createSignal("")
+  const [splitThread, setSplitThread] = createSignal<ChatThread | null>(null)
+  const [splitOpen, setSplitOpen] = createSignal(false)
   const [historyOpen, setHistoryOpen] = createSignal(false)
   const [historySearch, setHistorySearch] = createSignal("")
   const [historyAllWorkspaces, setHistoryAllWorkspaces] = createSignal(false)
@@ -252,6 +255,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const sessionKey = (root = workspace()) => `chat.session.${encodeURIComponent(root)}`
   const threadsKey = (root = workspace()) => `chat.threads.${encodeURIComponent(root)}`
   const activeThreadKey = (root = workspace()) => `chat.active.${encodeURIComponent(root)}`
+  const splitThreadKey = (root = workspace()) => `chat.split.${encodeURIComponent(root)}`
   const saveArtifactContext = async (patch: Partial<ArtifactContext>, root = workspace(), threadId = activeThreadId()) => {
     if (!root || !threadId) return
     const key = artifactContextKey(root, threadId)
@@ -323,6 +327,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setMessages(selected?.messages || legacyMessages)
     setSessionId(selected?.sessionId || legacySession)
     if (stored.length) await persistThreads(root, stored, selected?.id || stored[0].id)
+    const savedSplitId = await window.api.store.get<string>(splitThreadKey(root))
+    const savedSplit = savedSplitId ? stored.find((thread) => thread.id === savedSplitId && thread.id !== selected?.id) : undefined
+    setSplitThread(savedSplit || null)
+    setSplitOpen(Boolean(savedSplit))
     await restoreQueue(selected?.id)
     await restoreArtifactContext(root, selected?.id)
     setHistoryIndex(-1); setHistoryDraft("")
@@ -397,6 +405,29 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await window.api.conversations.save(fork)
     if (fork.workspace === workspace()) setChatThreads((current) => [fork, ...current])
     await openConversation(fork)
+  }
+  const openSplitConversation = async (thread: ChatThread) => {
+    if (thread.id === activeThreadId()) return
+    const full = await window.api.conversations.get(thread.id) as ChatThread | undefined
+    if (!full) return
+    setFilesOpen(false); setTerminalRailOpen(false); setInspectorOpen(false); setPreviewOpen(false)
+    setSplitThread(full); setSplitOpen(true)
+    await window.api.store.set(splitThreadKey(workspace()), full.id)
+  }
+  const closeSplitConversation = async () => {
+    setSplitOpen(false); setSplitThread(null)
+    await window.api.store.delete(splitThreadKey(workspace()))
+  }
+  const focusSplitConversation = async () => {
+    const thread = splitThread()
+    if (!thread || running()) return
+    await openConversation(thread)
+    await closeSplitConversation()
+  }
+  const openLatestSplitConversation = async () => {
+    const candidate = chatThreads().find((thread) => thread.id !== activeThreadId() && thread.messages.length)
+    if (candidate) await openSplitConversation(candidate)
+    else setSlashNotice("Create or keep another conversation before opening a split pane.")
   }
   const refreshHistory = async () => setHistoryResults(await window.api.conversations.search(historySearch(), historyAllWorkspaces() ? undefined : workspace()) as ChatThread[])
   const updateThreadMeta = async (thread: ChatThread, patch: Partial<ChatThread>) => {
@@ -1235,9 +1266,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       <Show when={active() === "telegram"} fallback={
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "browser-agent"} fallback={<Show when={active() === "runs"} fallback={<>
-        <div class={`chat-workbench ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""} ${filesOpen() ? "chat-workbench--files" : ""} ${filesRailCollapsed() ? "chat-workbench--files-collapsed" : ""} ${inspectorOpen() ? "chat-workbench--inspector" : ""} ${terminalRailOpen() ? "chat-workbench--terminal" : ""}`}><div class="chat-column"><section class="chat-thread">
-          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={workspace()}><button class={filesOpen() ? "active" : ""} onClick={() => void toggleFilesRail()} title="Browse project files">▤ Files</button></Show><button class={terminalRailOpen() ? "active" : ""} onClick={toggleTerminalRail} title="Open workspace terminal">{">_ Terminal"}</button><button class={inspectorOpen() ? "active" : ""} onClick={() => { setInspectorOpen((value) => !value); setFilesOpen(false); setTerminalRailOpen(false); setPreviewOpen(false) }} title="Inspect current task">◌ Activity</button><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview"); await saveArtifactContext({ previewUrl: result.url }) } catch (error) { setPreviewStatus((error as Error).message) } } setFilesOpen(false); setTerminalRailOpen(false); setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button class={historyOpen() ? "active" : ""} onClick={async () => { const next = !historyOpen(); setHistoryOpen(next); if (next) await refreshHistory() }}>History {chatThreads().filter((thread) => thread.messages.length).length || ""}</button><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
-          <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Chat history</strong><span>{historyAllWorkspaces() ? "All workspaces" : selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div class="chat-history__tools"><input value={historySearch()} onInput={async (event) => { setHistorySearch(event.currentTarget.value); await refreshHistory() }} placeholder="Search conversations…"/><label><input type="checkbox" checked={historyAllWorkspaces()} onChange={async (event) => { setHistoryAllWorkspaces(event.currentTarget.checked); await refreshHistory() }}/> All workspaces</label></div><div><For each={historyResults().filter((thread) => thread.messages.length && !thread.archived)} fallback={<p>No matching chats.</p>}>{(thread) => <article class={thread.id === activeThreadId() ? "active" : ""}><button disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.pinned ? "📌 " : ""}{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages · {thread.model || "default"} · {thread.sessionStatus || (thread.sessionId ? "resumable" : "new")}</span></button><div><button onClick={() => { const title = window.prompt("Conversation name", thread.title); if (title?.trim()) void updateThreadMeta(thread, { title: title.trim() }) }}>Rename</button><button onClick={() => void updateThreadMeta(thread, { pinned: !thread.pinned })}>{thread.pinned ? "Unpin" : "Pin"}</button><button onClick={() => void window.api.conversations.export(thread.id)}>Export</button><button onClick={() => void _forkConversation(thread)}>Fork</button><button onClick={() => void updateThreadMeta(thread, { archived: true })}>Archive</button></div></article>}</For></div></section></Show>
+        <div class={`chat-workbench ${splitOpen() ? "chat-workbench--split" : ""} ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""} ${filesOpen() ? "chat-workbench--files" : ""} ${filesRailCollapsed() ? "chat-workbench--files-collapsed" : ""} ${inspectorOpen() ? "chat-workbench--inspector" : ""} ${terminalRailOpen() ? "chat-workbench--terminal" : ""}`}><div class="chat-column"><section class="chat-thread">
+          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={workspace()}><button class={filesOpen() ? "active" : ""} onClick={() => void toggleFilesRail()} title="Browse project files">▤ Files</button></Show><button class={terminalRailOpen() ? "active" : ""} onClick={toggleTerminalRail} title="Open workspace terminal">{">_ Terminal"}</button><button class={inspectorOpen() ? "active" : ""} onClick={() => { setInspectorOpen((value) => !value); setFilesOpen(false); setTerminalRailOpen(false); setPreviewOpen(false) }} title="Inspect current task">◌ Activity</button><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview"); await saveArtifactContext({ previewUrl: result.url }) } catch (error) { setPreviewStatus((error as Error).message) } } setFilesOpen(false); setTerminalRailOpen(false); setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button class={splitOpen() ? "active" : ""} onClick={() => void (splitOpen() ? closeSplitConversation() : openLatestSplitConversation())} title="Keep another conversation visible">▥ Split</button><button class={historyOpen() ? "active" : ""} onClick={async () => { const next = !historyOpen(); setHistoryOpen(next); if (next) await refreshHistory() }}>History {chatThreads().filter((thread) => thread.messages.length).length || ""}</button><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
+          <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Chat history</strong><span>{historyAllWorkspaces() ? "All workspaces" : selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div class="chat-history__tools"><input value={historySearch()} onInput={async (event) => { setHistorySearch(event.currentTarget.value); await refreshHistory() }} placeholder="Search conversations…"/><label><input type="checkbox" checked={historyAllWorkspaces()} onChange={async (event) => { setHistoryAllWorkspaces(event.currentTarget.checked); await refreshHistory() }}/> All workspaces</label></div><div><For each={historyResults().filter((thread) => thread.messages.length && !thread.archived)} fallback={<p>No matching chats.</p>}>{(thread) => <article class={thread.id === activeThreadId() ? "active" : ""}><button disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.pinned ? "📌 " : ""}{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages · {thread.model || "default"} · {thread.sessionStatus || (thread.sessionId ? "resumable" : "new")}</span></button><div><button onClick={() => void openSplitConversation(thread)} disabled={thread.id === activeThreadId()}>Split</button><button onClick={() => { const title = window.prompt("Conversation name", thread.title); if (title?.trim()) void updateThreadMeta(thread, { title: title.trim() }) }}>Rename</button><button onClick={() => void updateThreadMeta(thread, { pinned: !thread.pinned })}>{thread.pinned ? "Unpin" : "Pin"}</button><button onClick={() => void window.api.conversations.export(thread.id)}>Export</button><button onClick={() => void _forkConversation(thread)}>Fork</button><button onClick={() => void updateThreadMeta(thread, { archived: true })}>Archive</button></div></article>}</For></div></section></Show>
           <div class="chat-messages" ref={messagesElement} onScroll={(event) => { const element = event.currentTarget; userNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 100 }}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
               <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(splitThinking(message.logs).filter((log) => log.kind !== "thought").map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) void run(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
@@ -1247,6 +1278,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         </section>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For></section></Show>
+        <Show when={splitOpen() && splitThread()}>{(thread) => <ConversationSplitPane thread={thread()} onClose={() => void closeSplitConversation()} onFocus={() => void focusSplitConversation()} />}</Show>
         <section class="chat-composer chat-composer--docked" aria-label="Grok Build task composer">
           <div class="chat-composer__context">
             <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
