@@ -30,6 +30,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - The Advanced session controls also expose Grok Build's verified `--continue` path for explicitly continuing the most recent native session; it takes precedence over an explicit session UUID.
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
 - Searchable Grok run history, scheduled tasks, project skills, official Rhai workflows, and durable workspace goals.
+- Plan mode now presents an explicit decision gate after `plan.md` is available: View plan, Approve & build, Revise plan, or Reject & dismiss. Approval and revision stay disabled while the plan is still being written.
 - Scheduled runs now create distinct persisted conversations; **Open last result** returns to the transcript and native session for review or continuation.
 - DuckBot RAG Memory is the primary desktop memory source; recall is bounded to relevant local context, while Grok Build's duplicate default memory is disabled unless experimental memory is explicitly selected.
 - Agent → Memory includes explicit DuckBot brain diagnostics (`brain_stats`) and a bounded `brain_wake_up` preview for inspecting session context without adding either call to the normal fast task path.

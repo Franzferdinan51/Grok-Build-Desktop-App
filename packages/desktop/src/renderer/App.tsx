@@ -1517,6 +1517,27 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     void run(next.text, { fromQueue: true })
   }
 
+  const approveSavedPlan = async () => {
+    if (!visibleSessionPlan() || running()) return
+    setPlanMode(false)
+    setSessionPlan(null)
+    await window.api.store.set(STORE_KEYS.defaultsPlanMode, false)
+    setSlashNotice("Plan approved. Grok Build is starting implementation.")
+    await run("Implement the approved plan.md and verify every requested change.", { permissionMode: "auto", noPlan: true })
+  }
+  const reviseSavedPlan = async () => {
+    if (!visibleSessionPlan() || running()) return
+    setSlashNotice("Plan revision requested. Grok Build will update plan.md and wait for your decision again.")
+    await run("Revise the saved plan.md based on the latest conversation and current workspace state. Do not edit implementation files; leave the revised plan ready for approval.", { permissionMode: "plan", noPlan: false })
+  }
+  const dismissSavedPlan = async () => {
+    if (running()) return
+    setPlanMode(false)
+    setSessionPlan(null)
+    await window.api.store.set(STORE_KEYS.defaultsPlanMode, false)
+    setSlashNotice("Plan dismissed. No implementation was started.")
+  }
+
   const browsePromptHistory = (direction: -1 | 1) => {
     const history = messages().filter((message) => message.role === "user").map((message) => message.logs.map((log) => log.content).join("\n")).reverse()
     if (!history.length) return
@@ -1894,7 +1915,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           </div>
         </section>
         <Show when={workspace() || contextRailMode()}><nav class="context-rail-tabs" aria-label="Session context rail"><span>Session tools</span><button class={contextRailMode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()}>Files</button><button class={contextRailMode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail}>Terminal</button><button class={contextRailMode() === "activity" ? "active" : ""} onClick={toggleActivityRail}>Activity</button><Show when={previewEnabled()}><button class={contextRailMode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>Preview</button></Show><Show when={selectedProject()?.isGit}><button class={contextRailMode() === "review" ? "active" : ""} onClick={() => void toggleReviewRail()}>Review</button></Show></nav></Show>
-        <Show when={planMode() || visibleSessionPlan()}><section class={`goal-banner ${planMode() ? "" : "goal-banner--completed"}`}><div><span>{planMode() ? "PLAN MODE" : "SAVED PLAN"}</span><strong>{visibleSessionPlan()?.markdown?.split(/\r?\n/).find((line) => line.startsWith("#"))?.replace(/^#+\s*/, "") || (planMode() ? "Plan ready for review" : "Saved Grok Build plan")}</strong><small>{visibleSessionPlan()?.sessionId || (planMode() ? "Waiting for plan.md" : "")}</small></div><div><Show when={visibleSessionPlan()}><button onClick={() => void executeSlashCommand("/view-plan")}>View plan</button></Show><Show when={planMode()}><button onClick={() => { setPlanMode(false); void window.api.store.set(STORE_KEYS.defaultsPlanMode, false); void run("Approve the saved plan.md and start implementing it.", { permissionMode: "auto", noPlan: true }) }}>Approve & build</button></Show><Show when={planMode() && !visibleSessionPlan()}><button onClick={() => void refreshSessionPlan(workspace(), sessionId())}>Refresh plan</button></Show><Show when={planMode()}><button onClick={() => void executeSlashCommand("/plan off")}>Exit plan</button></Show></div></section></Show>
+        <Show when={planMode() || visibleSessionPlan()}><section class={`goal-banner ${planMode() ? "" : "goal-banner--completed"}`} aria-label="Plan decision"><div><span>{planMode() ? "PLAN MODE" : "SAVED PLAN"}</span><strong>{visibleSessionPlan()?.markdown?.split(/\r?\n/).find((line) => line.startsWith("#"))?.replace(/^#+\s*/, "") || (planMode() ? "Waiting for plan.md" : "Saved Grok Build plan")}</strong><small>{visibleSessionPlan()?.sessionId || (planMode() ? "Grok Build is preparing the plan…" : "")}</small></div><div><Show when={visibleSessionPlan()}><button onClick={() => void executeSlashCommand("/view-plan")}>View plan</button></Show><Show when={planMode()}><button class="goal-banner__approve" disabled={!visibleSessionPlan() || running()} onClick={() => void approveSavedPlan()}>Approve &amp; build</button><button disabled={!visibleSessionPlan() || running()} onClick={() => void reviseSavedPlan()}>Revise plan</button><button disabled={running()} onClick={() => void dismissSavedPlan()}>Reject &amp; dismiss</button></Show><Show when={planMode() && !visibleSessionPlan()}><button onClick={() => void refreshSessionPlan(workspace(), sessionId())}>Refresh plan</button></Show></div></section></Show>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued{queueParked() ? " · parked" : ""}</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button disabled={Boolean(queueEdit()) && queueEdit()?.id !== entry.id} onClick={() => queueEdit()?.id === entry.id ? void saveQueuedEdit() : beginQueuedEdit(entry)}>{queueEdit()?.id === entry.id ? "Save" : "Edit"}</button><Show when={queueEdit()?.id === entry.id}><button onClick={cancelQueuedEdit}>Cancel</button></Show><button disabled={queueEdit()?.id === entry.id} onClick={() => void sendQueuedNow(entry.id)}>Send now</button><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For><Show when={queueParked()}><button onClick={() => void resumeParkedQueue()}>Resume queue</button></Show></section></Show>
         <Show when={splitOpen() && splitThreads().length}><ConversationSplitPane threads={splitThreads()} activeId={splitActiveId()} onSelect={setSplitActiveId} onClose={(id) => void closeSplitConversation(id)} onFocus={() => void focusSplitConversation()} /></Show>
