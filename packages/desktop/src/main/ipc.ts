@@ -220,6 +220,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("telegram:deny-chat", async (_event, chatId: string) => deps.telegram().denyChat(chatId))
   ipcMain.handle("telegram:revoke-chat", async (_event, chatId: string) => deps.telegram().revokeChat(chatId))
   ipcMain.handle("telegram:set-auto-approve-first", async (_event, enabled: boolean) => deps.telegram().setAutoApproveFirst(enabled))
+  ipcMain.handle("telegram:set-agent-options", async (_event, patch: { requireMention?: boolean; reactions?: boolean; notifications?: "important" | "all"; statusIndicator?: boolean }) => deps.telegram().setAgentOptions(patch || {}))
   ipcMain.handle("local-studio:status", () => deps.localStudio().snapshot())
   ipcMain.handle("local-studio:set-url", (_event, baseUrl: string) => deps.localStudio().setBaseURL(baseUrl))
   ipcMain.handle("host-controls:browser-status", () => hostBrowserStatus())

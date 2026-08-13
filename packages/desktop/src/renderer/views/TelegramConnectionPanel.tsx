@@ -38,6 +38,7 @@ export function TelegramConnectionPanel(props: {
   onDeny: (id: string) => void
   onRevoke: (id: string) => void
   onAutoApproveFirst: (enabled: boolean) => void
+  onAgentOptions: (patch: { requireMention?: boolean; reactions?: boolean; notifications?: "important" | "all"; statusIndicator?: boolean }) => void
   onOpenBot: () => void
   onOpenBotFather: () => void
   onRefresh: () => void
@@ -105,6 +106,30 @@ export function TelegramConnectionPanel(props: {
       Auto-approve the first incoming chat
     </label>
     <p class="provider-notice">Off by default. Useful for a personal bot. Later chats still need explicit approval.</p>
+
+    <h3 class="list-group__label">Agent channel</h3>
+    <p class="provider-notice">Hermes/OpenClaw-style channel controls. Grok Build stays the only execution runtime.</p>
+    <label class="settings-switch telegram-connect__switch">
+      <input type="checkbox" checked={Boolean(props.status.requireMention)} onChange={(event) => props.onAgentOptions({ requireMention: event.currentTarget.checked })} />
+      <span />
+      Groups require @mention or reply
+    </label>
+    <label class="settings-switch telegram-connect__switch">
+      <input type="checkbox" checked={props.status.reactions !== false} onChange={(event) => props.onAgentOptions({ reactions: event.currentTarget.checked })} />
+      <span />
+      React 👀 / ✅ / ❌ while a task runs
+    </label>
+    <label class="settings-switch telegram-connect__switch">
+      <input type="checkbox" checked={props.status.notifications !== "all"} onChange={(event) => props.onAgentOptions({ notifications: event.currentTarget.checked ? "important" : "all" })} />
+      <span />
+      Quiet progress (notify only finals and approvals)
+    </label>
+    <label class="settings-switch telegram-connect__switch">
+      <input type="checkbox" checked={props.status.statusIndicator !== false} onChange={(event) => props.onAgentOptions({ statusIndicator: event.currentTarget.checked })} />
+      <span />
+      Show Online / Offline on the bot profile
+    </label>
+    <p class="provider-notice">Use /sethome in Telegram to deliver scheduled results to that chat{props.status.homeChatId ? ` · home ${props.status.homeChatId}` : ""}.</p>
 
     <Show when={props.pending.length}>
       <section>

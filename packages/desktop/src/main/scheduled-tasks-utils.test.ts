@@ -7,7 +7,7 @@ const task = { id: "s1", name: "Nightly", prompt: "test", cwd: "/repo", enabled:
 test("scheduled task patches expose running and failed detail without losing repeat timing", () => {
   const running = withScheduleRunningPatch(task, true)
   assert.equal(running.running, true)
-  const finished = withScheduleFinishPatch(running, "failed", 200)
+  const finished = withScheduleFinishPatch(running, "failed", 200, "thread-1", "run-1")
   const final = withScheduleRunningPatch(finished, false, "provider unavailable")
   assert.equal(final.running, false)
   assert.equal(final.lastStatus, "failed")

@@ -36,10 +36,14 @@ export const ESSENTIAL_BOT_COMMANDS = [
   { command: "retry", description: "Retry the previous instruction" },
   { command: "undo", description: "Rewind the previous turn" },
   { command: "cancel", description: "Cancel the active task" },
+  { command: "stop", description: "Stop the active task" },
   { command: "new", description: "Start a fresh session" },
   { command: "history", description: "Recent conversation" },
   { command: "workspace", description: "Show the working directory" },
   { command: "skills", description: "List loaded skills" },
+  { command: "sethome", description: "Deliver scheduled results here" },
+  { command: "approve", description: "Approve a held task" },
+  { command: "deny", description: "Deny a held task" },
   { command: "whoami", description: "Show this chat id" },
 ] as const
 

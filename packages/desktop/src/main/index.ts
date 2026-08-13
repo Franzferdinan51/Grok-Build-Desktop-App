@@ -18,7 +18,8 @@ import { TelegramBridge } from "./telegram"
 import { LocalStudioController } from "./local-studio"
 import { initLogging, write as writeLog } from "./logging"
 import { createMenu } from "./menu"
-import { GrokTaskScheduler } from "./scheduled-tasks"
+import { GrokTaskScheduler, onScheduleEvent } from "./scheduled-tasks"
+import { scheduledHomeNotice } from "./telegram-ux"
 import { PreviewServer } from "./preview-server"
 import { getStore } from "./store"
 import { recoverInterruptedGrokRuns } from "./grok-runs"
@@ -234,6 +235,15 @@ app.whenReady().then(async () => {
   })
   telegram.start()
   scheduler.start()
+  onScheduleEvent((event) => {
+    const homeChatId = getStore().get("telegram").homeChatId
+    if (!homeChatId) return
+    const notice = scheduledHomeNotice(event)
+    if (!notice) return
+    void telegram.sendLong(homeChatId, notice).catch((error) => {
+      writeLog("warn", `Telegram home-channel delivery failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  })
   // Auto-update is now single-flight: a 6h `setInterval` and the 30s
   // warmup `setTimeout` can land in either order, and `installUpdate`
   // may take up to 10 minutes. Without the inflight guard, a long update

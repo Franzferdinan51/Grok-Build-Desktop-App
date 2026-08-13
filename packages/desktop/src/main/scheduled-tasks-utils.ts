@@ -32,6 +32,8 @@ export function withScheduleFinishPatch(
   task: ScheduledGrokTask,
   status: "completed" | "failed",
   at: number = Date.now(),
+  threadId?: string,
+  runId?: string,
 ): ScheduledGrokTask {
   const repeat = task.repeatMinutes && task.repeatMinutes > 0
   return {
@@ -40,6 +42,8 @@ export function withScheduleFinishPatch(
     lastStatus: status,
     enabled: Boolean(repeat),
     nextRunAt: repeat ? at + (task.repeatMinutes as number) * 60_000 : task.nextRunAt,
+    lastThreadId: threadId ?? task.lastThreadId,
+    lastRunId: runId ?? task.lastRunId,
   }
 }
 

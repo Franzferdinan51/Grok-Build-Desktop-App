@@ -33,6 +33,11 @@ export type TelegramStatus = {
   pendingCount?: number
   autoApproveFirst?: boolean
   coolOffMs?: number
+  requireMention?: boolean
+  reactions?: boolean
+  notifications?: "important" | "all"
+  statusIndicator?: boolean
+  homeChatId?: string
 }
 export type TelegramChat = {
   id: string
@@ -98,6 +103,7 @@ export type ElectronAPI = {
     denyChat: (chatId: string) => Promise<string[]>
     revokeChat: (chatId: string) => Promise<string[]>
     setAutoApproveFirst: (enabled: boolean) => Promise<boolean>
+    setAgentOptions: (patch: { requireMention?: boolean; reactions?: boolean; notifications?: "important" | "all"; statusIndicator?: boolean }) => Promise<{ requireMention: boolean; reactions: boolean; notifications: "important" | "all"; statusIndicator: boolean; homeChatId?: string }>
     onChange: (handler: () => void) => () => void
   }
   memory: { status: () => Promise<DuckbotMemoryStatus>; health: () => Promise<DuckbotMemoryHealth>; wakeUp: (query?: string) => Promise<string>; recall: (query: string) => Promise<string> }
@@ -158,6 +164,7 @@ const api: ElectronAPI = {
     denyChat: (chatId) => ipcRenderer.invoke("telegram:deny-chat", chatId),
     revokeChat: (chatId) => ipcRenderer.invoke("telegram:revoke-chat", chatId),
     setAutoApproveFirst: (enabled) => ipcRenderer.invoke("telegram:set-auto-approve-first", enabled),
+    setAgentOptions: (patch) => ipcRenderer.invoke("telegram:set-agent-options", patch),
     onChange: (handler) => {
       const listener = () => handler()
       ipcRenderer.on("telegram:changed", listener)

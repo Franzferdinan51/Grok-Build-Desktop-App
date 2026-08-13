@@ -88,8 +88,8 @@ export class GrokTaskScheduler {
       catch (error) {
         const detail = `Could not persist scheduled conversation: ${String(error).slice(0, 2_000)}`
         this.backend.clearActiveRun(reservedRunId)
-        this.finish(task, "failed", detail)
-        emitScheduleEvent({ taskId: task.id, name: task.name, status: "failed", detail, at: Date.now() })
+        this.finish(task, "failed", detail, threadId)
+        emitScheduleEvent({ taskId: task.id, name: task.name, status: "failed", detail, at: Date.now(), threadId })
         return
       }
       let run: ReturnType<typeof startGrokRun> | undefined
@@ -126,22 +126,23 @@ export class GrokTaskScheduler {
         }, reservedRunId)
         if (!assistantMessage.logs.some((log) => log.kind === "text")) assistantMessage.logs = [{ kind: "text", content: "Scheduled task completed. Grok Build returned no public summary." }]
         await persistThread(true)
-        finishGrokRun(run.id, { status: "completed", grokSessionId: thread.sessionId || undefined }); this.finish(task, "completed")
+        finishGrokRun(run.id, { status: "completed", grokSessionId: thread.sessionId || undefined }); this.finish(task, "completed", undefined, threadId, run.id)
         emitScheduleEvent({ taskId: task.id, name: task.name, status: "completed", detail: "Scheduled task completed", at: Date.now(), runId: run.id, threadId })
       } catch (error) {
         const detail = String(error).slice(0, 2_000)
         if (!assistantMessage.logs.some((log) => log.kind === "error")) assistantMessage.logs = [...assistantMessage.logs, { kind: "error", content: detail }]
         try { await persistThread(true) } catch { /* retain the original task failure */ }
         if (run) finishGrokRun(run.id, { status: "failed", grokSessionId: thread.sessionId || undefined, error: detail })
-        this.finish(task, "failed", detail)
+        this.finish(task, "failed", detail, threadId, run?.id)
         emitScheduleEvent({ taskId: task.id, name: task.name, status: "failed", detail, at: Date.now(), runId: run?.id, threadId })
       } finally {
         this.backend.clearActiveRun(run?.id || reservedRunId)
       }
     } finally { this.checking = false }
   }
-  private finish(done: ScheduledGrokTask, status: "completed" | "failed", detail?: string) {
-    const now = Date.now(); const repeat = done.repeatMinutes && done.repeatMinutes > 0
-    getStore().set("schedules", listSchedules().map((task) => task.id === done.id ? withScheduleRunningPatch(withScheduleFinishPatch(task, status, now), false, detail) : task))
+  private finish(done: ScheduledGrokTask, status: "completed" | "failed", detail?: string, threadId?: string, runId?: string) {
+    const now = Date.now()
+    const patched = withScheduleFinishPatch(done, status, now, threadId, runId)
+    getStore().set("schedules", listSchedules().map((task) => task.id === done.id ? withScheduleRunningPatch(patched, false, detail) : task))
   }
 }

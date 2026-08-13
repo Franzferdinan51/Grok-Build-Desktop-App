@@ -1950,6 +1950,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             onDeny={async (id) => { await window.api.telegram.denyChat(id); await refreshTelegram(); setTelegramNotice(`${id} denied`) }}
             onRevoke={async (id) => { await window.api.telegram.revokeChat(id); await refreshTelegram(); setTelegramNotice(`${id} revoked`) }}
             onAutoApproveFirst={async (enabled) => { await window.api.telegram.setAutoApproveFirst(enabled); await refreshTelegram() }}
+            onAgentOptions={async (patch) => { await window.api.telegram.setAgentOptions(patch); await refreshTelegram() }}
             onOpenBot={() => { const name = telegram().username; if (name) void window.api.app.openExternal(`https://t.me/${name}`) }}
             onOpenBotFather={() => void window.api.app.openExternal("https://t.me/BotFather")}
             onRefresh={() => void refreshTelegram(!telegram().polling)}

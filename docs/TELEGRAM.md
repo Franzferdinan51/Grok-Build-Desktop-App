@@ -40,6 +40,8 @@ The Agent tab is the desktop control plane for the same persistent agent. Runtim
 - `/reasoning on|off` — override reasoning for this chat session
 - `/history` — show recent public conversation
 - `/schedules` — list enabled scheduled work
+- `/sethome` — deliver completed/failed scheduled results to this chat
+- `/home` — show or clear the scheduled home channel
 - `/cancel` — stop the active task
 - `/security` or `/sandbox` — show the NemoClaw-inspired host policy
 - `/security on|off` — enable or disable the policy layer
@@ -66,3 +68,12 @@ and its dependencies are available.
 ## Reliability
 
 The update offset is persisted to prevent duplicate processing after restart. Polling errors are logged, stale webhooks are cleared without discarding queued updates, callbacks are acknowledged immediately, and `/status` and `/cancel` remain responsive while a task runs.
+
+Hermes/OpenClaw channel UX is adapted without importing those runtimes:
+
+- Progress and typing stay quiet by default (`disable_notification`). Final replies, pairing, and approvals still notify.
+- An incoming task message can be pinned for the turn and reacted 👀 → ✅/❌.
+- The bot short description can show Online/Offline while polling is live.
+- Groups can require an @mention or a reply before ordinary chatter runs a task.
+- Held security approvals offer inline Approve/Deny buttons.
+- `/sethome` sends scheduled completion/failure notices to the chosen authorized chat.

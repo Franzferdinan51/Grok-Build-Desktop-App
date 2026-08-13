@@ -94,6 +94,11 @@ type StoreSchema = {
     pendingChatIds?: string[]
     chatProfiles?: Record<string, { id: string; type?: string; title?: string; username?: string; firstName?: string; lastName?: string; lastSeenAt?: number; lastPreview?: string }>
     autoApproveFirst?: boolean
+    homeChatId?: string
+    requireMention?: boolean
+    reactions?: boolean
+    notifications?: "important" | "all"
+    statusIndicator?: boolean
     sessions?: Record<string, {
       sessionId?: string; model?: string; workspace?: string; updatedAt: number
       transcript?: { role: "user" | "assistant"; text: string }[]

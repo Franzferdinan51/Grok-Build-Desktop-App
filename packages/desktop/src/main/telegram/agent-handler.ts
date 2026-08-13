@@ -27,6 +27,7 @@ import type { GrokBuildBackend, RunTaskInput, GrokBuildEvent } from "../grok-bui
 import { nemoConfig, nemoStatus, recordNemoAudit, taskApprovalReason } from "../nemoclaw-security"
 import { listGrokSkills } from "../grok-skills"
 import { dequeueChatTasks, describeCancelChat, enqueueTelegramTask, prioritizeTelegramTask } from "../telegram-queue"
+import { normalizeTelegramAgentOptions, telegramReactionEmoji, type TelegramInboundMeta } from "../telegram-ux"
 
 export type TelegramQueueEntry = { chatId: string; text: string; queuedAt: number }
 export type TelegramAgentSession = {
@@ -55,6 +56,8 @@ export type AgentHandlerDeps = {
   buildInput(chatId: string, taskText: string, agent: TelegramAgentSession): Promise<RunTaskInput | undefined>
 }
 
+export type { TelegramInboundMeta }
+
 const telegramSession = (chatId: string, store = getStore()): TelegramAgentSession => store.get("telegram").sessions?.[chatId] || { updatedAt: Date.now() }
 const saveTelegramSession = (chatId: string, patch: Partial<TelegramAgentSession>, store = getStore()): TelegramAgentSession => {
   const telegramSettings = store.get("telegram")
@@ -66,7 +69,7 @@ const saveTelegramSession = (chatId: string, patch: Partial<TelegramAgentSession
 export function createAgentHandler(deps: AgentHandlerDeps) {
   const { backend, queue } = deps
 
-  const handleMessage = async (chatId: string, text: string): Promise<string | { text: string; buttons: { text: string; data: string }[][] }> => {
+  const handleMessage = async (chatId: string, text: string, meta?: TelegramInboundMeta): Promise<string | { text: string; buttons: { text: string; data: string }[][] }> => {
     // Picker callbacks: each prefix is routed through the shipped
     // parseTelegramCallback so the dispatcher table can stay in one place.
     const callback = parseTelegramCallback(text)
@@ -156,9 +159,11 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
         if (callback.kind === "moa_aggregator") return buildTelegramMoaAggregatorPicker(catalog.models, aggregator)
         return buildTelegramMoaMenu(Boolean(getStore().get("moa.enabled")), references, aggregator)
       }
+      if (callback.kind === "approve_task") return handleMessage(chatId, "/approve", meta)
+      if (callback.kind === "deny_task") return handleMessage(chatId, "/deny", meta)
       if (callback.kind === "menu") {
         const rewritten = mapMenuCallback(callback.payload)
-        if (rewritten) return handleMessage(chatId, rewritten)
+        if (rewritten) return handleMessage(chatId, rewritten, meta)
       }
     }
     const parsed = parseTelegramCommand(text)
@@ -168,6 +173,21 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     if (name === "start" || name === "help" || name === "menu") return menu
     if (name === "commands") return TELEGRAM_HELP_TEXT
     if (name === "whoami" || name === "id") return `Telegram chat id: ${chatId}`
+    if (name === "sethome" || name === "home") {
+      const current = getStore().get("telegram")
+      const action = argument.toLowerCase() || (name === "sethome" ? "here" : "status")
+      if (action === "here" || action === "set" || name === "sethome" && !argument) {
+        getStore().set("telegram", { ...current, homeChatId: chatId })
+        return "🏠 This chat is now the home channel. Completed and failed scheduled tasks will be delivered here."
+      }
+      if (action === "clear" || action === "off") {
+        getStore().set("telegram", { ...current, homeChatId: undefined })
+        return "🏠 Home channel cleared. Scheduled results stay in the desktop Scheduled page."
+      }
+      return current.homeChatId
+        ? `Home channel: ${current.homeChatId}${current.homeChatId === chatId ? " (this chat)" : ""}\nUse /sethome to move it here, or /home clear to remove it.`
+        : "No home channel is set. Use /sethome in the chat that should receive scheduled results."
+    }
     if (name === "goal") {
       const raw = argument.trim()
       const [actionToken, ...rest] = raw.split(/\s+/)
@@ -206,7 +226,7 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       const agent = deps.session(chatId)
       const context = (agent.transcript || []).slice(-6).map((entry) => `${entry.role === "user" ? "User" : "Agent"}: ${entry.text}`).join("\n\n")
       const request = argument || "Extract the reusable workflow, decisions, and verification steps from the recent Telegram work and draft a SKILL.md for it."
-      return startAgentTask(deps, chatId, `Create or improve a reusable Grok Build skill. ${request}\n\nRecent context:\n${context.slice(-12_000)}`, agent)
+      return startAgentTask(deps, chatId, `Create or improve a reusable Grok Build skill. ${request}\n\nRecent context:\n${context.slice(-12_000)}`, agent, meta)
     }
     if (name === "skill") {
       const [skillName, ...skillArgs] = argument.split(/\s+/).filter(Boolean)
@@ -215,7 +235,7 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       const skill = listGrokSkills(workspace).find((entry) => entry.name.toLowerCase() === skillName.toLowerCase())
       if (!skill) return `Skill not found: ${skillName}\nUse /skills to list available skills.`
       const request = skillArgs.join(" ") || "Apply this skill to the current request."
-      return startAgentTask(deps, chatId, `Use the skill at ${skill.path}. ${request}`, deps.session(chatId))
+      return startAgentTask(deps, chatId, `Use the skill at ${skill.path}. ${request}`, deps.session(chatId), meta)
     }
     if (name === "login") {
       const provider = (argument || "xai").trim().toLowerCase()
@@ -449,7 +469,10 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     if (approvalReason && !approvedTask && !deps.session(chatId).pendingApproval) {
       deps.saveSession(chatId, { pendingApproval: { task: taskText.slice(0, 20_000), reason: approvalReason, requestedAt: Date.now() } })
       recordNemoAudit({ chatId, action: "telegram.task", decision: "pending", detail: approvalReason })
-      return `🛡️ Approval required: ${approvalReason}.\n\nTask held safely. Review it, then use /approve or /deny.`
+      return {
+        text: `🛡️ Approval required: ${approvalReason}.\n\nTask held safely. Review it, then tap a button or use /approve or /deny.`,
+        buttons: [[{ text: "✅ Approve", data: "approve_task" }, { text: "🚫 Deny", data: "deny_task" }]],
+      }
     }
     let agent = deps.session(chatId)
     const idleHours = Math.max(0, Number(getStore().get("agent.sessionIdleHours")) || 0)
@@ -457,13 +480,13 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       deps.saveSession(chatId, { sessionId: "", transcript: [], compressedSummary: "" })
       agent = deps.session(chatId)
     }
-    return await startAgentTask(deps, chatId, taskText, agent)
+    return await startAgentTask(deps, chatId, taskText, agent, meta)
   }
 
   return { handleMessage }
 }
 
-async function startAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: string, agent: TelegramAgentSession): Promise<string> {
+async function startAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: string, agent: TelegramAgentSession, meta?: TelegramInboundMeta): Promise<string> {
   const { backend, queue } = deps
   if (backend.isRunning() || deps.getReserved()) {
     const position = enqueueTelegramTask(queue, { chatId, text: taskText, queuedAt: Date.now() })
@@ -474,7 +497,7 @@ async function startAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: 
   deps.setRunningChat(chatId)
   deps.setCancelled(false)
   try {
-    return await runAgentTask(deps, chatId, taskText, agent)
+    return await runAgentTask(deps, chatId, taskText, agent, meta)
   } finally {
     deps.setRunningChat("")
     deps.setReserved(false)
@@ -482,7 +505,7 @@ async function startAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: 
   }
 }
 
-async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: string, agent: TelegramAgentSession): Promise<string> {
+async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: string, agent: TelegramAgentSession, meta?: TelegramInboundMeta): Promise<string> {
   const { backend, telegram } = deps
   const input = await deps.buildInput(chatId, taskText, agent)
   if (!input) return "Agent task could not be built — no project / model configured."
@@ -493,6 +516,13 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
   const cwd = input.cwd || agent.workspace || join(app.getPath("userData"), "Scratch")
   const workspaceName = cwd === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : getStore().get("projects").find((project) => project.path === cwd)?.name || "Scratch"
   const modelName = input.model || "Grok Build default"
+  const options = normalizeTelegramAgentOptions(getStore().get("telegram"))
+  const inboundId = meta?.messageId
+  let turnPhase: "started" | "completed" | "failed" | "cancelled" = "started"
+  if (inboundId) {
+    if (options.reactions) void telegram.react(chatId, inboundId, telegramReactionEmoji("started"))
+    void telegram.pinMessage(chatId, inboundId)
+  }
   await telegram.sendActivity(chatId)
   const progressId = await telegram.sendProgress(chatId, `🚀 Task started\nModel: ${modelName}\nWorkspace: ${workspaceName}`)
   let response = ""
@@ -521,17 +551,24 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
       else if (event.type.toLowerCase().includes("tool")) updateProgress("🔧 Grok Build is using workspace tools")
     })
     if (deps.getCancelled()) {
+      turnPhase = "cancelled"
       finishGrokRun(run.id, { status: "cancelled" })
       await telegram.editProgress(chatId, progressId, `⏹ Task cancelled\nTime: ${elapsed()}\nModel: ${modelName}`)
       return "Task cancelled."
     }
+    turnPhase = "completed"
     finishGrokRun(run.id, { status: "completed" })
   } catch (error) {
+    turnPhase = "failed"
     finishGrokRun(run.id, { status: "failed", error: error instanceof Error ? error.message : String(error) })
     await telegram.editProgress(chatId, progressId, `❌ Task failed\nTime: ${elapsed()}\nModel: ${modelName}`)
     throw error
   } finally {
     clearInterval(activityTimer)
+    if (inboundId) {
+      void telegram.unpinMessage(chatId, inboundId)
+      if (options.reactions) void telegram.react(chatId, inboundId, telegramReactionEmoji(turnPhase))
+    }
   }
   if (getStore().get("agent.appControls")) {
     const { actions } = validateAppActions(response)

@@ -12,6 +12,11 @@ export type TelegramPersistedState = {
   pendingChatIds?: string[]
   chatProfiles?: Record<string, unknown>
   autoApproveFirst?: boolean
+  homeChatId?: string
+  requireMention?: boolean
+  reactions?: boolean
+  notifications?: "important" | "all"
+  statusIndicator?: boolean
   sessions?: Record<string, unknown>
 }
 
@@ -21,6 +26,11 @@ function withSharedDisconnectFields(previous: TelegramPersistedState): Omit<Tele
     pendingChatIds: previous.pendingChatIds || [],
     chatProfiles: previous.chatProfiles || {},
     autoApproveFirst: previous.autoApproveFirst || false,
+    ...(previous.homeChatId ? { homeChatId: previous.homeChatId } : {}),
+    ...(previous.requireMention ? { requireMention: true } : {}),
+    ...(previous.reactions === false ? { reactions: false } : {}),
+    ...(previous.notifications === "all" ? { notifications: "all" as const } : {}),
+    ...(previous.statusIndicator === false ? { statusIndicator: false } : {}),
     updateOffset: 0,
     sessions: previous.sessions || {},
   }

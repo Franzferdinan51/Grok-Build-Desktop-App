@@ -26,6 +26,16 @@ import {
   type TelegramChatProfile,
   type TelegramChatView,
 } from "./telegram-connection.ts"
+import {
+  groupMessageShouldRun,
+  inboundMentionsBot,
+  normalizeTelegramAgentOptions,
+  shouldSilenceTelegramSend,
+  telegramPresenceText,
+  type TelegramAgentOptions,
+  type TelegramInboundMeta,
+  type TelegramSendKind,
+} from "./telegram-ux.ts"
 
 export type TelegramStatus = {
   connected: boolean
@@ -44,6 +54,11 @@ export type TelegramStatus = {
   autoApproveFirst?: boolean
   /** Cooldown remaining before a retried connect attempt will be honoured. */
   coolOffMs?: number
+  requireMention?: boolean
+  reactions?: boolean
+  notifications?: "important" | "all"
+  statusIndicator?: boolean
+  homeChatId?: string
 }
 
 export type { TelegramChatView }
@@ -98,7 +113,7 @@ export class TelegramBridge {
   private polling = false
   private pollGeneration = 0
   private offset = 0
-  private handler?: (chatId: string, text: string) => Promise<string | TelegramReply>
+  private handler?: (chatId: string, text: string, meta?: TelegramInboundMeta) => Promise<string | TelegramReply>
   private unauthorizedNotified = new Set<string>()
   // Exponential backoff base for transient polling failures. Resets on the
   // next successful poll, so a sustained outage does not permanently penalise
@@ -127,7 +142,20 @@ export class TelegramBridge {
   private pollAbort?: AbortController
   private changeListeners = new Set<() => void>()
 
-  setMessageHandler(handler: (chatId: string, text: string) => Promise<string | TelegramReply>): void { this.handler = handler }
+  setMessageHandler(handler: (chatId: string, text: string, meta?: TelegramInboundMeta) => Promise<string | TelegramReply>): void { this.handler = handler }
+
+  agentOptions(): TelegramAgentOptions {
+    return normalizeTelegramAgentOptions(getStore().get("telegram"))
+  }
+
+  async setAgentOptions(patch: Partial<TelegramAgentOptions>): Promise<TelegramAgentOptions> {
+    return enqueueTelegramMutation(async () => {
+      const next = normalizeTelegramAgentOptions({ ...this.agentOptions(), ...patch })
+      getStore().set("telegram", { ...getStore().get("telegram"), ...next })
+      this.notifyChange()
+      return next
+    })
+  }
 
   onChange(listener: () => void): () => void {
     this.changeListeners.add(listener)
@@ -264,6 +292,7 @@ export class TelegramBridge {
       pendingCount: this.pendingChats().length,
       autoApproveFirst: Boolean(getStore().get("telegram").autoApproveFirst),
       coolOffMs: this.coolOffRemaining(),
+      ...this.agentOptions(),
       ...partial,
     }
   }
@@ -456,10 +485,12 @@ export class TelegramBridge {
     void this.bootstrap(generation)
   }
   stop(): void {
+    const goingOffline = this.polling && Boolean(this.token())
     this.polling = false
     this.pollGeneration++
     this.pollAbort?.abort()
     this.pollAbort = undefined
+    if (goingOffline) void this.setPresence(false)
   }
 
   private async bootstrap(generation: number): Promise<void> {
@@ -476,6 +507,7 @@ export class TelegramBridge {
       this.webhookCleared = true
       this.lastError = ""
       await this.configureCommands()
+      await this.setPresence(true)
       writeLog("info", `Telegram polling started at update ${this.offset}`)
       await this.poll(generation)
     } catch (error) {
@@ -501,7 +533,7 @@ export class TelegramBridge {
         const pollAbort = new AbortController()
         this.pollAbort = pollAbort
         const timeout = setTimeout(() => pollAbort.abort(), 30_000)
-        let response: TelegramResponse<{ ok: boolean; result?: { update_id: number; message?: { text?: string; chat: { id: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } }; callback_query?: { id: string; data?: string; message?: { chat: { id: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } } } }[]; description?: string }>
+        let response: TelegramResponse<{ ok: boolean; result?: { update_id: number; message?: { message_id?: number; text?: string; entities?: { type: string; offset: number; length: number }[]; reply_to_message?: { from?: { id?: number; is_bot?: boolean } }; chat: { id: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } }; callback_query?: { id: string; data?: string; message?: { message_id?: number; chat: { id: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } } } }[]; description?: string }>
         try {
           response = await telegramRequest(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${this.offset}`, { signal: pollAbort.signal })
         } finally {
@@ -546,6 +578,27 @@ export class TelegramBridge {
           const text = update.message?.text?.trim() || update.callback_query?.data?.trim()
           if (update.callback_query) void this.answerCallback(update.callback_query.id)
           if (!chatId || !text || !chat) continue
+          const mention = inboundMentionsBot({
+            text,
+            botUsername: this.lastUsername,
+            botId: this.lastBotId || undefined,
+            entities: update.message?.entities,
+            replyFromId: update.message?.reply_to_message?.from?.id,
+            replyFromIsBot: update.message?.reply_to_message?.from?.is_bot,
+          })
+          const inbound: TelegramInboundMeta = {
+            messageId: update.message?.message_id || update.callback_query?.message?.message_id,
+            chatType: chat.type,
+            replyToBot: mention.replyToBot,
+            mentionsBot: mention.mentionsBot,
+          }
+          if (!groupMessageShouldRun({
+            chatType: chat.type,
+            requireMention: this.agentOptions().requireMention,
+            text,
+            mentionsBot: inbound.mentionsBot,
+            replyToBot: inbound.replyToBot,
+          })) continue
           const profile = profileFromTelegramChat(chat, text)
           this.rememberChat(profile)
           if (!this.allowedChats().includes(chatId)) {
@@ -570,7 +623,7 @@ export class TelegramBridge {
                   this.unauthorizedNotified.add(chatId)
                   await this.sendLong(chatId, pairing)
                 }
-                if (this.handler) void this.handleMessage(chatId, text)
+                if (this.handler) void this.handleMessage(chatId, text, inbound)
               } else if (route === "cancel") {
                 await this.sendLong(chatId, alreadyNotified
                   ? "Nothing to cancel until this chat is approved."
@@ -586,7 +639,7 @@ export class TelegramBridge {
           if (!this.handler) { await this.send(chatId, "Grok Build Desktop is connected but its task handler is not ready."); continue }
           // Do not block polling while an agent task runs. This keeps callbacks,
           // /status, and especially /cancel responsive during long runs.
-          void this.handleMessage(chatId, text)
+          void this.handleMessage(chatId, text, inbound)
         }
         if (payload.result?.length) await this.persistOffset()
       } catch (error) {
@@ -600,12 +653,13 @@ export class TelegramBridge {
     }
   }
 
-  private async handleMessage(chatId: string, text: string): Promise<void> {
+  private async handleMessage(chatId: string, text: string, meta?: TelegramInboundMeta): Promise<void> {
     try {
       writeLog("info", `Telegram command received from authorized chat ${chatId}: ${text.startsWith("/") ? text.split(/\s/, 1)[0] : "message"}`)
-      const reply = await this.handler!(chatId, text)
-      if (typeof reply === "string") await this.sendLong(chatId, reply)
-      else await this.sendRich(chatId, reply)
+      const reply = await this.handler!(chatId, text, meta)
+      const kind: TelegramSendKind = text === "approve_task" || text === "deny_task" || text.startsWith("/approve") || text.startsWith("/deny") ? "approval" : "final"
+      if (typeof reply === "string") await this.sendLong(chatId, reply, kind)
+      else await this.sendRich(chatId, reply, kind)
     } catch (error) {
       try {
         await this.sendLong(chatId, `Task failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -636,14 +690,19 @@ export class TelegramBridge {
     try { await telegramPayload(`https://api.telegram.org/bot${token}/answerCallbackQuery`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ callback_query_id: id }) }) } catch { /* best effort */ }
   }
 
-  private async sendRich(chatId: string, reply: TelegramReply): Promise<void> {
+  private silentFlag(kind: TelegramSendKind): boolean {
+    return shouldSilenceTelegramSend(kind, this.agentOptions().notifications)
+  }
+
+  private async sendRich(chatId: string, reply: TelegramReply, kind: TelegramSendKind = "final"): Promise<void> {
     const token = this.token(); if (!token) return
+    const silent = this.silentFlag(kind)
     let payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(reply.text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: telegramInlineKeyboard(reply) }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(reply.text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true }, disable_notification: silent, reply_markup: telegramInlineKeyboard(reply) }),
     })
     if (!payload.ok && /parse|entity|too long/i.test(payload.description || "")) {
       payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: reply.text.slice(0, 4096), reply_markup: telegramInlineKeyboard(reply) }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: reply.text.slice(0, 4096), disable_notification: silent, reply_markup: telegramInlineKeyboard(reply) }),
       })
     }
     if (!payload.ok) throw new Error(payload.description || "Telegram send failed")
@@ -664,10 +723,46 @@ export class TelegramBridge {
     const token = this.token(); if (!token) return undefined
     try {
       const payload = await telegramPayload<{ ok: boolean; result?: { message_id: number } }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true }, disable_notification: this.silentFlag("progress") }),
       })
       return payload.ok ? payload.result?.message_id : undefined
     } catch { return undefined }
+  }
+
+  async react(chatId: string, messageId: number, emoji: string): Promise<void> {
+    const token = this.token(); if (!token || !messageId) return
+    try {
+      await telegramPayload(`https://api.telegram.org/bot${token}/setMessageReaction`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId, reaction: [{ type: "emoji", emoji }] }),
+      })
+    } catch { /* Reactions are best-effort visual feedback. */ }
+  }
+
+  async pinMessage(chatId: string, messageId: number): Promise<void> {
+    const token = this.token(); if (!token || !messageId) return
+    try {
+      await telegramPayload(`https://api.telegram.org/bot${token}/pinChatMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId, disable_notification: true }),
+      })
+    } catch { /* Pin is a visual turn indicator and must never fail a task. */ }
+  }
+
+  async unpinMessage(chatId: string, messageId: number): Promise<void> {
+    const token = this.token(); if (!token || !messageId) return
+    try {
+      await telegramPayload(`https://api.telegram.org/bot${token}/unpinChatMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+      })
+    } catch { /* Unpin is best-effort cleanup. */ }
+  }
+
+  async setPresence(online: boolean): Promise<void> {
+    const token = this.token(); if (!token || !this.agentOptions().statusIndicator) return
+    try {
+      await telegramPayload(`https://api.telegram.org/bot${token}/setMyShortDescription`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ short_description: telegramPresenceText(online) }),
+      })
+    } catch { /* Profile presence is optional and must never block polling. */ }
   }
 
   async editProgress(chatId: string, messageId: number | undefined, text: string): Promise<void> {
@@ -688,27 +783,28 @@ export class TelegramBridge {
     } catch { /* Progress cleanup is best-effort and must never hide a result. */ }
   }
 
-  async send(chatId: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  async send(chatId: string, text: string, kind: TelegramSendKind = "final"): Promise<{ ok: boolean; error?: string }> {
     const token = this.token()
     if (!token) return { ok: false, error: "Connect Telegram first" }
     if (!chatId.trim()) return { ok: false, error: "A Telegram chat ID is required" }
     if (!text.trim()) return { ok: false, error: "A message is required" }
+    const silent = this.silentFlag(kind)
     try {
       let payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: telegramHtml(text).slice(0, 4096), parse_mode: "HTML", link_preview_options: { is_disabled: true }, disable_notification: silent }),
       })
       if (!payload.ok && /parse|entity|too long/i.test(payload.description || "")) {
         payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: text.slice(0, 4096) }),
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId.trim(), text: text.slice(0, 4096), disable_notification: silent }),
         })
       }
       return payload.ok ? { ok: true } : { ok: false, error: payload.description || "Telegram send failed" }
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   }
 
-  async sendLong(chatId: string, text: string): Promise<void> {
+  async sendLong(chatId: string, text: string, kind: TelegramSendKind = "final"): Promise<void> {
     for (const chunk of telegramTextChunks(text)) {
-      const result = await this.send(chatId, chunk)
+      const result = await this.send(chatId, chunk, kind)
       if (!result.ok) throw new Error(result.error || "Telegram send failed")
     }
   }

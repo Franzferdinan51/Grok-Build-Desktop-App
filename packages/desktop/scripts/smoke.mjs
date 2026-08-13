@@ -347,6 +347,10 @@ assert.deepEqual(emptySoft, { allowedChatIds: [], pendingChatIds: [], chatProfil
 const emptyForget = withForgottenTokenState({})
 assert.equal(emptyForget.token, undefined)
 assert.deepEqual(emptyForget, { allowedChatIds: [], pendingChatIds: [], chatProfiles: {}, autoApproveFirst: false, updateOffset: 0, sessions: {} })
+const afterForgetHome = withForgottenTokenState({ token: "x", homeChatId: "42", requireMention: true })
+assert.equal(afterForgetHome.token, undefined)
+assert.equal(afterForgetHome.homeChatId, "42")
+assert.equal(afterForgetHome.requireMention, true)
 
 // Shell tokenizer for GrokBuildBackend.runTool: the prior regex split
 // command lines incorrectly on embedded escapes, empty quoted strings,
@@ -455,6 +459,9 @@ assert.deepEqual(parseTelegramCallback("moa_aggregator"), { kind: "moa_aggregato
 assert.deepEqual(parseTelegramCallback("moa_agg:1"), { kind: "moa_agg", payload: "1" })
 assert.deepEqual(parseTelegramCallback("moa_preset:deep"), { kind: "moa_preset", payload: "deep" })
 assert.deepEqual(parseTelegramCallback("menu:models"), { kind: "menu", payload: "models" })
+assert.deepEqual(parseTelegramCallback("approve_task"), { kind: "approve_task", payload: "" })
+assert.deepEqual(parseTelegramCallback("deny_task"), { kind: "deny_task", payload: "" })
+assert.deepEqual(parseTelegramCommand("/sethome"), { name: "sethome", argument: "" })
 assert.equal(parseTelegramCallback("hello"), null)
 
 // Menu mapping: each menu:* callback maps to its slash equivalent.
