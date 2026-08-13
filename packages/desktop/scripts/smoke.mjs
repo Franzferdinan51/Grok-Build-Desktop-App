@@ -49,14 +49,17 @@ const root = await mkdtemp(join(tmpdir(), "grok-build-desktop-smoke-"))
 await writeFile(join(root, "hello.txt"), "hello\n")
 await mkdir(join(root, "node_modules"))
 await writeFile(join(root, "node_modules", "ignored.js"), "ignored")
-await symlink("/etc/passwd", join(root, "escape"))
+const symlinkSmoke = process.platform !== "win32"
+if (symlinkSmoke) await symlink("/etc/passwd", join(root, "escape"))
 
 assert.deepEqual((await listWorkspaceFiles(root)).map((file) => file.path), ["hello.txt"])
 await writeWorkspaceFile(root, "hello.txt", "updated\n")
 assert.equal(await readWorkspaceFile(root, "hello.txt"), "updated\n")
 await assert.rejects(readWorkspaceFile(root, "../outside"), /escapes the workspace/)
-await assert.rejects(readWorkspaceFile(root, "escape"), /symbolic link|ENOENT|ENOTDIR/)
-await assert.rejects(writeWorkspaceFile(root, "escape", "blocked"), /symbolic link|ENOENT|ENOTDIR/)
+if (symlinkSmoke) {
+  await assert.rejects(readWorkspaceFile(root, "escape"), /symbolic link|ENOENT|ENOTDIR/)
+  await assert.rejects(writeWorkspaceFile(root, "escape", "blocked"), /symbolic link|ENOENT|ENOTDIR/)
+}
 assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim().split(/[\\/]/).at(-1), basename(await realpath(root)))
 // Editors and skill workflows routinely need to write files into brand-new
 // subdirectories. Without mkdir-after-validate, writeWorkspaceFile would
@@ -74,7 +77,7 @@ assert.equal(await readWorkspaceFile(root, "src/components/Button.tsx"), "export
 // does not yet exist as a real file. The error class depends on whether the
 // symlink resolves to a directory (symbolic link) or to a non-directory
 // target (ENOTDIR) — both correctly block the write.
-await assert.rejects(writeWorkspaceFile(root, "escape/new.txt", "blocked"), /symbolic link|ENOTDIR|ENOENT/)
+if (symlinkSmoke) await assert.rejects(writeWorkspaceFile(root, "escape/new.txt", "blocked"), /symbolic link|ENOTDIR|ENOENT/)
 assert.equal((await listWorkspaceFiles(root)).some((file) => file.path.startsWith("newdir/")), true)
 assert.equal((await listWorkspaceFiles(root)).some((file) => file.path.startsWith("src/")), true)
 
