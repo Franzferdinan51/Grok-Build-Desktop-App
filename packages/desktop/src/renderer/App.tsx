@@ -759,6 +759,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
       if (event.type === "cancelled") queueBackendEvent({ kind: "text", content: event.data || "Task cancelled." })
     })
+    const unsubscribeQuickEntry = window.api.onQuickEntrySubmit((payload) => {
+      if (payload.target === "new") void newConversation().then(() => void run(payload.text))
+      else void run(payload.text)
+    })
     const onGlobalKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
@@ -780,7 +784,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       }
     }
     window.addEventListener("keydown", onGlobalKey)
-    onCleanup(() => window.removeEventListener("keydown", onGlobalKey))
+    onCleanup(() => { window.removeEventListener("keydown", onGlobalKey); unsubscribeQuickEntry() })
     unsubscribeMenu = window.api.onMenuCommand((command) => {
       if (command === "new-task") {
         setActive("new-task")

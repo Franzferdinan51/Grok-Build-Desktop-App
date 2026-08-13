@@ -11,7 +11,7 @@
  *  - Grok Build execution backend lifecycle
  */
 
-import { app, BrowserWindow, Menu, session } from "electron"
+import { app, BrowserWindow, Menu, globalShortcut, screen, session } from "electron"
 import { registerIpcHandlers } from "./ipc"
 import { GrokBuildBackend } from "./grok-build-backend"
 import { TelegramBridge } from "./telegram"
@@ -24,10 +24,12 @@ import { getStore } from "./store"
 import { recoverInterruptedGrokRuns } from "./grok-runs"
 import { createAgentHandler, saveAgentSession } from "./telegram/agent-handler"
 import { buildAgentInput } from "./telegram/agent-input"
-import { acquireSingleInstanceLock, appIconPath, createMainWindow, loadRenderer, APP_NAME } from "./window-factory"
+import { acquireSingleInstanceLock, appIconPath, createMainWindow, createQuickEntryWindow, loadQuickEntryRenderer, loadRenderer, APP_NAME } from "./window-factory"
 import { installBundledSkills } from "./bundled-skills"
+import { DEFAULT_QUICK_ENTRY_ACCELERATOR, validateQuickEntryAccelerator } from "./quick-entry"
 
 let mainWindow: BrowserWindow | null = null
+let quickEntryWindow: BrowserWindow | null = null
 const backend = new GrokBuildBackend()
 const telegram = new TelegramBridge()
 const localStudio = new LocalStudioController()
@@ -112,6 +114,18 @@ async function createAndLoadMainWindow(): Promise<BrowserWindow> {
   return win
 }
 
+async function showQuickEntry(): Promise<void> {
+  if (!quickEntryWindow || quickEntryWindow.isDestroyed()) {
+    quickEntryWindow = createQuickEntryWindow({ onClosed: () => { quickEntryWindow = null } })
+    await loadQuickEntryRenderer(quickEntryWindow)
+    quickEntryWindow.on("blur", () => { if (!quickEntryWindow?.isDestroyed()) quickEntryWindow?.hide() })
+  }
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  const bounds = quickEntryWindow.getBounds()
+  quickEntryWindow.setPosition(Math.round(display.workArea.x + (display.workArea.width - bounds.width) / 2), Math.round(display.workArea.y + display.workArea.height * 0.16))
+  quickEntryWindow.show(); quickEntryWindow.focus()
+}
+
 app.whenReady().then(async () => {
   _logger = initLogging()
   writeLog("info", `${APP_NAME} starting — pid=${process.pid}`)
@@ -126,6 +140,7 @@ app.whenReady().then(async () => {
     telegram: () => telegram,
     localStudio: () => localStudio,
     getMainWindow: () => mainWindow,
+    getQuickEntryWindow: () => quickEntryWindow,
     preview: () => preview,
   })
 
@@ -171,6 +186,9 @@ app.whenReady().then(async () => {
   // Set up app menu
   const menu = createMenu(mainWindow)
   Menu.setApplicationMenu(menu)
+  const quickEntryAccelerator = validateQuickEntryAccelerator((getStore().get("quickEntry.accelerator") as string | undefined) || DEFAULT_QUICK_ENTRY_ACCELERATOR)
+  if (!globalShortcut.register(quickEntryAccelerator, () => void showQuickEntry())) writeLog("warn", `Quick Entry shortcut unavailable: ${quickEntryAccelerator}`)
+  else writeLog("info", `Quick Entry shortcut registered: ${quickEntryAccelerator}`)
   // safeStorage may trigger a macOS Keychain approval dialog when an ad-hoc
   // development build gets a new signature. Start Telegram only after the
   // main window is visible so that prompt can never make the app appear dead.
@@ -237,5 +255,7 @@ app.on("before-quit", async () => {
   await backend.shutdown()
   scheduler.stop()
   if (updateTimer) clearInterval(updateTimer)
+  globalShortcut.unregisterAll()
+  quickEntryWindow?.destroy(); quickEntryWindow = null
   await preview.stop()
 })

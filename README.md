@@ -29,6 +29,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
 - Searchable Grok run history, scheduled tasks, project skills, and durable workspace goals.
 - Slash-command palette with keyboard completion and dynamically discovered Grok Build skills.
+- Global Quick Entry (`CommandOrControl+Shift+Space`) opens a secure, always-on-top composer from anywhere and routes submissions into the current or a new saved conversation.
 - Configurable reasoning, turn limits, self-verification, web search, subagents, and visible automatic-approval controls.
 
 ### Models and authentication

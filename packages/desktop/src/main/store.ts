@@ -84,6 +84,7 @@ type StoreSchema = {
   schedules: ScheduledGrokTask[]
   memory?: { enabled?: boolean; telegramEnabled?: boolean; duckbotPath?: string; soulPath?: string; embeddingProvider?: string; embeddingModel?: string }
   host?: { browserScript?: string; desktopScript?: string; disabled?: boolean }
+  quickEntry: { accelerator: string; enabled: boolean }
 }
 
 let _store: Store<StoreSchema> | null = null
@@ -92,7 +93,7 @@ export function getStore(): Store<StoreSchema> {
   if (!_store) {
     _store = new Store<StoreSchema>({
       name: "grok-build-desktop",
-      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, localStudio: { baseUrl: "" }, telegram: { allowedChatIds: [], pendingChatIds: [] }, nemoclaw: { enabled: true, requireApproval: true, audit: [] }, projects: [], schedules: [] },
+      defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, localStudio: { baseUrl: "" }, telegram: { allowedChatIds: [], pendingChatIds: [] }, nemoclaw: { enabled: true, requireApproval: true, audit: [] }, projects: [], schedules: [], quickEntry: { accelerator: "CommandOrControl+Shift+Space", enabled: true } },
       clearInvalidConfig: true,
     })
   }

@@ -66,6 +66,12 @@ export function createMainWindow(opts: MainWindowOptions = {}): BrowserWindow {
   return win
 }
 
+export function createQuickEntryWindow(opts: { onClosed?: () => void } = {}): BrowserWindow {
+  const win = new BrowserWindow({ width: 720, height: 188, minWidth: 520, minHeight: 160, maxWidth: 980, maxHeight: 260, show: false, frame: false, resizable: true, alwaysOnTop: true, skipTaskbar: true, backgroundColor: "#0d0f14", title: "Grok Build Quick Entry", icon: appIconPath(), webPreferences: { preload: join(__dirname, "../preload/index.js"), nodeIntegration: false, contextIsolation: true, sandbox: true } })
+  win.on("closed", () => opts.onClosed?.())
+  return win
+}
+
 /**
  * Load the renderer entry point. In dev the renderer URL is provided by
  * the HMR server (`process.env.ELECTRON_RENDERER_URL`); in production the
@@ -75,6 +81,11 @@ export function createMainWindow(opts: MainWindowOptions = {}): BrowserWindow {
 export async function loadRenderer(win: BrowserWindow): Promise<void> {
   if (process.env.ELECTRON_RENDERER_URL) await win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await win.loadFile(join(__dirname, "../renderer/index.html"))
+}
+
+export async function loadQuickEntryRenderer(win: BrowserWindow): Promise<void> {
+  if (process.env.ELECTRON_RENDERER_URL) await win.loadURL(`${process.env.ELECTRON_RENDERER_URL}?quick-entry=1`)
+  else await win.loadFile(join(__dirname, "../renderer/index.html"), { query: { "quick-entry": "1" } })
 }
 
 /**

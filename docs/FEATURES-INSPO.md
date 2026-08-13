@@ -27,6 +27,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 - **Activity continuity:** each saved Grok run carries its conversation ID, allowing the switcher and Task Inspector to show verified running, completed, failed, or cancelled states without inferring identity from prompt text or filesystem paths.
 - **Coding context:** the composer surfaces the active Git branch and diff summary with direct Review and Files actions, adapting Duck-Agent's coding-status row to this app's existing project snapshot and review routes.
 - **Multi-session workspace:** a persisted secondary conversation pane keeps another saved thread visible for comparison or monitoring. It is read-only until focused, and Grok Build still serializes execution through the existing singleton backend.
+- **Quick Entry:** a Duck-Agent-inspired global shortcut opens a sandboxed lightweight composer and sends only validated text plus a current/new conversation target back to the main renderer; it never starts a second agent runtime.
 - **Live task visibility:** the Task Inspector summarizes the current Grok Build run, goal, queue, and streamed activity without inventing a second approval or execution system.
 - **Approval visibility:** the Task Inspector also reports the effective approval mode (automatic, interactive, plan-only, or no-prompts) from the existing Grok Build settings.
 - **Terminal continuity:** the chat terminal rail reuses the existing workspace-only command bridge and output cap; it does not add a second shell or broaden command authority.

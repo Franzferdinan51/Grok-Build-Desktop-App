@@ -8,6 +8,7 @@
 import { render } from "solid-js/web"
 import { createSignal, onMount, onCleanup } from "solid-js"
 import { App } from "./App"
+import { QuickEntry } from "./QuickEntry"
 
 const root = document.getElementById("root")
 if (!root) {
@@ -51,9 +52,5 @@ onMount(() => {
   })
 })
 
-render(
-  () => (
-    <App backendStatus={backendStatus} />
-  ),
-  root
-)
+const isQuickEntry = new URLSearchParams(window.location.search).get("quick-entry") === "1"
+render(() => isQuickEntry ? <QuickEntry /> : <App backendStatus={backendStatus} />, root)

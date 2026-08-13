@@ -93,9 +93,11 @@ export type ElectronAPI = {
   store: { get: <T = unknown>(key: string) => Promise<T>; set: <T = unknown>(key: string, value: T) => Promise<void>; delete: (key: string) => Promise<void> }
   window: { minimize: () => void; maximize: () => void; close: () => void }
   app: { openExternal: (url: string) => Promise<void>; getVersion: () => Promise<string>; backendRepository: () => Promise<string>; restart: () => Promise<{ ok: boolean }> }
+  quickEntry: { submit: (text: string, target: "current" | "new") => Promise<{ ok: boolean }>; close: () => Promise<void> }
   dialog: { openFile: (options?: { filters?: { name: string; extensions: string[] }[] }) => Promise<{ canceled: boolean; filePaths: string[] }>; openDirectory: () => Promise<{ canceled: boolean; filePaths: string[] }> }
   onMenuCommand: (handler: (command: string) => void) => () => void
   onMenuSetProvider: (handler: (provider: string) => void) => () => void
+  onQuickEntrySubmit: (handler: (payload: { text: string; target: "current" | "new" }) => void) => () => void
 }
 
 const api: ElectronAPI = {
@@ -151,9 +153,11 @@ const api: ElectronAPI = {
   store: { get: <T = unknown>(key: string) => ipcRenderer.invoke("store:get", key) as Promise<T>, set: <T = unknown>(key: string, value: T) => ipcRenderer.invoke("store:set", key, value), delete: (key) => ipcRenderer.invoke("store:delete", key) },
   window: { minimize: () => ipcRenderer.invoke("window:minimize"), maximize: () => ipcRenderer.invoke("window:maximize"), close: () => ipcRenderer.invoke("window:close") },
   app: { openExternal: (url) => ipcRenderer.invoke("app:open-external", url), getVersion: () => ipcRenderer.invoke("app:get-version"), backendRepository: () => ipcRenderer.invoke("app:backend-repository"), restart: () => ipcRenderer.invoke("app:restart") },
+  quickEntry: { submit: (text, target) => ipcRenderer.invoke("quick-entry:submit", text, target), close: () => ipcRenderer.invoke("quick-entry:close") },
   dialog: { openFile: (options) => ipcRenderer.invoke("dialog:open-file", options), openDirectory: () => ipcRenderer.invoke("dialog:open-directory") },
   onMenuCommand: (handler) => { const listener = (_event: IpcRendererEvent, command: string) => handler(command); ipcRenderer.on("menu:command", listener); return () => ipcRenderer.removeListener("menu:command", listener) },
   onMenuSetProvider: (handler) => { const listener = (_event: IpcRendererEvent, provider: string) => handler(provider); ipcRenderer.on("menu:set-provider", listener); return () => ipcRenderer.removeListener("menu:set-provider", listener) },
+  onQuickEntrySubmit: (handler: (payload: { text: string; target: "current" | "new" }) => void) => { const listener = (_event: IpcRendererEvent, payload: { text: string; target: "current" | "new" }) => handler(payload); ipcRenderer.on("quick-entry:submit", listener); return () => ipcRenderer.removeListener("quick-entry:submit", listener) },
 }
 
 contextBridge.exposeInMainWorld("api", api)

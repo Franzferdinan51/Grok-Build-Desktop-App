@@ -26,6 +26,7 @@ type Deps = {
   localStudio: () => LocalStudioController
   getMainWindow: () => BrowserWindow | null
   preview: () => PreviewServer
+  getQuickEntryWindow?: () => BrowserWindow | null
 }
 
 const browserManager = new BrowserManager()
@@ -35,6 +36,14 @@ let previousBrowserAgentScreenshot: string | undefined
 
 export function registerIpcHandlers(deps: Deps): void {
   const memory = new DuckbotMemory()
+  ipcMain.handle("quick-entry:submit", (_event, text: string, target: "current" | "new") => {
+    const trimmed = typeof text === "string" ? text.trim() : ""
+    if (!trimmed || trimmed.length > 20_000 || !["current", "new"].includes(target)) throw new Error("Invalid Quick Entry submission")
+    deps.getMainWindow()?.webContents.send("quick-entry:submit", { text: trimmed, target })
+    deps.getQuickEntryWindow?.()?.hide()
+    return { ok: true }
+  })
+  ipcMain.handle("quick-entry:close", (event) => BrowserWindow.fromWebContents(event.sender)?.hide())
   ipcMain.handle("backend:status", () => deps.backend().status())
   ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
