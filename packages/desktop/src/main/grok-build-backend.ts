@@ -9,6 +9,7 @@
  */
 
 import { execFile, spawn, type ChildProcess } from "child_process"
+import { randomUUID } from "crypto"
 import { promisify } from "util"
 import { existsSync } from "fs"
 import { homedir } from "os"
@@ -31,6 +32,7 @@ import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeM
 import { DuckbotMemory } from "./duckbot-memory"
 import { buildBaseArgs, compatibleCliArgs, promptArgsFor } from "./grok-args"
 import { StreamingJsonParser } from "./streaming-json"
+import { reserveActiveRun } from "./active-run-admission"
 import {
   describeOAuthProvider,
   firstExistingHelper,
@@ -126,7 +128,6 @@ export type RunTaskInput = {
 export class GrokBuildBackend {
   private current: ChildProcess | null = null
   private activeRun: GrokBuildActiveRunSnapshot | null = null
-  private pendingRunId: string | undefined
   private cancelRequested = false
   private moaAbort: AbortController | null = null
   private readonly codexBridge = new CodexOAuthBridge()
@@ -160,9 +161,13 @@ export class GrokBuildBackend {
 
   isRunning(): boolean { return this.current !== null || this.moaAbort !== null || this.activeRun !== null }
 
-  setActiveRunId(runId: string): void {
-    if (this.activeRun) return
-    this.pendingRunId = runId
+  /** Reserve the singleton before any async CLI discovery or persistence. */
+  reserveRun(input: Pick<RunTaskInput, "cwd" | "prompt" | "threadId">): string {
+    if (this.isRunning()) throw new Error("A Grok Build task is already running")
+    const reservation = reserveActiveRun(this.activeRun, input, randomUUID, Date.now(), GrokBuildBackend.MAX_ACTIVE_RUN_EVENT_CHARS)
+    this.activeRun = reservation as GrokBuildActiveRunSnapshot
+    const runId = reservation.runId
+    return runId
   }
 
   activeRunSnapshot(): GrokBuildActiveRunSnapshot | null {
@@ -173,7 +178,6 @@ export class GrokBuildBackend {
   clearActiveRun(runId?: string): void {
     if (runId && this.activeRun?.runId && this.activeRun.runId !== runId) return
     this.activeRun = null
-    this.pendingRunId = undefined
   }
 
   private recordActiveEvent(event: GrokBuildEvent): void {
@@ -479,14 +483,21 @@ export class GrokBuildBackend {
     return execFileAsync(status.command, [command, ...args], { cwd, timeout: 10 * 60_000, maxBuffer: 10 * 1024 * 1024, env: this.environment() })
   }
 
-  async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void): Promise<void> {
+  async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void, reservedRunId?: string): Promise<void> {
     if (!input.prompt.trim()) throw new Error("A task prompt is required")
-    if (this.isRunning()) throw new Error("A Grok Build task is already running")
+    if (reservedRunId) {
+      if (this.activeRun?.runId !== reservedRunId) throw new Error("The reserved Grok Build task is no longer active")
+    } else if (this.isRunning()) throw new Error("A Grok Build task is already running")
+    else this.reserveRun(input)
 
-    // Reserve the singleton before the first asynchronous CLI probe. This is
-    // also the source for renderer reattachment, so a second caller cannot
-    // pass admission while the first run is still discovering flags/models.
-    this.activeRun = { runId: this.pendingRunId, threadId: input.threadId, cwd: input.cwd, prompt: input.prompt.slice(0, GrokBuildBackend.MAX_ACTIVE_RUN_EVENT_CHARS), startedAt: Date.now(), events: [] }
+    // A reservation is also the source for renderer reattachment. The
+    // metadata may be refined here for callers that reserved before building
+    // the final command, while the reservation itself remains synchronous.
+    if (this.activeRun) {
+      this.activeRun.threadId = input.threadId
+      this.activeRun.cwd = input.cwd
+      this.activeRun.prompt = input.prompt.slice(0, GrokBuildBackend.MAX_ACTIVE_RUN_EVENT_CHARS)
+    }
 
     try {
     const status = await this.status()
@@ -818,7 +829,6 @@ ${referenceSection}
     }
     } finally {
       this.activeRun = null
-      this.pendingRunId = undefined
     }
   }
 

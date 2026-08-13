@@ -59,6 +59,12 @@ export class GrokTaskScheduler {
         model: task.model,
         sessionStatus: "new",
       }
+      let reservedRunId: string
+      try {
+        reservedRunId = this.backend.reserveRun({ prompt: task.prompt, cwd: task.cwd, threadId })
+      } catch {
+        return
+      }
       let saveChain = Promise.resolve()
       let writeTimer: NodeJS.Timeout | undefined
       let writePending = false
@@ -81,19 +87,20 @@ export class GrokTaskScheduler {
       try { await persistThread(true) }
       catch (error) {
         const detail = `Could not persist scheduled conversation: ${String(error).slice(0, 2_000)}`
+        this.backend.clearActiveRun(reservedRunId)
         this.finish(task, "failed", detail)
         emitScheduleEvent({ taskId: task.id, name: task.name, status: "failed", detail, at: Date.now() })
         return
       }
-      const run = startGrokRun({ prompt: task.prompt, cwd: task.cwd, model: task.model, threadId })
-      this.backend.setActiveRunId(run.id)
-      getStore().set("schedules", listSchedules().map((entry) => entry.id === task.id ? { ...withScheduleRunningPatch(entry, true), lastRunId: run.id, lastThreadId: threadId } : entry))
-      emitScheduleEvent({ taskId: task.id, name: task.name, status: "running", detail: "Grok Build is working in the scheduled workspace", at: Date.now(), runId: run.id, threadId })
+      let run: ReturnType<typeof startGrokRun> | undefined
       try {
+        run = startGrokRun({ prompt: task.prompt, cwd: task.cwd, model: task.model, threadId }, reservedRunId)
+        getStore().set("schedules", listSchedules().map((entry) => entry.id === task.id ? { ...withScheduleRunningPatch(entry, true), lastRunId: run!.id, lastThreadId: threadId } : entry))
+        emitScheduleEvent({ taskId: task.id, name: task.name, status: "running", detail: "Grok Build is working in the scheduled workspace", at: Date.now(), runId: run.id, threadId })
         await this.backend.run({ prompt: task.prompt, cwd: task.cwd, model: task.model, threadId, permissionMode: "auto", noPlan: true }, (event) => {
           const sessionId = "sessionId" in event && typeof event.sessionId === "string" ? event.sessionId : undefined
           if (sessionId) { thread.sessionId = sessionId; thread.sessionStatus = "resumable"; persistThread() }
-          recordGrokRunEvent(run.id, {
+          recordGrokRunEvent(run!.id, {
             type: event.type,
             data: "data" in event && typeof event.data === "string" ? event.data : undefined,
             message: "message" in event && typeof event.message === "string" ? event.message : undefined,
@@ -115,8 +122,8 @@ export class GrokTaskScheduler {
             assistantMessage.logs = [...assistantMessage.logs, { kind: "error", content: event.message.slice(-2_000) }]
             persistThread()
           }
-          if (event.type === "phase" && typeof event.data === "string" && event.data) emitScheduleEvent({ taskId: task.id, name: task.name, status: "running", detail: event.data, at: Date.now(), runId: run.id, threadId })
-        })
+          if (event.type === "phase" && typeof event.data === "string" && event.data) emitScheduleEvent({ taskId: task.id, name: task.name, status: "running", detail: event.data, at: Date.now(), runId: run!.id, threadId })
+        }, reservedRunId)
         if (!assistantMessage.logs.some((log) => log.kind === "text")) assistantMessage.logs = [{ kind: "text", content: "Scheduled task completed. Grok Build returned no public summary." }]
         await persistThread(true)
         finishGrokRun(run.id, { status: "completed", grokSessionId: thread.sessionId || undefined }); this.finish(task, "completed")
@@ -124,11 +131,12 @@ export class GrokTaskScheduler {
       } catch (error) {
         const detail = String(error).slice(0, 2_000)
         if (!assistantMessage.logs.some((log) => log.kind === "error")) assistantMessage.logs = [...assistantMessage.logs, { kind: "error", content: detail }]
-        await persistThread(true)
-        finishGrokRun(run.id, { status: "failed", grokSessionId: thread.sessionId || undefined, error: detail }); this.finish(task, "failed", detail)
-        emitScheduleEvent({ taskId: task.id, name: task.name, status: "failed", detail, at: Date.now(), runId: run.id, threadId })
+        try { await persistThread(true) } catch { /* retain the original task failure */ }
+        if (run) finishGrokRun(run.id, { status: "failed", grokSessionId: thread.sessionId || undefined, error: detail })
+        this.finish(task, "failed", detail)
+        emitScheduleEvent({ taskId: task.id, name: task.name, status: "failed", detail, at: Date.now(), runId: run?.id, threadId })
       } finally {
-        this.backend.clearActiveRun(run.id)
+        this.backend.clearActiveRun(run?.id || reservedRunId)
       }
     } finally { this.checking = false }
   }

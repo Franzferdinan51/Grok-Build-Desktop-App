@@ -104,8 +104,14 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("memory:status", () => memory.status())
   ipcMain.handle("memory:recall", (_event, query: string) => memory.context(query))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
-    const run = startGrokRun({ ...input, advisorCount: input.moa?.referenceModels.filter(Boolean).slice(0, 8).length })
-    deps.backend().setActiveRunId(run.id)
+    const reservedRunId = deps.backend().reserveRun(input)
+    let run
+    try {
+      run = startGrokRun({ ...input, advisorCount: input.moa?.referenceModels.filter(Boolean).slice(0, 8).length }, reservedRunId)
+    } catch (error) {
+      deps.backend().clearActiveRun(reservedRunId)
+      throw error
+    }
     let grokSessionId: string | undefined
     let cancelled = false
     let usage: unknown
@@ -144,7 +150,7 @@ export function registerIpcHandlers(deps: Deps): void {
       await deps.backend().run(input, (update) => {
         if ("sessionId" in update && typeof update.sessionId === "string") grokSessionId = update.sessionId
         queueEvent(update)
-      })
+      }, reservedRunId)
       flushEvents()
       finishGrokRun(run.id, { status: cancelled ? "cancelled" : "completed", grokSessionId, latencyMs: Date.now() - run.startedAt, advisorFailures, ...usageMetrics(usage) })
     } catch (error) {
