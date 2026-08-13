@@ -60,6 +60,7 @@ export type WorkspaceFile = { path: string; size: number }
 export type StoredChatThread = { id: string; workspace: string; title: string; createdAt: number; updatedAt: number; messages: { id: string; role: "user" | "assistant"; logs: { kind: "text" | "thought" | "error"; content: string }[]; createdAt: number }[]; sessionId: string; model?: string; summary?: string; pinned?: boolean; archived?: boolean; sessionStatus?: "new" | "resumable" | "recovered" | "broken" }
 export type StoredChatSummary = Omit<StoredChatThread, "messages"> & { messageCount: number }
 export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; embeddingProvider: string; embeddingModel?: string; error?: string }
+export type DuckbotMemoryHealth = DuckbotMemoryStatus & { checkedAt: number; stats?: { vector_chunks?: number; vector_by_tier?: Record<string, number>; graph_entities?: number; graph_relationships?: number; blocks?: number; quarantine_pending?: number; generated_at?: number } }
 export type BrowserAgentStatus = { running: boolean; url?: string; title?: string }
 export type BrowserAgentSnapshot = { url: string; title: string; text: string; html: string; viewport: { width: number; height: number }; links: { text: string; href: string }[]; controls: { index: number; tag: string; type: string | null; label: string; disabled: boolean }[]; screenshotPath: string }
 
@@ -99,7 +100,7 @@ export type ElectronAPI = {
     setAutoApproveFirst: (enabled: boolean) => Promise<boolean>
     onChange: (handler: () => void) => () => void
   }
-  memory: { status: () => Promise<DuckbotMemoryStatus>; recall: (query: string) => Promise<string> }
+  memory: { status: () => Promise<DuckbotMemoryStatus>; health: () => Promise<DuckbotMemoryHealth>; wakeUp: (query?: string) => Promise<string>; recall: (query: string) => Promise<string> }
   projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; scratch: () => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
   grokRuns: { list: () => Promise<GrokRunRecord[]> }
   conversations: { list: (workspace?: string) => Promise<StoredChatThread[]>; summaries: (workspace?: string) => Promise<StoredChatSummary[]>; get: (id: string) => Promise<StoredChatThread | undefined>; save: (thread: StoredChatThread) => Promise<StoredChatThread>; search: (query: string, workspace?: string) => Promise<StoredChatThread[]>; export: (id: string) => Promise<{ saved: boolean; path?: string }> }
@@ -163,7 +164,7 @@ const api: ElectronAPI = {
       return () => ipcRenderer.removeListener("telegram:changed", listener)
     },
   },
-  memory: { status: () => ipcRenderer.invoke("memory:status"), recall: (query) => ipcRenderer.invoke("memory:recall", query) },
+  memory: { status: () => ipcRenderer.invoke("memory:status"), health: () => ipcRenderer.invoke("memory:health"), wakeUp: (query) => ipcRenderer.invoke("memory:wake-up", query), recall: (query) => ipcRenderer.invoke("memory:recall", query) },
   projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), scratch: () => ipcRenderer.invoke("projects:scratch"), remove: (id) => ipcRenderer.invoke("projects:remove", id) },
   grokRuns: { list: () => ipcRenderer.invoke("grok-runs:list") },
   conversations: { list: (workspace) => ipcRenderer.invoke("conversations:list", workspace), summaries: (workspace) => ipcRenderer.invoke("conversations:summaries", workspace), get: (id) => ipcRenderer.invoke("conversations:get", id), save: (thread) => ipcRenderer.invoke("conversations:save", thread), search: (query, workspace) => ipcRenderer.invoke("conversations:search", query, workspace), export: (id) => ipcRenderer.invoke("conversations:export", id) },

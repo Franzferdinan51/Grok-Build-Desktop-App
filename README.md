@@ -32,6 +32,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Searchable Grok run history, scheduled tasks, project skills, official Rhai workflows, and durable workspace goals.
 - Scheduled runs now create distinct persisted conversations; **Open last result** returns to the transcript and native session for review or continuation.
 - DuckBot RAG Memory is the primary desktop memory source; recall is bounded to relevant local context, while Grok Build's duplicate default memory is disabled unless experimental memory is explicitly selected.
+- Agent → Memory includes explicit DuckBot brain diagnostics (`brain_stats`) and a bounded `brain_wake_up` preview for inspecting session context without adding either call to the normal fast task path.
 - Run History is an actionable session inspector: open the owning conversation, resume a verified native session, fork a run, stop the active run, or copy bounded diagnostics.
 - If the Electron main process restarts during a task, Run History marks the run **Interrupted · outcome unknown**, preserves a bounded last-known activity tail, and requires an explicit review before resume or fork.
 - Slash-command palette with keyboard completion and dynamically discovered Grok Build skills and workflows.

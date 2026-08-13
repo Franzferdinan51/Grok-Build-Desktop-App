@@ -102,6 +102,8 @@ export function registerIpcHandlers(deps: Deps): void {
     return { ok: true }
   })
   ipcMain.handle("memory:status", () => memory.status())
+  ipcMain.handle("memory:health", () => memory.health())
+  ipcMain.handle("memory:wake-up", (_event, query?: string) => memory.wakeUp(typeof query === "string" ? query : ""))
   ipcMain.handle("memory:recall", (_event, query: string) => memory.context(query))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const reservedRunId = deps.backend().reserveRun(input)

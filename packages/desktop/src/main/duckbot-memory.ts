@@ -5,8 +5,10 @@ import { join, resolve } from "path"
 import { getStore } from "./store"
 import { write as writeLog } from "./logging"
 import { providerSecretEnvironment } from "./model-secrets"
+import { normalizeMemoryStats, type DuckbotMemoryStats } from "./duckbot-memory-utils"
 
 export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; embeddingProvider: string; embeddingModel?: string; error?: string }
+export type DuckbotMemoryHealth = DuckbotMemoryStatus & { checkedAt: number; stats?: DuckbotMemoryStats }
 
 const REPO_CANDIDATES = [join(homedir(), ".openclaw", "workspace", "duckbot-rag-memory"), join(homedir(), "duckbot-rag-memory"), join(homedir(), "Desktop", "duckbot-rag-memory")]
 const SOUL_FILES: Record<string, string> = {
@@ -158,6 +160,21 @@ export class DuckbotMemory {
     const provider = String(getStore().get("memory.embeddingProvider") || "").trim() || "nvidia-if-configured / local fallback"
     const model = String(getStore().get("memory.embeddingModel") || "").trim() || undefined
     return { enabled: this.enabled(), available: Boolean(repo), repository: repo, soulDirectory: ensureSoulFiles(), embeddingProvider: provider, embeddingModel: model, error: repo ? undefined : "Install duckbot-rag-memory and its .venv to enable semantic recall" }
+  }
+  async health(): Promise<DuckbotMemoryHealth> {
+    const base = this.status()
+    const checkedAt = Date.now()
+    if (!base.enabled || !base.available) return { ...base, checkedAt }
+    try {
+      const result = await callTool("brain_stats", {}, 3_000) as DuckbotMemoryStats
+      return { ...base, checkedAt, stats: normalizeMemoryStats(result) }
+    } catch (error) {
+      return { ...base, checkedAt, error: safeRecallText(String(error)) }
+    }
+  }
+  async wakeUp(query = ""): Promise<string> {
+    const result = await callTool("brain_wake_up", { query: query.slice(0, 1_500), k: 4, include_blocks: true, include_graph: false, include_fsrs_review: false }, 3_500)
+    return safeRecallText(JSON.stringify(result)).slice(0, MAX_RECALL_CHARS)
   }
   async context(query: string): Promise<string> {
     const identity = identityContext()

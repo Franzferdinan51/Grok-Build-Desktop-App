@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, GrokSubcommand, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, OAuthStatusSnapshot, GitWorktree } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, GrokSubcommand, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, DuckbotMemoryHealth, OAuthStatusSnapshot, GitWorktree } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -213,6 +213,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [maxTurns, setMaxTurns] = createSignal(0)
   const [sessionIdleHours, setSessionIdleHours] = createSignal(0)
   const [memoryStatus, setMemoryStatus] = createSignal<DuckbotMemoryStatus | null>(null)
+  const [memoryHealth, setMemoryHealth] = createSignal<DuckbotMemoryHealth | null>(null)
+  const [memoryNotice, setMemoryNotice] = createSignal("")
   const [telegramMemoryEnabled, setTelegramMemoryEnabled] = createSignal(false)
   const [webSearchEnabled, setWebSearchEnabled] = createSignal(true)
   const [autoLearnEnabled, setAutoLearnEnabled] = createSignal(false)
@@ -1496,6 +1498,21 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   })
 
   const refreshLocalStudio = async () => setLocalStudio(await window.api.localStudio.status())
+  const refreshMemoryHealth = async () => {
+    setMemoryNotice("Checking DuckBot brain…")
+    try {
+      const health = await window.api.memory.health()
+      setMemoryHealth(health)
+      setMemoryNotice(health.error ? `DuckBot check: ${health.error}` : `Brain checked ${new Date(health.checkedAt).toLocaleTimeString()}`)
+    } catch (error) { setMemoryNotice(error instanceof Error ? error.message : String(error)) }
+  }
+  const wakeMemory = async () => {
+    setMemoryNotice("Loading bounded wake-up context…")
+    try {
+      const context = await window.api.memory.wakeUp(workspace() || undefined)
+      setMemoryNotice(context ? `Wake-up context\n${context}` : "DuckBot returned no wake-up context")
+    } catch (error) { setMemoryNotice(error instanceof Error ? error.message : String(error)) }
+  }
   const updateAdvanced = async <K extends keyof AdvancedSettings>(key: K, value: AdvancedSettings[K]) => {
     const next = { ...advanced(), [key]: value }
     setAdvanced(next)
@@ -1905,7 +1922,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
           </Show>
           <Show when={agentTab() === "memory"}>
-          <div class="settings-card"><div><strong>Hybrid soul + long-term memory</strong><span>OpenClaw/Hermes-style identity files layered with DuckBot semantic recall.</span></div><div class="agent-defaults-grid"><label class="settings-switch"><input type="checkbox" checked={memoryStatus()?.enabled ?? true} onChange={async (event) => { await window.api.store.set(STORE_KEYS.memoryEnabled, event.currentTarget.checked); setMemoryStatus(await window.api.memory.status()) }} /><span />Enable DuckBot RAG memory</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={telegramMemoryEnabled()} onChange={async (event) => { setTelegramMemoryEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.memoryTelegramEnabled, event.currentTarget.checked) }} /><span />Use personal memory in Telegram</label><div class="agent-lifecycle-list"><span>{memoryStatus()?.available ? "✓ Semantic brain connected" : "○ Semantic brain unavailable"}</span><span>✓ SOUL, USER, AGENTS, and curated MEMORY files</span><span>✓ Relevant-only recall before each turn</span><span>✓ Episodic capture after successful turns</span></div></div><p class="provider-notice">{memoryStatus()?.error || `Soul files: ${memoryStatus()?.soulDirectory || "initializing"}`}. Telegram access is off by default to prevent personal memories from entering group chats; enable it only for trusted, allowlisted chats.</p></div>
+          <div class="settings-card"><div><strong>Hybrid soul + long-term memory</strong><span>OpenClaw/Hermes-style identity files layered with DuckBot semantic recall.</span></div><div class="agent-defaults-grid"><label class="settings-switch"><input type="checkbox" checked={memoryStatus()?.enabled ?? true} onChange={async (event) => { await window.api.store.set(STORE_KEYS.memoryEnabled, event.currentTarget.checked); setMemoryStatus(await window.api.memory.status()); setMemoryHealth(null) }} /><span />Enable DuckBot RAG memory</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={telegramMemoryEnabled()} onChange={async (event) => { setTelegramMemoryEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.memoryTelegramEnabled, event.currentTarget.checked) }} /><span />Use personal memory in Telegram</label><div class="agent-lifecycle-list"><span>{memoryStatus()?.available ? "✓ Semantic brain connected" : "○ Semantic brain unavailable"}</span><span>✓ SOUL, USER, AGENTS, and curated MEMORY files</span><span>✓ Relevant-only recall before each turn</span><span>✓ Episodic capture after successful turns</span></div></div><div class="token-row memory-actions"><button onClick={() => void refreshMemoryHealth()} disabled={!memoryStatus()?.available}>Refresh brain stats</button><button onClick={() => void wakeMemory()} disabled={!memoryStatus()?.available}>Wake up context</button></div><Show when={memoryHealth()?.stats}><div class="memory-stats-grid"><span><b>{memoryHealth()?.stats?.vector_chunks ?? 0}</b> chunks</span><span><b>{memoryHealth()?.stats?.graph_entities ?? 0}</b> entities</span><span><b>{memoryHealth()?.stats?.blocks ?? 0}</b> blocks</span><span><b>{memoryHealth()?.stats?.quarantine_pending ?? 0}</b> pending review</span></div></Show><Show when={memoryNotice()}><pre class="runtime-json memory-notice">{memoryNotice()}</pre></Show><p class="provider-notice">{memoryStatus()?.error || `Soul files: ${memoryStatus()?.soulDirectory || "initializing"}`}. Telegram access is off by default to prevent personal memories from entering group chats; enable it only for trusted, allowlisted chats.</p></div>
 
           </Show>
           <Show when={agentTab() === "telegram"}>
