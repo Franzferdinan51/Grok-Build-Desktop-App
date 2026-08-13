@@ -257,7 +257,7 @@ grok -p "<task>" --cwd "<workspace>" --output-format streaming-json
 
 The desktop app adds only verified Grok flags for the selected controls, including model, reasoning effort, turn limits, verification, web search, subagents, permissions, memory, sandboxing, rules, worktrees, session recovery, and structured output.
 
-Advanced settings also expose an opt-in authenticated ACP transport (`grok agent stdio`). It uses the local `grok login` session, streams native ACP session/tool updates, and answers permission requests fail-closed unless `bypassPermissions` is explicitly selected. Headless streaming-json remains the default and is the supported path for structured browser planning, MoA advisor runs, schedules, and API-key environments.
+Advanced settings also expose an opt-in authenticated ACP transport (`grok agent stdio`). It uses the local `grok login` session, streams native ACP session/tool updates, and pauses the desktop on a bounded approval dialog when Grok requests a permission. Denials fail closed; `bypassPermissions` can be explicitly selected for unattended work. Headless streaming-json remains the default and is the supported path for structured browser planning, MoA advisor runs, schedules, and API-key environments.
 
 The app expects the maintained backend fork because several third-party Responses-compatible providers emit harmless extension control frames such as `response.metadata`. The fork ignores those non-content frames while retaining xAI upstream behavior.
 

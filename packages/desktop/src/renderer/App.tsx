@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, GrokSubcommand, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, DuckbotMemoryHealth, OAuthStatusSnapshot, GitWorktree } from "../preload"
+import type { BackendEvent, BackendPermissionRequest, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, GrokSubcommand, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, DuckbotMemoryHealth, OAuthStatusSnapshot, GitWorktree } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -195,6 +195,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [terminalRailOpen, setTerminalRailOpen] = createSignal(false)
   const [contextRailMode, setContextRailMode] = createSignal<ContextRailMode | null>(null)
   const [notifications, setNotifications] = createSignal<DesktopNotification[]>([])
+  const [permissionRequest, setPermissionRequest] = createSignal<BackendPermissionRequest | null>(null)
   const [showJumpToLatest, setShowJumpToLatest] = createSignal(false)
   const [composerDropActive, setComposerDropActive] = createSignal(false)
   const [agentAppControls, setAgentAppControls] = createSignal(false)
@@ -234,6 +235,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   let eventFrame = 0
   let pendingEvents: TaskLog[] = []
   let unsubscribeBackend = () => {}
+  let unsubscribePermission = () => {}
   let unsubscribeMenu = () => {}
   let backendWasAvailable = false
   let userNearBottom = true
@@ -246,6 +248,17 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setNotifications((current) => [...current.slice(-2), { id, kind, title, message }])
     window.setTimeout(() => setNotifications((current) => current.filter((notice) => notice.id !== id)), 5000)
     if (kind === "success" || kind === "error") void window.api.app.notify({ kind, title, body: message })
+  }
+  const respondToPermission = async (response: { outcome: "selected"; optionId: string } | { outcome: "cancelled" }) => {
+    const request = permissionRequest()
+    if (!request) return
+    setPermissionRequest(null)
+    const result = await window.api.backend.respondPermission(request.requestId, response)
+    if (!result.ok) {
+      announce("error", "Permission response rejected", "The Grok Build task no longer has an active permission request.")
+      return
+    }
+    setSlashNotice(response.outcome === "cancelled" ? "Permission denied. Grok Build will stop this turn safely." : "Permission granted. Grok Build is continuing.")
   }
   // Per-thread + 250ms-debounced saves. Replaces the unbounded
   // `saveChain = saveChain.then(...)` that previously rewrote every
@@ -291,6 +304,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     cancelAnimationFrame(scrollFrame)
     cancelAnimationFrame(eventFrame)
     unsubscribeBackend()
+    unsubscribePermission()
     unsubscribeMenu()
     // Drain any debounced conversation writes before the window is torn down
     // so the user does not lose the most recent transcript.
@@ -1091,6 +1105,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (event.type === "cancelled") queueBackendEvent({ kind: "text", content: event.data || "Task cancelled." })
       if (streamingEventMayMutateWorkspace(event as unknown as Record<string, unknown>)) workspaceRefresh.notify()
     })
+    unsubscribePermission = window.api.backend.onPermissionRequest((request) => {
+      setPermissionRequest(request)
+      setSlashNotice("Grok Build is waiting for permission. Choose an option to continue the run.")
+    })
     const activeRun = await window.api.backend.activeRun()
     if (activeRun) {
       const associatedThread = activeRun.threadId && activeRun.threadId !== activeThreadId()
@@ -1753,6 +1771,23 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
 
   return <div class={`app-root ${sidebarCollapsed() ? "app-root--sidebar-collapsed" : ""}`}>
     <NotificationStack notifications={notifications()} onDismiss={(id) => setNotifications((current) => current.filter((notice) => notice.id !== id))} />
+    <Show when={permissionRequest()}>
+      {(request) => <div class="permission-backdrop" role="presentation">
+        <section class="permission-dialog" role="dialog" aria-modal="true" aria-label="Grok Build permission request">
+          <header><div><span class="permission-dialog__eyebrow">GROK BUILD · ACTION APPROVAL</span><h2>{request().title || "Grok Build needs your approval"}</h2></div><span class="permission-dialog__lock">RUN PAUSED</span></header>
+          <p class="permission-dialog__intro">The active task is waiting for a permission decision. Select an option to resume it, or deny the request to stop safely.</p>
+          <div class="permission-dialog__options">
+            <For each={request().options.filter((option) => option.optionId)}>
+              {(option) => <button class={`permission-option ${option.kind?.toLowerCase().includes("reject") || option.kind?.toLowerCase().includes("deny") ? "permission-option--deny" : ""}`} onClick={() => void respondToPermission({ outcome: "selected", optionId: option.optionId! })}>
+                <strong>{option.name || option.optionId}</strong>
+                <small>{option.description || option.kind || "Continue with this permission choice"}</small>
+              </button>}
+            </For>
+          </div>
+          <footer><span>Only this pending request is answered; the task remains in the selected workspace.</span><button class="permission-dialog__cancel" onClick={() => void respondToPermission({ outcome: "cancelled" })}>Deny and stop</button></footer>
+        </section>
+      </div>}
+    </Show>
     <Show when={paletteOpen()}>
       <div class="command-palette" role="dialog" aria-label="Command palette">
         <input

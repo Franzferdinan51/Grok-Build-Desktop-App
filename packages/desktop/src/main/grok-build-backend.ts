@@ -32,7 +32,7 @@ import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeM
 import { DuckbotMemory } from "./duckbot-memory"
 import { buildBaseArgs, compatibleCliArgs, promptArgsFor } from "./grok-args"
 import { StreamingJsonParser } from "./streaming-json"
-import { runGrokAcp } from "./grok-acp"
+import { runGrokAcp, type GrokAcpPermissionRequest, type GrokAcpPermissionResponse } from "./grok-acp"
 import { reserveActiveRun } from "./active-run-admission"
 import {
   describeOAuthProvider,
@@ -126,6 +126,10 @@ export type RunTaskInput = {
   }
   /** Explicit opt-in to the authenticated Grok Build ACP transport. */
   transport?: "headless" | "acp"
+}
+
+export type GrokBuildRunHooks = {
+  onPermissionRequest?: (request: GrokAcpPermissionRequest) => Promise<GrokAcpPermissionResponse>
 }
 
 export class GrokBuildBackend {
@@ -487,7 +491,7 @@ export class GrokBuildBackend {
     return execFileAsync(status.command, [command, ...args], { cwd, timeout: 10 * 60_000, maxBuffer: 10 * 1024 * 1024, env: this.environment() })
   }
 
-  async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void, reservedRunId?: string): Promise<void> {
+  async run(input: RunTaskInput, onEvent: (event: GrokBuildEvent) => void, reservedRunId?: string, hooks?: GrokBuildRunHooks): Promise<void> {
     if (!input.prompt.trim()) throw new Error("A task prompt is required")
     if (reservedRunId) {
       if (this.activeRun?.runId !== reservedRunId) throw new Error("The reserved Grok Build task is no longer active")
@@ -552,6 +556,7 @@ export class GrokBuildBackend {
           onThought: (data) => onEvent({ type: "thought", data }),
           onTool: (title) => onEvent({ type: "phase", phase: "executing", data: `ACP tool: ${title}` }),
           onSession: (sessionId) => onEvent({ type: "phase", phase: "executing", data: `ACP session ${sessionId}` }),
+          onPermissionRequest: hooks?.onPermissionRequest,
         })
         onEvent({ type: "end", sessionId: result.sessionId })
         onEvent({ type: "phase", phase: result.stopReason === "cancelled" ? "cancelled" : "completed", data: "Grok Build ACP finished its run" })

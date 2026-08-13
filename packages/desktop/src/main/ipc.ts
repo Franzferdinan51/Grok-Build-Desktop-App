@@ -1,4 +1,5 @@
 import { ipcMain, dialog, app, BrowserWindow, Notification } from "electron"
+import { randomUUID } from "crypto"
 import { existsSync, mkdirSync } from "fs"
 import { unlink, writeFile } from "fs/promises"
 import { join } from "path"
@@ -23,6 +24,7 @@ import { DuckbotMemory } from "./duckbot-memory"
 import { hostBrowserOpen, hostBrowserStatus, hostDesktopStatus } from "./host-controls"
 import { isRendererForbiddenStoreKey } from "./store-guard"
 import { normalizeDesktopNotification } from "./desktop-notifications"
+import { permissionResponse, type GrokAcpPermissionOption, type GrokAcpPermissionResponse } from "./grok-acp"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -41,6 +43,15 @@ let previousBrowserAgentScreenshot: string | undefined
 
 export function registerIpcHandlers(deps: Deps): void {
   const memory = new DuckbotMemory()
+  const pendingPermissions = new Map<string, { runId: string; senderId: number; options: GrokAcpPermissionOption[]; resolve: (response: GrokAcpPermissionResponse) => void; timer: ReturnType<typeof setTimeout> }>()
+  const cancelPendingPermissions = (runId: string) => {
+    for (const [requestId, request] of pendingPermissions) {
+      if (request.runId !== runId) continue
+      pendingPermissions.delete(requestId)
+      clearTimeout(request.timer)
+      request.resolve({ outcome: { outcome: "cancelled" } })
+    }
+  }
   onScheduleEvent((event) => deps.getMainWindow()?.webContents.send("schedules:event", event))
   ipcMain.handle("quick-entry:submit", (_event, text: string, target: "current" | "new") => {
     const trimmed = typeof text === "string" ? text.trim() : ""
@@ -53,6 +64,22 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("backend:status", () => deps.backend().status())
   ipcMain.handle("backend:models", () => deps.backend().models())
   ipcMain.handle("backend:cancel", () => deps.backend().cancel())
+  ipcMain.handle("backend:permission-response", (event, requestId: string, response: unknown) => {
+    const request = pendingPermissions.get(requestId)
+    if (!request || request.senderId !== event.sender.id || typeof response !== "object" || response === null) return { ok: false }
+    const candidate = response as { outcome?: unknown; optionId?: unknown }
+    if (candidate.outcome === "cancelled") {
+      pendingPermissions.delete(requestId)
+      clearTimeout(request.timer)
+      request.resolve({ outcome: { outcome: "cancelled" } })
+      return { ok: true }
+    }
+    if (candidate.outcome !== "selected" || typeof candidate.optionId !== "string" || !request.options.some((option) => option.optionId === candidate.optionId)) return { ok: false }
+    pendingPermissions.delete(requestId)
+    clearTimeout(request.timer)
+    request.resolve({ outcome: { outcome: "selected", optionId: candidate.optionId } })
+    return { ok: true }
+  })
   ipcMain.handle("backend:set-path", (_event, path: string) => {
     // Reject obviously dangerous payloads before persisting: empty strings
     // are allowed (clears the override), but everything else must look
@@ -154,7 +181,29 @@ export function registerIpcHandlers(deps: Deps): void {
       await deps.backend().run(effectiveInput, (update) => {
         if ("sessionId" in update && typeof update.sessionId === "string") grokSessionId = update.sessionId
         queueEvent(update)
-      }, reservedRunId)
+      }, reservedRunId, effectiveInput.transport === "acp" ? {
+        onPermissionRequest: (request: { options: GrokAcpPermissionOption[]; toolCall?: unknown; title?: string }) => {
+          if (effectiveInput.permissionMode === "bypassPermissions") return Promise.resolve(permissionResponse("bypassPermissions", request.options))
+          const requestId = randomUUID()
+          return new Promise<GrokAcpPermissionResponse>((resolve) => {
+            const timer = setTimeout(() => {
+              if (!pendingPermissions.has(requestId)) return
+              pendingPermissions.delete(requestId)
+              resolve({ outcome: { outcome: "cancelled" } })
+              if (!event.sender.isDestroyed()) event.sender.send("backend:permission-request-expired", { requestId, runId: reservedRunId })
+            }, 5 * 60_000)
+            timer.unref?.()
+            pendingPermissions.set(requestId, { runId: reservedRunId, senderId: event.sender.id, options: request.options, resolve, timer })
+            if (event.sender.isDestroyed()) {
+              pendingPermissions.delete(requestId)
+              clearTimeout(timer)
+              resolve({ outcome: { outcome: "cancelled" } })
+              return
+            }
+            event.sender.send("backend:permission-request", { requestId, runId: reservedRunId, options: request.options, toolCall: request.toolCall, title: request.title })
+          })
+        },
+      } : undefined)
       flushEvents()
       finishGrokRun(run.id, { status: cancelled ? "cancelled" : "completed", grokSessionId, latencyMs: Date.now() - run.startedAt, advisorFailures, ...usageMetrics(usage) })
     } catch (error) {
@@ -163,6 +212,7 @@ export function registerIpcHandlers(deps: Deps): void {
       finishGrokRun(run.id, { status: "failed", grokSessionId, error: message, latencyMs: Date.now() - run.startedAt, advisorFailures, ...usageMetrics(usage), errorClass: classifyRunError(message) })
       throw error
     } finally {
+      cancelPendingPermissions(reservedRunId)
       deps.backend().clearActiveRun(run.id)
       deps.onBackendIdle?.()
     }

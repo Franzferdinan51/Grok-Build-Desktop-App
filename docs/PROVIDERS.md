@@ -23,7 +23,7 @@ For signed-in desktop agent sessions, Advanced settings may opt into Grok Build'
 grok --permission-mode <mode> agent stdio
 ```
 
-ACP is intentionally explicit and is not used for structured browser output or mixed-model MoA runs. The default remains headless streaming-json so the desktop can preserve its bounded parser and verified recovery behavior.
+ACP is intentionally explicit and is not used for structured browser output or mixed-model MoA runs. Permission requests are delivered to the renderer as a bounded, user-selectable approval dialog; denial or a closed window cancels the request. The default remains headless streaming-json so the desktop can preserve its bounded parser and verified recovery behavior.
 
 ## LM Studio and API models — Grok Build's catalog
 

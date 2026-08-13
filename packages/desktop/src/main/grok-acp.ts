@@ -2,11 +2,16 @@ import { spawn, type ChildProcess } from "child_process"
 
 export type GrokAcpPermissionMode = "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"
 
+export type GrokAcpPermissionOption = { optionId?: string; name?: string; kind?: string; description?: string }
+export type GrokAcpPermissionRequest = { options: GrokAcpPermissionOption[]; toolCall?: unknown; title?: string }
+export type GrokAcpPermissionResponse = { outcome: { outcome: "selected"; optionId: string } | { outcome: "cancelled" } }
+
 export type GrokAcpCallbacks = {
   onText?: (text: string) => void
   onThought?: (text: string) => void
   onTool?: (title: string) => void
   onSession?: (sessionId: string) => void
+  onPermissionRequest?: (request: GrokAcpPermissionRequest) => Promise<GrokAcpPermissionResponse>
 }
 
 export type GrokAcpResult = { text: string; sessionId: string; stopReason: string | null }
@@ -16,9 +21,9 @@ type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error
 const TIMEOUTS = { initialize: 20_000, authenticate: 20_000, session: 30_000, prompt: 120_000 }
 
 /** ACP permission responses are fail-closed unless the user selected bypass mode. */
-export function permissionResponse(mode: GrokAcpPermissionMode, options: Array<{ optionId?: string; kind?: string }>): { outcome: { outcome: "selected" | "cancelled"; optionId?: string } } {
-  const allowed = mode === "bypassPermissions" && options.find((option) => option.optionId && String(option.kind || "").startsWith("allow"))
-  return allowed
+export function permissionResponse(mode: GrokAcpPermissionMode, options: Array<{ optionId?: string; kind?: string }>): GrokAcpPermissionResponse {
+  const allowed = mode === "bypassPermissions" ? options.find((option) => option.optionId && String(option.kind || "").startsWith("allow")) : undefined
+  return allowed?.optionId
     ? { outcome: { outcome: "selected", optionId: allowed.optionId } }
     : { outcome: { outcome: "cancelled" } }
 }
@@ -102,8 +107,13 @@ export function runGrokAcp(
           continue
         }
         if (message.id !== undefined && message.method === "session/request_permission") {
-          const choices = Array.isArray(message.params?.options) ? message.params.options : []
-          send({ jsonrpc: "2.0", id: message.id, result: permissionResponse(mode, choices) })
+          const choices = (Array.isArray(message.params?.options) ? message.params.options : []) as GrokAcpPermissionOption[]
+          const request = { options: choices, toolCall: message.params?.toolCall, title: typeof message.params?.title === "string" ? message.params.title : undefined }
+          void (callbacks.onPermissionRequest
+            ? callbacks.onPermissionRequest(request)
+            : Promise.resolve(permissionResponse(mode, choices)))
+            .then((result) => send({ jsonrpc: "2.0", id: message.id, result }))
+            .catch(() => send({ jsonrpc: "2.0", id: message.id, result: { outcome: { outcome: "cancelled" } } }))
           continue
         }
         if (message.method !== "session/update" || !promptSent || message.params?._meta?.isReplay === true) continue

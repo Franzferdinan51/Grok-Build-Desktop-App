@@ -16,6 +16,8 @@ export type OAuthProviderStatus = {
 }
 export type OAuthStatusSnapshot = { providers: OAuthProviderStatus[] }
 export type BackendEvent = { type: string; data?: string; message?: string; phase?: "starting" | "advising" | "executing" | "recovering" | "completed" | "failed" | "cancelled"; sessionId?: string; usage?: unknown }
+export type BackendPermissionOption = { optionId?: string; name?: string; kind?: string; description?: string }
+export type BackendPermissionRequest = { requestId: string; runId: string; options: BackendPermissionOption[]; toolCall?: unknown; title?: string }
 export type ActiveRunSnapshot = { runId?: string; threadId?: string; cwd: string; prompt: string; startedAt: number; sessionId?: string; phase?: BackendEvent["phase"]; events: BackendEvent[] }
 export type TelegramStatus = {
   connected: boolean
@@ -87,6 +89,8 @@ export type ElectronAPI = {
     workflows: (workspace?: string) => Promise<GrokWorkflow[]>
     sessionPlan: (cwd: string, sessionId?: string) => Promise<SessionPlan | null>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
+    onPermissionRequest: (handler: (request: BackendPermissionRequest) => void) => () => void
+    respondPermission: (requestId: string, response: { outcome: "selected"; optionId: string } | { outcome: "cancelled" }) => Promise<{ ok: boolean }>
   }
   telegram: {
     status: (probe?: boolean) => Promise<TelegramStatus>
@@ -148,6 +152,12 @@ const api: ElectronAPI = {
       ipcRenderer.on("backend:event", listener)
       return () => ipcRenderer.removeListener("backend:event", listener)
     },
+    onPermissionRequest: (handler) => {
+      const listener = (_event: IpcRendererEvent, request: BackendPermissionRequest) => handler(request)
+      ipcRenderer.on("backend:permission-request", listener)
+      return () => ipcRenderer.removeListener("backend:permission-request", listener)
+    },
+    respondPermission: (requestId, response) => ipcRenderer.invoke("backend:permission-response", requestId, response),
   },
   telegram: {
     status: (probe) => ipcRenderer.invoke("telegram:status", probe),
