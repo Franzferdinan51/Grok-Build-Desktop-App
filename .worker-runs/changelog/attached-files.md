@@ -1,2 +1,3 @@
 - Added Duck-Agent-inspired workspace-file attachments to the chat composer, with an eight-file cap, visible context chips, and explicit prompt routing.
 - Added action-oriented Git Review with per-file stage/unstage, staged-diff fallback, and confirmed tracked-file discard.
+- Added validated native desktop notifications for background Grok Build completion and failure feedback.

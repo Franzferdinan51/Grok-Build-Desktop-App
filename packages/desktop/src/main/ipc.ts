@@ -1,4 +1,4 @@
-import { ipcMain, dialog, app, BrowserWindow } from "electron"
+import { ipcMain, dialog, app, BrowserWindow, Notification } from "electron"
 import { existsSync, mkdirSync } from "fs"
 import { unlink, writeFile } from "fs/promises"
 import { join } from "path"
@@ -14,12 +14,13 @@ import { listGrokSkills } from "./grok-skills"
 import { BrowserManager } from "./browser-manager"
 import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
-import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
+import { applyGitFileAction, gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
 import { PreviewServer } from "./preview-server"
 import { exportConversation, getConversation, listConversationSummaries, listConversations, saveConversation, searchConversations, type StoredChatThread } from "./conversation-store"
 import { DuckbotMemory } from "./duckbot-memory"
 import { hostBrowserOpen, hostBrowserStatus, hostDesktopStatus } from "./host-controls"
 import { isRendererForbiddenStoreKey } from "./store-guard"
+import { normalizeDesktopNotification } from "./desktop-notifications"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -216,6 +217,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("workspace:command", (_event, root: string, command: string) => runWorkspaceCommand(root, command))
   ipcMain.handle("workspace:git-changes", (_event, root: string) => gitChangedFiles(root))
   ipcMain.handle("workspace:git-diff", (_event, root: string, path: string) => gitFileDiff(root, path))
+  ipcMain.handle("workspace:git-action", (_event, root: string, path: string, action: "stage" | "unstage" | "discard") => applyGitFileAction(root, path, action))
   ipcMain.handle("preview:start", (_event, root: string) => deps.preview().start(root))
   ipcMain.handle("preview:stop", () => deps.preview().stop())
   ipcMain.handle("preview:inspect", async () => {
@@ -270,6 +272,20 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.handle("app:get-version", () => app.getVersion())
   ipcMain.handle("app:backend-repository", () => "https://github.com/xai-org/grok-build")
+  ipcMain.handle("app:notify", (_event, input: { kind: "success" | "error"; title: string; body: string }) => {
+    const notification = normalizeDesktopNotification(input)
+    const main = deps.getMainWindow()
+    if (!notification || !Notification.isSupported() || !main || main.isDestroyed() || main.isFocused()) return { shown: false }
+    const native = new Notification({ title: notification.title, body: notification.body })
+    native.on("click", () => {
+      if (main.isDestroyed()) return
+      if (main.isMinimized()) main.restore()
+      main.show()
+      main.focus()
+    })
+    native.show()
+    return { shown: true }
+  })
   ipcMain.handle("dialog:open-file", async (_event, options?: { filters?: { name: string; extensions: string[] }[] }) =>
     dialog.showOpenDialog({ properties: ["openFile"], filters: options?.filters }))
   ipcMain.handle("dialog:open-directory", async () => dialog.showOpenDialog({ properties: ["openDirectory"] }))

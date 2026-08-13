@@ -217,6 +217,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const id = ++notificationId
     setNotifications((current) => [...current.slice(-2), { id, kind, title, message }])
     window.setTimeout(() => setNotifications((current) => current.filter((notice) => notice.id !== id)), 5000)
+    if (kind === "success" || kind === "error") void window.api.app.notify({ kind, title, body: message })
   }
   // Per-thread + 250ms-debounced saves. Replaces the unbounded
   // `saveChain = saveChain.then(...)` that previously rewrote every
@@ -1223,6 +1224,16 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     } finally { setTerminalRunning(false) }
   }
   const refreshDiff = async (root = workspace()) => { if (root) { setGitChanges(await window.api.workspace.gitChanges(root)); setSelectedDiff(""); setDiffContent("") } }
+  const applyReviewAction = async (path: string, action: "stage" | "unstage" | "discard") => {
+    if (!workspace()) return
+    try {
+      await window.api.workspace.gitAction(workspace(), path, action)
+      await refreshDiff()
+      setSlashNotice(`${action === "discard" ? "Discarded" : action === "stage" ? "Staged" : "Unstaged"} ${path}`)
+    } catch (error) {
+      setSlashNotice(`Git action failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const useSkillInChat = (name: string) => { setPrompt(`/${name} `); setSlashNotice(""); void navigate("new-task") }
   const askReviewInChat = () => {
     const paths = gitChanges().slice(0, 24).map((change) => `${change.status} ${change.path}`).join("\n")
@@ -1648,6 +1659,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           diff={diffContent()}
           onRefresh={() => void refreshDiff()}
           onSelect={async (path) => { setSelectedDiff(path); setDiffContent(await window.api.workspace.gitDiff(workspace(), path)) }}
+          onAction={(path, action) => void applyReviewAction(path, action)}
           onAskReview={askReviewInChat}
           onOpenProject={chooseWorkspace}
         />

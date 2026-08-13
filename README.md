@@ -32,6 +32,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Global Quick Entry (`CommandOrControl+Shift+Space`) opens a secure, always-on-top composer from anywhere and routes submissions into the current or a new saved conversation.
 - Workspace file attachments let you select up to eight files from the project rail and carry their paths into the next prompt as explicit agent context.
 - Action-oriented Git Review now supports per-file stage/unstage controls, staged-diff inspection, and confirmed discard for tracked changes.
+- Background task completion and failure also surface as native desktop notifications when the workbench is unfocused; clicking one restores the existing app window.
 - Configurable reasoning, turn limits, self-verification, web search, subagents, and visible automatic-approval controls.
 
 ### Models and authentication
