@@ -670,7 +670,9 @@ assert.equal(isSafeExternalUrl("  https://example.com/  "), true)
   assert.match(block, /# END GROK BUILD DESKTOP MANAGED PROVIDERS/)
   assert.match(block, /\[model\.lm-studio-qwen2-5\]/)
   assert.match(block, /base_url = "http:\/\/localhost:1234\/v1"/)
+  assert.match(block, /model = "qwen2.5"/)
   assert.match(block, /env_key = "LM_STUDIO_API_KEY"/)
+  assert.doesNotMatch(block, /model_name/)
 }
 {
   // codexOAuth snapshot emits the responses backend block.

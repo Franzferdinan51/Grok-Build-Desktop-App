@@ -15,7 +15,8 @@ import { composerDraftIsEmpty, composeDraftSnapshot, parseComposerDraft } from "
 import { createWorkspaceRefreshScheduler, streamingEventMayMutateWorkspace } from "./workspace-events"
 import { lastUserInstruction, rewindLastTurn } from "./conversation-lifecycle"
 import { buildPaletteItems, filterPaletteItems } from "./command-palette"
-import { catalogModelOptions, groupedModelOptions } from "./provider-availability"
+import { catalogModelOptions } from "./provider-availability"
+import { ModelPicker } from "./ModelPicker"
 import { ADVANCED_DEFAULTS, FRIENDLY_DEFAULTS, resolveFriendlyDefaults, type AdvancedSettings, type SettingsTab } from "./settings-defaults"
 import { formatWorkflowCatalog, resolveWorkflowLaunch } from "./workflow-launch"
 import { summarizeHarnessDoctor } from "./harness-doctor"
@@ -653,7 +654,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     ...providerSecrets().map((provider) => provider.modelId).filter(Boolean),
   ])]
   const signedFamilies = () => oauthStatus().providers.filter((row) => row.signedIn).map((row) => row.id)
-  const modelOptions = () => catalogModelOptions(selectableModels(), providerSecrets(), catalog().defaultModel, signedFamilies())
+  const modelOptions = () => catalogModelOptions(selectableModels(), providerSecrets(), catalog().defaultModel, signedFamilies(), catalog().models)
   const paletteItems = () => filterPaletteItems(buildPaletteItems({
     commands: DESKTOP_SLASH_COMMANDS,
     views: NAV.map((item) => ({ id: item.id, label: item.label })),
@@ -751,7 +752,6 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (available && !backendWasAvailable) void refreshModelCatalog()
     backendWasAvailable = available
   })
-  const modelPickerValue = () => moaEnabled() ? `__moa__:${moaCandidates()}` : model()
   const selectModelValue = async (value: string) => {
     if (value.startsWith("__moa__:")) {
       const count = Math.min(8, Math.max(2, Number(value.split(":")[1]) || 3))
@@ -1824,17 +1824,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <label class={`composer-toggle ${planMode() ? "composer-toggle--plan" : ""}`} title="Official Grok Build plan mode: --permission-mode plan, no --no-plan. Edits outside plan.md are blocked."><input type="checkbox" checked={planMode()} onChange={async (event) => { setPlanMode(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsPlanMode, event.currentTarget.checked) }} />☰ Plan</label>
             <label class={`composer-toggle ${autoApprove() ? "composer-toggle--warning" : ""}`} title="Allow Grok Build to execute tools without asking"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, event.currentTarget.checked) }} />⚡ Auto</label>
             <label class={`composer-toggle ${moaEnabled() ? "composer-toggle--moa" : ""}`} title={`Run ${moaCandidates()} candidates in parallel and synthesize the best result`}><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} />⌘ MoA ×{moaCandidates()}</label>
-            <select class="composer-model" value={modelPickerValue()} onFocus={() => void refreshModelCatalog()} onChange={(event) => void selectModelValue(event.currentTarget.value)} aria-label="Model">
-              <optgroup label="Mixture of Agents"><option value="__moa__:2">MoA · Fast ×2</option><option value="__moa__:3">MoA · Balanced ×3</option><option value="__moa__:5">MoA · Thorough ×5</option><option value="__moa__:8">MoA · Exhaustive ×8</option><Show when={![2,3,5,8].includes(moaCandidates())}><option value={`__moa__:${moaCandidates()}`}>MoA · Custom ×{moaCandidates()}</option></Show></optgroup>
-              <optgroup label="Grok Build">
-                <option value="">{catalog().defaultModel || "Default model"}</option>
-              </optgroup>
-              <For each={groupedModelOptions(modelOptions())}>{(group) =>
-                <optgroup label={group.label}>
-                  <For each={group.options}>{(entry) => <option value={entry.id} disabled={!entry.available}>{entry.available ? entry.label : `${entry.label} — ${entry.reason}`}</option>}</For>
-                </optgroup>
-              }</For>
-            </select>
+            <ModelPicker
+              value={model()}
+              emptyLabel={catalog().defaultModel || "Grok Build default"}
+              options={modelOptions()}
+              onOpen={() => void refreshModelCatalog()}
+              onChange={(value) => void selectModelValue(value)}
+              onNeedSettings={() => { setSettingsTab("accounts"); void navigate("settings") }}
+            />
             <button class="composer-send" disabled={!prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (Enter)" : "Send (Enter)"}>{running() ? "+" : "↑"}</button>
             <Show when={running()}><button class="composer-stop" onClick={() => { parkActiveQueue(); void window.api.backend.cancel() }} title="Stop current task"><span /></button></Show>
           </div>
@@ -1885,7 +1882,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           </Show>
 
           <Show when={agentTab() === "runtime"}>
-          <div class="settings-card"><div><strong>Agent runtime</strong><span>Defaults shared by desktop tasks and the Telegram agent.</span></div><div class="agent-defaults-grid"><label>Model<select value={model()} onChange={async (event) => { setModel(event.currentTarget.value); await window.api.store.set(STORE_KEYS.defaultsModel, event.currentTarget.value) }}><option value="">{catalog().defaultModel || "Grok Build default"}</option><For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label><label>Maximum turns<input type="number" min="0" max="100" value={maxTurns()} onInput={async (event) => { const value = Math.min(100, Math.max(0, Number(event.currentTarget.value) || 0)); setMaxTurns(value); await window.api.store.set(STORE_KEYS.defaultsMaxTurns, value) }} /><small>0 uses the CLI default</small></label><label class="settings-switch"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsThinking, event.currentTarget.checked) }} /><span />High reasoning</label><label class="settings-switch"><input type="checkbox" checked={selfVerify()} onChange={async (event) => { setSelfVerify(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsSelfVerify, event.currentTarget.checked) }} /><span />Verify completed work</label><label class="settings-switch"><input type="checkbox" checked={webSearchEnabled()} onChange={async (event) => { setWebSearchEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsWebSearch, event.currentTarget.checked) }} /><span />Web search</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, event.currentTarget.checked) }} /><span />Automatic approvals</label></div></div>
+          <div class="settings-card"><div><strong>Agent runtime</strong><span>Defaults shared by desktop tasks and the Telegram agent.</span></div><div class="agent-defaults-grid"><label>Model<ModelPicker compact value={model()} emptyLabel={catalog().defaultModel || "Grok Build default"} options={modelOptions()} onChange={async (value) => { setModel(value); await window.api.store.set(STORE_KEYS.defaultsModel, value) }} /></label><label>Maximum turns<input type="number" min="0" max="100" value={maxTurns()} onInput={async (event) => { const value = Math.min(100, Math.max(0, Number(event.currentTarget.value) || 0)); setMaxTurns(value); await window.api.store.set(STORE_KEYS.defaultsMaxTurns, value) }} /><small>0 uses the CLI default</small></label><label class="settings-switch"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsThinking, event.currentTarget.checked) }} /><span />High reasoning</label><label class="settings-switch"><input type="checkbox" checked={selfVerify()} onChange={async (event) => { setSelfVerify(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsSelfVerify, event.currentTarget.checked) }} /><span />Verify completed work</label><label class="settings-switch"><input type="checkbox" checked={webSearchEnabled()} onChange={async (event) => { setWebSearchEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsWebSearch, event.currentTarget.checked) }} /><span />Web search</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, event.currentTarget.checked) }} /><span />Automatic approvals</label></div></div>
 
           <div class="settings-card"><div><strong>Delegation and MoA</strong><span>Native Grok subagents plus private Hermes-style advisor fan-out.</span></div><div class="agent-defaults-grid"><label class="settings-switch"><input type="checkbox" checked={subagentsEnabled()} onChange={async (event) => { setSubagentsEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.agentSubagents, event.currentTarget.checked) }} /><span />Enable subagents</label><label>Delegation style<select value={delegationMode()} disabled={!subagentsEnabled()} onChange={async (event) => { const value = event.currentTarget.value as "balanced" | "aggressive"; setDelegationMode(value); await window.api.store.set(STORE_KEYS.agentDelegationMode, value) }}><option value="balanced">Balanced</option><option value="aggressive">Proactive parallel</option></select></label><label class="settings-switch"><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} /><span />Enable Mixture of Agents</label><label>Advisor budget<input type="number" min="200" max="2000" step="100" disabled={!moaEnabled()} value={moaReferenceTokenBudget()} onInput={async (event) => { const value = Math.min(2000, Math.max(200, Number(event.currentTarget.value) || 600)); setMoaReferenceTokenBudget(value); await window.api.store.set(STORE_KEYS.moaReferenceTokenBudget, value) }} /><small>tokens · fluid default 600</small></label></div><p class="provider-notice">Advisors remain private and read-only. One acting aggregator owns implementation and verification, while independent subagents can research, inspect, and test without overlapping edits.</p></div>
 

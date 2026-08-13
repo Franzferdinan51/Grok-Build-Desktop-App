@@ -43,7 +43,9 @@ All providers remain **Grok Build model targets**: selecting one always runs the
 | MiniMax | MiniMax's OpenAI-compatible API endpoint | MiniMax API key via an `env_key` |
 | OpenAI-compatible | Any user-supplied OpenAI-compatible `/v1` endpoint | Provider key via `OPENAI_COMPATIBLE_API_KEY` |
 
-Both desktop settings pages can edit the base URL and model ID for these entries. They update only the `GROK BUILD DESKTOP MANAGED PROVIDERS` section of `~/.grok/config.toml`; hand-written configuration outside that block is preserved.
+Both desktop settings pages can edit the base URL and model ID for these entries. They update only the `GROK BUILD DESKTOP MANAGED PROVIDERS` section of `~/.grok/config.toml`; hand-written configuration outside that block is preserved. Managed tables write Grok Build's official `model =` field (not `model_name`).
+
+NVIDIA Build/NIM models that already appear in `grok models` are selectable. NIM streams `"usage": null` on intermediate Chat Completions chunks, which Grok Build's Rust schema rejects. For those models the desktop starts a local compatibility proxy and a `gb-desktop-nim` alias so `grok --model` still runs Grok Build; it does not add a second agent runtime.
 
 Create a model entry in `~/.grok/config.toml`, then it appears in `grok models` and both desktop pickers:
 

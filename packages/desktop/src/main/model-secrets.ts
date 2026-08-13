@@ -5,7 +5,7 @@ import { homedir } from "os"
 import { dirname, join } from "path"
 import { randomUUID } from "crypto"
 import { removeLegacyCodexBridgeTables } from "./model-config-utils"
-import { buildManagedModelsBlock, spliceManagedModels } from "./model-config-block"
+import { buildManagedModelsBlock, spliceManagedModels, type ExtraManagedModel } from "./model-config-block"
 import { write as writeLog } from "./logging"
 
 export const PROVIDER_PRESETS = [
@@ -23,6 +23,7 @@ type SecretRecord = { label: string; envKey: string; encrypted: string }
 const records = (): Record<string, SecretRecord> => getStore().get("grok.providerSecrets", {})
 type CodexOAuthModel = { id: string; contextWindow?: number }
 let codexOAuth: { baseUrl: string; models: CodexOAuthModel[] } | null = null
+let nimCompat: ExtraManagedModel[] = []
 
 export function listProviderSecrets() {
   const saved = records()
@@ -70,7 +71,8 @@ export async function saveProviderSettings(id: string, baseUrl: string, modelId:
 export const buildManagedModelsBlockForProviders = (
   settings: Record<string, { baseUrl: string; modelId: string }>,
   codexSnapshot: { baseUrl: string; models: CodexOAuthModel[] } | null,
-): string => buildManagedModelsBlock(providers(), settings, codexSnapshot)
+  extras: ExtraManagedModel[] = nimCompat,
+): string => buildManagedModelsBlock(providers(), settings, codexSnapshot, extras)
 
 // Single-flight serialised queue. The previous implementation called
 // `writeManagedModels` synchronously inside every `saveProviderSettings`
@@ -129,6 +131,11 @@ export function writeManagedModelsSyncUnavailable(): never {
 
 export async function configureCodexOAuthModels(baseUrl: string, models: CodexOAuthModel[]): Promise<void> {
   codexOAuth = { baseUrl, models }
+  await writeManagedModels(getStore().get("grok.providerSettings", {}))
+}
+
+export async function configureNimCompatModel(entry: ExtraManagedModel | ExtraManagedModel[] | null): Promise<void> {
+  nimCompat = !entry ? [] : Array.isArray(entry) ? entry : [entry]
   await writeManagedModels(getStore().get("grok.providerSettings", {}))
 }
 

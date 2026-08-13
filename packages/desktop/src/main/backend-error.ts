@@ -17,7 +17,13 @@ export function classifyBackendError(message: string): { class: BackendErrorClas
   if (/no output|timed? ?out|timeout/i.test(text)) return { class: "timeout", retryable: true, userMessage: text }
   if (/network|connection|econn|enotfound|eai_again/i.test(text)) return { class: "network", retryable: true, userMessage: "The model provider connection dropped. Check the network and retry." }
   if (/serialization error:|error decoding response body|malformed streaming/i.test(text)) {
-    return { class: "serialization", retryable: true, userMessage: "The model provider returned a malformed streaming event. Retry this turn; the desktop will not invent a second agent loop." }
+    return {
+      class: "serialization",
+      retryable: true,
+      userMessage: /null, expected u32|usage/i.test(text)
+        ? "NVIDIA NIM streamed a payload Grok Build cannot parse. Retry this turn; the desktop routes NVIDIA models through a local compatibility proxy and does not add a second agent runtime."
+        : "The model provider returned a malformed streaming event. Retry this turn; the desktop will not invent a second agent loop.",
+    }
   }
   return { class: "runtime", retryable: false, userMessage: text }
 }

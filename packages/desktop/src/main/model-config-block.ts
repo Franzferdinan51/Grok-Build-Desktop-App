@@ -14,30 +14,62 @@ export type ProviderBlock = { id: string; label: string; envKey: string; baseUrl
 
 export type ManagedModels = Record<string, { baseUrl: string; modelId: string }>
 
+export type ExtraManagedModel = {
+  alias: string
+  model: string
+  baseUrl: string
+  name: string
+  envKey: string
+  apiBackend?: "chat_completions" | "responses" | "messages"
+  contextWindow?: number
+}
+
+export const DESKTOP_NIM_ALIAS = "gb-desktop-nim"
+
 const MANAGED_START = "# BEGIN GROK BUILD DESKTOP MANAGED PROVIDERS"
 const MANAGED_END = "# END GROK BUILD DESKTOP MANAGED PROVIDERS"
+
+function renderModelBlock(input: ExtraManagedModel): string {
+  const context = input.contextWindow ? `\ncontext_window = ${Math.floor(input.contextWindow)}` : ""
+  return `[model.${input.alias}]\nmodel = ${JSON.stringify(input.model)}\nbase_url = ${JSON.stringify(input.baseUrl)}\nname = ${JSON.stringify(input.name)}\napi_backend = ${JSON.stringify(input.apiBackend || "chat_completions")}\nenv_key = ${JSON.stringify(input.envKey)}${context}`
+}
 
 /**
  * Build the next managed block for `~/.grok/config.toml` from the supplied
  * provider settings + the live codex OAuth bridge snapshot.
+ * Grok Build reads `model`, not `model_name`, as the upstream API id.
  */
 export function buildManagedModelsBlock(
   providers: ProviderBlock[],
   settings: ManagedModels,
   codexSnapshot: { baseUrl: string; models: CodexOAuthModel[] } | null,
+  extras: ExtraManagedModel[] = [],
 ): string {
   const blocks = providers.flatMap((preset) => {
     const setting = settings[preset.id]
     if (!setting?.modelId) return []
     const alias = `${preset.id}-${setting.modelId}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-")
-    return [`[model.${alias}]\nbase_url = ${JSON.stringify(setting.baseUrl)}\nmodel_name = ${JSON.stringify(setting.modelId)}\nname = ${JSON.stringify(`${preset.label} · ${setting.modelId}`)}\napi_backend = "chat_completions"\nenv_key = ${JSON.stringify(preset.envKey)}`]
+    return [renderModelBlock({
+      alias,
+      model: setting.modelId,
+      baseUrl: setting.baseUrl,
+      name: `${preset.label} · ${setting.modelId}`,
+      envKey: preset.envKey,
+    })]
   })
-  const codexBlocks = (codexSnapshot?.models || []).map((model) => {
-    const alias = `codex-${model.id.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`
-    const context = model.contextWindow ? `\ncontext_window = ${Math.floor(model.contextWindow)}` : ""
-    return `[model.${alias}]\nmodel = ${JSON.stringify(model.id)}\nbase_url = ${JSON.stringify(codexSnapshot!.baseUrl)}\nname = ${JSON.stringify(`OpenAI Codex · ${model.id}`)}\napi_backend = "responses"\nenv_key = "GROK_CODEX_OAUTH_BRIDGE_KEY"${context}`
-  })
-  return `${MANAGED_START}\n${[...blocks, ...codexBlocks].join("\n\n")}\n${MANAGED_END}`
+  const codexBlocks = (codexSnapshot?.models || []).map((model) => renderModelBlock({
+    alias: `codex-${model.id.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`,
+    model: model.id,
+    baseUrl: codexSnapshot!.baseUrl,
+    name: `OpenAI Codex · ${model.id}`,
+    envKey: "GROK_CODEX_OAUTH_BRIDGE_KEY",
+    apiBackend: "responses",
+    contextWindow: model.contextWindow,
+  }))
+  const extraBlocks = extras
+    .filter((entry) => /^[a-z0-9][a-z0-9_-]*$/.test(entry.alias) && entry.model.trim() && /^https?:\/\//i.test(entry.baseUrl))
+    .map(renderModelBlock)
+  return `${MANAGED_START}\n${[...blocks, ...codexBlocks, ...extraBlocks].join("\n\n")}\n${MANAGED_END}`
 }
 
 /**

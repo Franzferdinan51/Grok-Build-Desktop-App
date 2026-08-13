@@ -6,6 +6,10 @@ test("providerFamily classifies known Grok Build model ids", () => {
   assert.equal(providerFamily("grok-4.5"), "xai")
   assert.equal(providerFamily("codex-gpt-5"), "openai")
   assert.equal(providerFamily("nvidia/nemotron-3-ultra-550b"), "nvidia")
+  assert.equal(providerFamily("nemotron-3-ultra-550b"), "nvidia")
+  assert.equal(providerFamily("nvidia-build"), "nvidia")
+  assert.equal(providerFamily("minimax-m3-nvidia"), "nvidia")
+  assert.equal(providerFamily("deepseek-v4-pro-nvidia"), "nvidia")
   assert.equal(providerFamily("MiniMax-M2.7"), "minimax")
 })
 
@@ -19,7 +23,27 @@ test("catalogModelOptions marks xAI and configured secrets available", () => {
   assert.equal(options.find((option) => option.id === "grok-4.5")?.label, "grok-4.5 (default)")
   assert.equal(options.find((option) => option.id === "codex-gpt-5")?.available, true)
   assert.equal(options.find((option) => option.id === "nvidia/nemotron-3-ultra-550b")?.available, false)
-  assert.match(options.find((option) => option.id === "nvidia/nemotron-3-ultra-550b")?.reason || "", /Configure nvidia/)
+  assert.match(options.find((option) => option.id === "nvidia/nemotron-3-ultra-550b")?.reason || "", /Configure NVIDIA/)
+})
+
+test("catalogModelOptions treats grok models catalog entries as already usable", () => {
+  const options = catalogModelOptions(
+    ["nemotron-3-ultra-550b", "minimax-m3-nvidia", "deepseek-v4-pro-nvidia"],
+    [],
+    "grok-4.6",
+    [],
+    ["nemotron-3-ultra-550b", "minimax-m3-nvidia", "deepseek-v4-pro-nvidia"],
+  )
+  assert.equal(options.every((option) => option.available), true)
+})
+
+test("a configured nvidia-build secret unlocks the NVIDIA family", () => {
+  const options = catalogModelOptions(
+    ["nemotron-3-ultra-550b"],
+    [{ id: "nvidia-build", label: "NVIDIA", modelId: "", configured: true }],
+  )
+  assert.equal(options[0]?.available, true)
+  assert.equal(options[0]?.family, "nvidia")
 })
 
 test("catalogModelOptions treats OAuth-signed families as available", () => {

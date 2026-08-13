@@ -19,7 +19,12 @@ import { normalizeBackendStderr } from "./backend-error"
 import { tokenizeCommandLine, ShellQuoteError } from "./shell-quote"
 import { parseGrokModels } from "./grok-models"
 import { parseGrokSubcommands, parseGrokSubcommandNames, type GrokSubcommand } from "./grok-subcommands"
-import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
+import { configureCodexOAuthModels, configureNimCompatModel, providerSecretEnvironment } from "./model-secrets"
+import { DESKTOP_NIM_ALIAS } from "./model-config-block"
+import { ensureNvidiaCompatProxy } from "./nvidia-stream-compat"
+import { needsNvidiaStreamCompat, parseGrokModelTables, resolveNvidiaUpstream, type GrokModelTable } from "./grok-model-tables"
+import { readFile } from "fs/promises"
+import { join } from "path"
 import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
 import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeMoaReferenceBudget } from "./moa-utils"
@@ -300,8 +305,34 @@ export class GrokBuildBackend {
     this.cliFlagsCache = null
   }
 
+  private nvidiaApiKey?: string
+
   private environment(): NodeJS.ProcessEnv {
-    return { ...process.env, ...providerSecretEnvironment(this.codexBridge.environment()) }
+    const env = { ...process.env, ...providerSecretEnvironment(this.codexBridge.environment()) }
+    if (this.nvidiaApiKey && !env.NVIDIA_API_KEY) env.NVIDIA_API_KEY = this.nvidiaApiKey
+    return env
+  }
+
+  private async prepareNvidiaModel(modelId?: string): Promise<string | undefined> {
+    if (!modelId) return modelId
+    let tables: GrokModelTable[] = []
+    try { tables = parseGrokModelTables(await readFile(join(homedir(), ".grok", "config.toml"), "utf8")) }
+    catch { tables = [] }
+    if (!needsNvidiaStreamCompat(modelId, tables)) return modelId
+    const upstream = resolveNvidiaUpstream(modelId, tables)
+    const proxy = await ensureNvidiaCompatProxy()
+    this.nvidiaApiKey = upstream.apiKey || this.nvidiaApiKey
+    await configureNimCompatModel({
+      alias: DESKTOP_NIM_ALIAS,
+      model: upstream.model,
+      baseUrl: `http://127.0.0.1:${proxy.port}/v1`,
+      name: `${upstream.model} · NVIDIA NIM compatibility`,
+      envKey: upstream.envKey || "NVIDIA_API_KEY",
+      contextWindow: upstream.contextWindow,
+    })
+    this.invalidateModelsCache()
+    writeLog("info", `Routing ${modelId} through the local NVIDIA NIM compatibility proxy`)
+    return DESKTOP_NIM_ALIAS
   }
 
   private async syncCodexOAuthModels(): Promise<void> {
@@ -595,11 +626,21 @@ ${referenceSection}
     }
 
     const structuredOutput = Boolean(input.jsonSchema?.trim())
+    try {
+      const routed = await this.prepareNvidiaModel(effectiveModel)
+      if (routed && routed !== effectiveModel) {
+        onEvent({ type: "thought", data: `NVIDIA NIM streams a payload Grok Build cannot parse directly. This turn uses a local compatibility proxy and still runs as Grok Build --model ${effectiveModel}.\n` })
+        effectiveModel = routed
+      }
+    } catch (error) {
+      writeLog("error", `NVIDIA NIM compatibility setup failed: ${String(error)}`)
+      onEvent({ type: "thought", data: "Could not start the NVIDIA NIM compatibility proxy. The selected NVIDIA model may fail with a serialization error.\n" })
+    }
     const cliInput = input.memory === "experimental" || input.memory === "disabled"
       ? input
       : { ...input, memory: "disabled" as const }
     const promptArgs = promptArgsFor({ ...cliInput, prompt: effectivePrompt }, effectivePrompt)
-    const args = buildBaseArgs({ ...cliInput, prompt: effectivePrompt }, promptArgs)
+    const args = buildBaseArgs({ ...cliInput, prompt: effectivePrompt, model: effectiveModel }, promptArgs)
 
     const omittedFlags = new Set<string>()
     const compatibleArgs = this.compatibleCliArgs(args, supportedFlags, (flag) => omittedFlags.add(flag))

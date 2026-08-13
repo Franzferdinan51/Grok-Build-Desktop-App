@@ -19,6 +19,12 @@ test("classifyBackendError treats malformed streaming events as retryable serial
   const classified = classifyBackendError("serialization error: invalid type: null")
   assert.equal(classified.class, "serialization")
   assert.equal(classified.retryable, true)
+  assert.match(classified.userMessage, /malformed streaming event/)
+})
+
+test("classifyBackendError names the NVIDIA NIM usage:null failure", () => {
+  const classified = classifyBackendError("serialization error: invalid type: null, expected u32 at line 1 column 319")
+  assert.match(classified.userMessage, /NVIDIA NIM/)
 })
 
 test("normalizeBackendStderr still extracts the human message from Internal error dumps", () => {

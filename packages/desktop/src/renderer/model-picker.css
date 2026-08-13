@@ -1,0 +1,92 @@
+.model-picker { position: relative; min-width: 0; }
+.model-picker__trigger {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 10px;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: #262a34;
+  color: #c7cdd9;
+  padding: 0 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.model-picker--compact .model-picker__trigger { max-width: 100%; width: 100%; height: 36px; }
+.model-picker__trigger:hover, .model-picker--open .model-picker__trigger { background: #2e3441; color: #eef1f8; }
+.model-picker__family {
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: 8px;
+  color: #8ea2d6;
+}
+.model-picker__trigger strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+}
+.model-picker__trigger i {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #8b93a3;
+}
+.model-picker__menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 24;
+  width: min(360px, 72vw);
+  max-height: min(420px, 52vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #3a4458;
+  border-radius: 12px;
+  background: #151922;
+  box-shadow: 0 18px 48px #000a;
+}
+.model-picker--compact .model-picker__menu { left: 0; right: auto; bottom: auto; top: calc(100% + 6px); width: 100%; }
+.model-picker__menu input {
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 1px solid #2b3240;
+  background: #10141c;
+  color: #edf1f8;
+  padding: 10px 12px;
+  outline: 0;
+}
+.model-picker__list { overflow: auto; padding: 6px; }
+.model-picker__list section { margin-top: 6px; }
+.model-picker__list header {
+  padding: 6px 8px 4px;
+  color: #7f8ba2;
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.model-picker__option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #d7deea;
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.model-picker__option strong { font-size: 12px; }
+.model-picker__option span { color: #7f899b; font-size: 10px; }
+.model-picker__option.is-active, .model-picker__option:hover { background: #252c39; }
+.model-picker__option.is-selected { background: #243049; }
+.model-picker__option.is-locked { opacity: .55; cursor: default; }
+.model-picker__list p { margin: 10px 8px; color: #7f899b; font-size: 12px; }

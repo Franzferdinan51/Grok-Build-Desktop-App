@@ -35,30 +35,38 @@ const FAMILY_ORDER = ["xai", "openai", "minimax", "nvidia", "lmstudio", "compati
 export function providerFamily(modelId: string): string {
   const value = modelId.trim().toLowerCase()
   if (!value) return "unknown"
-  if (value.startsWith("codex-") || value.includes("gpt-")) return "openai"
+  if (value.startsWith("codex-") || /(^|[^a-z])gpt-/.test(value)) return "openai"
+  // NVIDIA-hosted MiniMax / DeepSeek / GLM aliases end in `-nvidia` and must
+  // not be treated as MiniMax OAuth or generic compatible models.
+  if (value.includes("nemotron") || value.startsWith("nvidia/") || value.startsWith("nvidia-") || value.endsWith("-nvidia")) return "nvidia"
   if (value.includes("minimax") || value.startsWith("m2.") || value.startsWith("m3")) return "minimax"
-  if (value.includes("nemotron") || value.startsWith("nvidia/")) return "nvidia"
   if (value.includes("lmstudio") || value.includes("localhost")) return "lmstudio"
   if (value.startsWith("grok") || value.includes("grok-")) return "xai"
   return "compatible"
 }
 
-export function catalogModelOptions(models: string[], secrets: ProviderSecretLike[] = [], defaultModel?: string, signedFamilies: string[] = []): ModelOption[] {
+export function secretFamily(secret: ProviderSecretLike): string {
+  return providerFamily(secret.modelId || secret.id)
+}
+
+export function catalogModelOptions(models: string[], secrets: ProviderSecretLike[] = [], defaultModel?: string, signedFamilies: string[] = [], catalogIds: string[] = []): ModelOption[] {
   const configuredFamilies = new Set([
-    ...secrets.filter((secret) => secret.configured).map((secret) => providerFamily(secret.modelId || secret.id)),
+    ...secrets.filter((secret) => secret.configured).map(secretFamily),
     ...signedFamilies.filter(Boolean),
   ])
   const configuredIds = new Set(secrets.filter((secret) => secret.configured && secret.modelId).map((secret) => secret.modelId))
+  const listed = new Set(catalogIds.filter(Boolean))
   return [...new Set(models.filter(Boolean))].map((id) => {
     const family = providerFamily(id)
     const needsSecret = family === "openai" || family === "minimax" || family === "nvidia" || family === "compatible"
-    const available = !needsSecret || configuredIds.has(id) || configuredFamilies.has(family) || id === defaultModel
+    const listedByGrok = listed.has(id)
+    const available = listedByGrok || !needsSecret || configuredIds.has(id) || configuredFamilies.has(family) || id === defaultModel
     return {
       id,
       label: id === defaultModel ? `${id} (default)` : id,
       available,
       family,
-      reason: available ? undefined : `Configure ${family} in Settings before selecting this Grok Build model`,
+      reason: available ? undefined : `Configure ${providerFamilyLabel(family)} in Settings before selecting this Grok Build model`,
     }
   })
 }

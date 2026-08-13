@@ -1,8 +1,9 @@
 import { For, Show } from "solid-js"
-import type { BackendStatus, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSubcommand, OAuthProviderStatus, OAuthStatusSnapshot, ProviderSecret } from "../../preload"
-import { groupedModelOptions, type ModelOption } from "../provider-availability"
+import type { BackendStatus, GrokBuildModelCatalog, GrokBuildUpdateStatus, OAuthProviderStatus, OAuthStatusSnapshot, ProviderSecret, GrokSubcommand } from "../../preload"
+import type { ModelOption } from "../provider-availability"
 import { SETTINGS_TABS, type AdvancedSettings, type SettingsTab } from "../settings-defaults"
 import { PageShell } from "./PageShell"
+import { ModelPicker } from "../ModelPicker"
 import grokBuildLogo from "../assets/grok-build-logo.png"
 
 function GroupedModelSelect(props: {
@@ -11,23 +12,7 @@ function GroupedModelSelect(props: {
   options: ModelOption[]
   onChange: (value: string) => void
 }) {
-  return <select value={props.value} onChange={(event) => props.onChange(event.currentTarget.value)}>
-    <option value="">{props.emptyLabel}</option>
-    <For each={groupedModelOptions(props.options)}>{(group) =>
-      <optgroup label={group.label}>
-        <For each={group.options}>{(entry) =>
-          <option value={entry.id} disabled={!entry.available}>{entry.available ? entry.label : `${entry.label} — ${entry.reason}`}</option>
-        }</For>
-      </optgroup>
-    }</For>
-  </select>
-}
-
-const safeToolCommand = (name: string) => {
-  if (["inspect", "doctor", "du"].includes(name)) return `${name} --json`
-  if (["mcp", "plugin", "sessions", "worktree"].includes(name)) return `${name} list`
-  if (["models", "version", "dashboard"].includes(name)) return name
-  return `${name} --help`
+  return <ModelPicker compact value={props.value} emptyLabel={props.emptyLabel} options={props.options} onChange={props.onChange} />
 }
 
 function oauthTone(row?: OAuthProviderStatus): "ok" | "warn" | "missing" {
@@ -260,7 +245,7 @@ export function SettingsPanel(props: {
             <div><strong>{provider.label}</strong><span>{provider.envKey}</span></div>
             <div class="provider-fields">
               <label>Base URL<input value={props.endpointDrafts[provider.id] || ""} onInput={(event) => props.onEndpointDraft(provider.id, event.currentTarget.value)} /></label>
-              <label>Model ID<input value={props.modelDrafts[provider.id] || ""} onInput={(event) => props.onModelDraft(provider.id, event.currentTarget.value)} placeholder="e.g. my-coding-model" /></label>
+              <label>Model ID<input value={props.modelDrafts[provider.id] || ""} onInput={(event) => props.onModelDraft(provider.id, event.currentTarget.value)} placeholder={provider.id === "nvidia-build" ? "nvidia/nemotron-3-ultra-550b-a55b" : "e.g. my-coding-model"} /></label>
               <button onClick={() => props.onSaveProvider(provider.id)}>Save endpoint</button>
             </div>
             <div class="token-row">
@@ -274,7 +259,7 @@ export function SettingsPanel(props: {
           </article>
         </Show>
       }</For>
-      <p class="telegram-note">API keys stay in the main process. The model picker is still populated by <code>grok models</code>.</p>
+      <p class="telegram-note">API keys stay in the main process. The model picker is populated by <code>grok models</code>. NVIDIA NIM models listed there are selectable; the desktop rewrites NIM's <code>usage: null</code> stream so Grok Build can parse it.</p>
     </Show>
 
     <Show when={props.tab === "advanced"}>
@@ -367,7 +352,7 @@ export function SettingsPanel(props: {
             </label>
             <label>Memory
               <select value={props.advanced.memory} onChange={(event) => props.onAdvanced("memory", event.currentTarget.value as AdvancedSettings["memory"])}>
-                <option value="default">DuckBot RAG primary</option>
+                <option value="default">Configured default</option>
                 <option value="experimental">Experimental cross-session memory</option>
                 <option value="disabled">Disable memory</option>
               </select>
@@ -397,9 +382,8 @@ export function SettingsPanel(props: {
           <div><strong>Advanced prompt and session input</strong><span>Prompt files, JSON content blocks, session UUIDs, and plan control.</span></div>
           <div class="advanced-settings-grid">
             <label>Prompt file<input value={props.advanced.promptFile} onInput={(event) => props.onAdvanced("promptFile", event.currentTarget.value)} placeholder="workspace prompt file path" /></label>
-            <label>New or forked session UUID<input value={props.advanced.sessionId} disabled={props.advanced.continueSession} onInput={(event) => props.onAdvanced("sessionId", event.currentTarget.value)} placeholder="optional UUID" /></label>
+            <label>New or forked session UUID<input value={props.advanced.sessionId} onInput={(event) => props.onAdvanced("sessionId", event.currentTarget.value)} placeholder="optional UUID" /></label>
             <label>Prompt JSON content blocks<textarea value={props.advanced.promptJson} onInput={(event) => props.onAdvanced("promptJson", event.currentTarget.value)} placeholder='[{"type":"text","text":"Task"}]' /></label>
-            <label class="settings-switch"><input type="checkbox" checked={props.advanced.continueSession} onChange={(event) => props.onAdvanced("continueSession", event.currentTarget.checked)} /><span />Continue latest Grok session (<code>--continue</code>)</label>
             <label class="settings-switch"><input type="checkbox" checked={props.advanced.noPlan} onChange={(event) => props.onAdvanced("noPlan", event.currentTarget.checked)} /><span />Disable plan mode (<code>--no-plan</code>)</label>
           </div>
         </div>
@@ -407,13 +391,12 @@ export function SettingsPanel(props: {
 
       <Show when={showCard("Grok backend toolbox", "mcp plugin sessions dashboard doctor du models version")}>
         <div class="settings-card">
-          <div><strong>Grok backend toolbox</strong><span>Live command catalog from the installed Grok Build CLI; safe presets remain available when the CLI is offline.</span></div>
+          <div><strong>Grok backend toolbox</strong><span>Native Grok Build subcommands: MCP, plugins, sessions, worktrees, doctor, disk usage, models, and the Agent Dashboard.</span></div>
           <div class="backend-tool-presets">
-            <For each={props.backendCommands.length ? props.backendCommands.map((entry) => entry.name) : ["inspect --json", "doctor --json", "du --json", "models", "version", "mcp list", "sessions list", "worktree list", "memory --help", "trace --help", "export --help", "completions --help", "setup --json", "dashboard"]}>{(command) =>
-              <button onClick={() => props.onRunBackendTool(props.backendCommands.length ? safeToolCommand(command) : command)}>{command}</button>
+            <For each={["inspect --json", "doctor --json", "du --json", "models", "version", "mcp list", "mcp doctor", "plugin list", "plugin marketplace list", "sessions list", "worktree list", "setup --json", "dashboard"]}>{(command) =>
+              <button onClick={() => props.onRunBackendTool(command)}>{command}</button>
             }</For>
           </div>
-          <Show when={props.backendCommands.length}><div class="provider-notice">Detected: {props.backendCommands.map((entry) => `${entry.name} — ${entry.description}`).join(" · ")}</div></Show>
           <div class="token-row">
             <input value={props.backendToolCommand} onInput={(event) => props.onBackendToolCommand(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") props.onRunBackendTool() }} placeholder="mcp list, plugin install URL, sessions search term…" />
             <button class="primary" disabled={props.backendToolRunning || !props.backendToolCommand.trim()} onClick={() => props.onRunBackendTool()}>{props.backendToolRunning ? "Running…" : "Run Grok tool"}</button>
