@@ -1503,6 +1503,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
                 <span class="coding-status-row__changes">{selectedProject()?.diffStat || `${selectedProject()?.changedFiles || 0} changed`}</span>
                 <button class="coding-status-row__action" onClick={() => void navigate("review")} title="Review changed files">Review</button>
                 <button class="coding-status-row__action" onClick={() => void toggleFilesRail()} title="Browse project files">Files</button>
+                <button class={`coding-status-row__action ${advanced().worktree ? "active" : ""}`} onClick={() => void updateAdvanced("worktree", !advanced().worktree)} title="Run the next task in an isolated Git worktree">{advanced().worktree ? "Isolated" : "Worktree"}</button>
               </div>
             </Show>
             <span class="composer-hint">⌘K palette · / commands · Grok Build edits this workspace</span>
