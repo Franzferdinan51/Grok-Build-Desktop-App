@@ -45,6 +45,7 @@ export function runGrokAcp(
       child = spawn(options.cli, args, {
         cwd: options.cwd,
         env: { ...process.env, XAI_API_KEY: undefined } as NodeJS.ProcessEnv,
+        shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(options.cli),
         stdio: ["pipe", "pipe", "pipe"],
       })
     } catch (error) {
