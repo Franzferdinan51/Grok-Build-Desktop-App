@@ -21,6 +21,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 ### Agentic coding workspace
 
 - Atomic per-conversation storage with sanitized rich Markdown, streamed output, collapsed reasoning, prompt queues, copy/retry actions, global search, rename, pin, archive, export, model/session labels, and cross-workspace history.
+- Persisted multi-session workspace view: keep a second saved conversation visible in a read-only pane for comparison or monitoring, then focus it when you are ready to work; execution remains serialized through the Grok Build backend.
 - Start in a persistent general-purpose Agent workspace, an isolated Scratch workspace, or an existing project.
 - Workspace file tree/editor, contained terminal with command history, Git review tree with highlighted diffs, and master-detail Skills/Scheduled pages.
 - Fixed header and composer with an independently scrolling chat transcript; every non-chat page, including the full Settings catalog, has its own reliable viewport scroll.
