@@ -945,6 +945,18 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await loadProject(scratch)
   }
 
+  const useExistingWorktree = async (worktree: GitWorktree) => {
+    if (!worktree.path || worktree.path === workspace()) return
+    const project = await window.api.projects.add(worktree.path)
+    setSelectedProject(project)
+    setWorkspace(project.path)
+    setProjects((current) => [project, ...current.filter((entry) => entry.id !== project.id)])
+    await window.api.store.set(STORE_KEYS.workspaceLast, project.path)
+    await loadProject(project)
+    setWorktreeOverviewOpen(false)
+    setSlashNotice(`Using ${worktree.branch || "detached"} worktree`)
+  }
+
   const maybeAutoLearn = async () => {
     if (!autoLearnEnabled() || !workspace()) return
     const key = `autoLearn.turns.${encodeURIComponent(workspace())}`
@@ -1511,7 +1523,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
                 <button class={`coding-status-row__action ${advanced().worktree ? "active" : ""}`} onClick={() => void updateAdvanced("worktree", !advanced().worktree)} title="Run the next task in an isolated Git worktree">{advanced().worktree ? "Isolated" : "Worktree"}</button>
                 <button class={`coding-status-row__action ${worktreeOverviewOpen() ? "active" : ""}`} onClick={() => { const next = !worktreeOverviewOpen(); setWorktreeOverviewOpen(next); if (next) void refreshGitWorktrees() }} title="Show linked Git worktrees">Worktrees {gitWorktrees().length}</button>
               </div>
-              <Show when={worktreeOverviewOpen()}><div class="worktree-overview" aria-label="Git worktrees"><For each={gitWorktrees()}>{(worktree) => <div class={worktree.isMain ? "worktree-overview__row worktree-overview__row--main" : "worktree-overview__row"}><span>{worktree.isMain ? "●" : worktree.detached ? "◇" : "⑂"}</span><strong>{worktree.branch || "detached"}</strong><code title={worktree.path}>{worktree.path}</code><small>{worktree.isMain ? "main checkout" : "linked worktree"}</small></div>}</For><Show when={!gitWorktrees().length}><span class="worktree-overview__empty">No worktrees detected.</span></Show></div></Show>
+              <Show when={worktreeOverviewOpen()}><div class="worktree-overview" aria-label="Git worktrees"><For each={gitWorktrees()}>{(worktree) => <div class={worktree.isMain ? "worktree-overview__row worktree-overview__row--main" : "worktree-overview__row"}><span>{worktree.isMain ? "●" : worktree.detached ? "◇" : "⑂"}</span><strong>{worktree.branch || "detached"}</strong><code title={worktree.path}>{worktree.path}</code><small>{worktree.isMain ? "main checkout" : "linked worktree"}</small><Show when={worktree.path !== workspace()}><button class="worktree-overview__use" onClick={() => void useExistingWorktree(worktree)}>Use</button></Show></div>}</For><Show when={!gitWorktrees().length}><span class="worktree-overview__empty">No worktrees detected.</span></Show></div></Show>
             </Show>
             <span class="composer-hint">⌘K palette · / commands · Grok Build edits this workspace</span>
           </div>
