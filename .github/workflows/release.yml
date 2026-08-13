@@ -43,7 +43,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: grok-build-desktop-${{ matrix.platform }}
-          path: ${{ matrix.artifact }}
+          path: |
+            packages/desktop/dist/*.dmg
+            packages/desktop/dist/*.zip
+            packages/desktop/dist/*.exe
+            packages/desktop/dist/*.blockmap
+            packages/desktop/dist/latest*.yml
           if-no-files-found: error
 
   publish:
