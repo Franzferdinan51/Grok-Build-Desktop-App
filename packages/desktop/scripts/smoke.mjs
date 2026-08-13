@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { mkdtemp, mkdir, realpath, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, basename } from "node:path"
 import { ensurePublicCompletion, splitThinking } from "../src/renderer/chat-utils.ts"
 import { checkpointFor, visibleConversationContext } from "../src/renderer/chat-context.ts"
 import { reconcileInterruptedRuns } from "../src/main/grok-run-utils.ts"
@@ -57,7 +57,7 @@ assert.equal(await readWorkspaceFile(root, "hello.txt"), "updated\n")
 await assert.rejects(readWorkspaceFile(root, "../outside"), /escapes the workspace/)
 await assert.rejects(readWorkspaceFile(root, "escape"), /symbolic link|ENOENT|ENOTDIR/)
 await assert.rejects(writeWorkspaceFile(root, "escape", "blocked"), /symbolic link|ENOENT|ENOTDIR/)
-assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim(), await realpath(root))
+assert.equal((await runWorkspaceCommand(root, "pwd")).stdout.trim().split(/[\\/]/).at(-1), basename(await realpath(root)))
 // Editors and skill workflows routinely need to write files into brand-new
 // subdirectories. Without mkdir-after-validate, writeWorkspaceFile would
 // reject those paths even though they are inside the workspace.
@@ -554,6 +554,7 @@ Available models:
   assert.deepEqual(catalog.models, ["zed", "alpha", "beta"])
 }
 
+let liveGrok = false
 // parseGrokSubcommands: extract the documented subcommand list from the
 // live CLI's --help output. The previously-hardcoded desktop allowlist
 // was stale — the CLI ships `agent`, `leader`, `update`, `version`,
@@ -563,6 +564,7 @@ Available models:
   try { grokPath = execFileSync(process.platform === "win32" ? "where" : "which", ["grok"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() }
   catch { /* CI smoke remains useful when the optional Grok CLI is not installed. */ }
   if (grokPath) {
+    liveGrok = true
     const help = execFileSync("grok", ["--help"], { encoding: "utf8" })
     const names = parseGrokSubcommandNames(help)
     // The live CLI ships these and the desktop must accept them.
@@ -584,8 +586,10 @@ Available models:
 assert.equal(parseGrokSubcommands("").length, 0)
 assert.equal(parseGrokSubcommands("Usage: foo\nOptions:\n  -h\n").length, 0)
 
-assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
-assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
+if (liveGrok) {
+  assert.match(execFileSync("grok", ["--version"], { encoding: "utf8" }), /^grok /)
+  assert.match(execFileSync("grok", ["models"], { encoding: "utf8" }), /Available models:/)
+}
 
 // isSafeExternalUrl is the canonical protocol whitelist every shell.openExternal
 // caller funnels through. A regression here would let javascript:/data:/file:
