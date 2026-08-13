@@ -1289,11 +1289,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.\nThis is iteration ${activeGoal.iterations + 1}. ${activeGoal.iterations > 0 ? "Previous iterations have already made progress; do not repeat completed work. Summarize what is left at the end of this turn." : "Start with the highest-leverage sub-task you can fully verify."}`
         : submitted
       const continueSession = !ephemeral && advanced().continueSession
-      const resumeSession = ephemeral || continueSession ? "" : sessionId()
       const activeThread = chatThreads().find((thread) => thread.id === activeThreadId())
       const recentContext = ephemeral || officialSlash ? "" : visibleConversationContext(priorMessages, activeThread?.summary)
+      const resumeSession = ephemeral || continueSession ? "" : sessionId()
       const withRecentContext = (instruction: string) => `## Recent conversation context\nContinue this workspace conversation without repeating completed work. Preserve decisions, unfinished tasks, and the user's intent.\n\n${recentContext}\n\n## Current instruction\n${instruction}`
-      if (!officialSlash && !resumeSession && recentContext) executionPrompt = withRecentContext(executionPrompt)
+      if (!officialSlash && !resumeSession && !continueSession && recentContext) executionPrompt = withRecentContext(executionPrompt)
       if (!ephemeral && !officialSlash && agentAppControls()) {
         executionPrompt += `\n\n## Desktop host controls\nYou may control safe app features by ending your response with one or more exact action tags. Use only when useful:\n<app_action>{"type":"preview.open"}</app_action>\n<app_action>{"type":"browser.open","url":"https://example.com"}</app_action>\n<app_action>{"type":"desktop.status"}</app_action>\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nThese actions are schema-validated by the host. Browser and desktop actions only count as successful when the host returns ok:true with observed state. Never place shell commands or secrets in an action.`
         if (previewOpen()) {
