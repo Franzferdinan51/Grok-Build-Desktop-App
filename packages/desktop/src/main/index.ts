@@ -11,7 +11,7 @@
  *  - Grok Build execution backend lifecycle
  */
 
-import { app, BrowserWindow, Menu, globalShortcut, screen, session } from "electron"
+import { app, BrowserWindow, Menu, dialog, globalShortcut, screen, session, type MessageBoxOptions } from "electron"
 import { registerIpcHandlers } from "./ipc"
 import { GrokBuildBackend } from "./grok-build-backend"
 import { TelegramBridge } from "./telegram"
@@ -27,6 +27,7 @@ import { buildAgentInput } from "./telegram/agent-input"
 import { acquireSingleInstanceLock, appIconPath, createMainWindow, createQuickEntryWindow, loadQuickEntryRenderer, loadRenderer, APP_NAME } from "./window-factory"
 import { installBundledSkills } from "./bundled-skills"
 import { DEFAULT_QUICK_ENTRY_ACCELERATOR, validateQuickEntryAccelerator } from "./quick-entry"
+import { quitPromptFor } from "./quit-guard"
 
 let mainWindow: BrowserWindow | null = null
 let quickEntryWindow: BrowserWindow | null = null
@@ -41,6 +42,8 @@ let telegramTaskCancelled = false
 let telegramRunningChat = ""
 let telegramTaskReserved = false
 let telegramDrainTimer: ReturnType<typeof setTimeout> | undefined
+let quitPromptOpen = false
+let quitConfirmedWithActiveWork = false
 const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
 const BROWSER_AGENT_PARTITION = "persist:grok-browser-agent"
 const BROWSER_AGENT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -265,7 +268,37 @@ app.on("window-all-closed", () => {
   }
 })
 
-app.on("before-quit", async () => {
+app.on("before-quit", async (event) => {
+  if (!quitConfirmedWithActiveWork && !quitPromptOpen) {
+    const prompt = quitPromptFor({ count: backend.isRunning() ? 1 : 0 })
+    if (prompt) {
+      event.preventDefault()
+      quitPromptOpen = true
+      const parent = BrowserWindow.getFocusedWindow() ?? mainWindow
+      const options: MessageBoxOptions = {
+        type: "question",
+        buttons: ["Keep Working", "Quit Anyway"],
+        defaultId: 0,
+        cancelId: 0,
+        message: prompt.message,
+        detail: prompt.detail
+      }
+      const promptPromise = parent && !parent.isDestroyed()
+        ? dialog.showMessageBox(parent, options)
+        : dialog.showMessageBox(options)
+      void promptPromise.then(({ response }) => {
+        quitPromptOpen = false
+        if (response === 1) {
+          quitConfirmedWithActiveWork = true
+          app.quit()
+        }
+      }).catch(() => {
+        quitPromptOpen = false
+      })
+      return
+    }
+  }
+
   writeLog("info", "App quitting — stopping Grok Build task")
   await backend.shutdown()
   scheduler.stop()
