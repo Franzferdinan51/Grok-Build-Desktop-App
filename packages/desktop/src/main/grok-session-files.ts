@@ -89,20 +89,9 @@ export function planTitle(markdown: string): string {
 }
 
 export function readSessionPlan(cwd: string, sessionId?: string, env: NodeJS.ProcessEnv = process.env): SessionPlan | null {
+  const requested = sessionId?.trim()
+  if (!requested) return null
   const group = sessionGroupDir(cwd, env)
   if (!group) return null
-  const requested = sessionId?.trim()
-  if (requested) {
-    const exact = planFromDir(join(group, requested), requested, cwd)
-    if (exact) return exact
-  }
-  let latest: SessionPlan | null = null
-  try {
-    for (const entry of readdirSync(group)) {
-      if (entry.startsWith(".")) continue
-      const candidate = planFromDir(join(group, entry), entry, cwd)
-      if (candidate && (!latest || candidate.updatedAt > latest.updatedAt)) latest = candidate
-    }
-  } catch { return latest }
-  return latest
+  return planFromDir(join(group, requested), requested, cwd)
 }

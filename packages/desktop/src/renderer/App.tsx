@@ -443,7 +443,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setChatThreads(stored)
     setActiveThreadId(selected?.id || "")
     setMessages(selectedFull?.messages || legacyMessages)
-    setSessionId(selectedFull?.sessionId || legacySession)
+    setSessionId(selectedFull?.sessionId || "")
     if (shouldPersistSelected && stored.length) await persistThreads(root, stored, selected?.id || stored[0].id)
     const savedSplitIds = parseDockedSessionIds(await window.api.store.get<string | string[]>(splitThreadKey(root)))
     const savedSplit = savedSplitIds.map((id) => stored.find((thread) => thread.id === id && thread.id !== selected?.id)).filter((thread): thread is ChatThread => Boolean(thread))
@@ -634,9 +634,17 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
   const goalKey = (root = workspace()) => `goal.${encodeURIComponent(root)}`
   const refreshSessionPlan = async (root = workspace(), grokSession = sessionId()) => {
-    if (!root) { setSessionPlan(null); return }
-    try { setSessionPlan(await window.api.backend.sessionPlan(root, grokSession || undefined)) }
-    catch { setSessionPlan(null) }
+    if (!root || !grokSession) { setSessionPlan(null); return }
+    try {
+      const plan = await window.api.backend.sessionPlan(root, grokSession)
+      setSessionPlan(plan?.sessionId === grokSession ? plan : null)
+    } catch { setSessionPlan(null) }
+  }
+  const visibleSessionPlan = () => {
+    const plan = sessionPlan()
+    const current = sessionId()
+    if (!plan?.markdown || !current || plan.sessionId !== current) return null
+    return plan
   }
   const loadGoal = async (root: string) => setGoal((await window.api.store.get<WorkspaceGoal>(goalKey(root))) ?? null)
   const saveGoal = async (next: WorkspaceGoal | null) => {
@@ -1678,9 +1686,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await refreshGitWorktrees(project.isGit ? project.path : "")
     if (active() === "skills") setSkills(await window.api.skills.list(project.path))
     if (active() === "workflows") setWorkflows(await window.api.backend.workflows(project.path))
+    setSessionPlan(null)
     await loadConversation(project.path)
     await loadGoal(project.path)
-    await refreshSessionPlan(project.path)
+    await refreshSessionPlan(project.path, sessionId())
   }
 
   const selectProject = async (project: ProjectSnapshot) => {
@@ -1793,7 +1802,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           </div>
         </section>
         <Show when={workspace() || contextRailMode()}><nav class="context-rail-tabs" aria-label="Session context rail"><span>Session tools</span><button class={contextRailMode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()}>Files</button><button class={contextRailMode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail}>Terminal</button><button class={contextRailMode() === "activity" ? "active" : ""} onClick={toggleActivityRail}>Activity</button><Show when={previewEnabled()}><button class={contextRailMode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>Preview</button></Show><Show when={selectedProject()?.isGit}><button class={contextRailMode() === "review" ? "active" : ""} onClick={() => void toggleReviewRail()}>Review</button></Show></nav></Show>
-        <Show when={planMode() || sessionPlan()?.markdown}><section class={`goal-banner ${planMode() ? "" : "goal-banner--completed"}`}><div><span>{planMode() ? "PLAN MODE" : "SAVED PLAN"}</span><strong>{sessionPlan()?.markdown?.split(/\r?\n/).find((line) => line.startsWith("#"))?.replace(/^#+\s*/, "") || (planMode() ? "Grok Build will explore and write plan.md before editing other files." : "Saved Grok Build plan")}</strong><small>{sessionPlan()?.sessionId || "No plan.md yet"}</small></div><div><Show when={sessionPlan()?.markdown}><button onClick={() => void executeSlashCommand("/view-plan")}>View</button></Show><Show when={sessionPlan()?.markdown}><button onClick={() => { setPlanMode(false); void window.api.store.set(STORE_KEYS.defaultsPlanMode, false); void run("Approve the saved plan.md and start implementing it.", { permissionMode: "auto", noPlan: true }) }}>Approve & build</button></Show><Show when={planMode()}><button onClick={() => void executeSlashCommand("/plan off")}>Exit plan</button></Show></div></section></Show>
+        <Show when={planMode() || visibleSessionPlan()}><section class={`goal-banner ${planMode() ? "" : "goal-banner--completed"}`}><div><span>{planMode() ? "PLAN MODE" : "SAVED PLAN"}</span><strong>{visibleSessionPlan()?.markdown?.split(/\r?\n/).find((line) => line.startsWith("#"))?.replace(/^#+\s*/, "") || (planMode() ? "Grok Build will explore and write plan.md before editing other files." : "Saved Grok Build plan")}</strong><small>{visibleSessionPlan()?.sessionId || (planMode() ? "No plan.md yet" : "")}</small></div><div><Show when={visibleSessionPlan()}><button onClick={() => void executeSlashCommand("/view-plan")}>View</button></Show><Show when={visibleSessionPlan()}><button onClick={() => { setPlanMode(false); void window.api.store.set(STORE_KEYS.defaultsPlanMode, false); void run("Approve the saved plan.md and start implementing it.", { permissionMode: "auto", noPlan: true }) }}>Approve & build</button></Show><Show when={planMode()}><button onClick={() => void executeSlashCommand("/plan off")}>Exit plan</button></Show></div></section></Show>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued{queueParked() ? " · parked" : ""}</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button disabled={Boolean(queueEdit()) && queueEdit()?.id !== entry.id} onClick={() => queueEdit()?.id === entry.id ? void saveQueuedEdit() : beginQueuedEdit(entry)}>{queueEdit()?.id === entry.id ? "Save" : "Edit"}</button><Show when={queueEdit()?.id === entry.id}><button onClick={cancelQueuedEdit}>Cancel</button></Show><button disabled={queueEdit()?.id === entry.id} onClick={() => void sendQueuedNow(entry.id)}>Send now</button><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For><Show when={queueParked()}><button onClick={() => void resumeParkedQueue()}>Resume queue</button></Show></section></Show>
         <Show when={splitOpen() && splitThreads().length}><ConversationSplitPane threads={splitThreads()} activeId={splitActiveId()} onSelect={setSplitActiveId} onClose={(id) => void closeSplitConversation(id)} onFocus={() => void focusSplitConversation()} /></Show>

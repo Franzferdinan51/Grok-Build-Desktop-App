@@ -13,7 +13,7 @@ test("encodeSessionCwd matches Grok's URL-encoded cwd groups", () => {
   assert.equal(encodeSessionCwd("/Users/duckets/Desktop/Grok-Build-Desktop-App"), "%2FUsers%2Fduckets%2FDesktop%2FGrok-Build-Desktop-App")
 })
 
-test("readSessionPlan prefers the requested session, then the newest plan.md", () => {
+test("readSessionPlan only returns the requested session's plan", () => {
   const home = mkdtempSync(join(tmpdir(), "grok-session-files-"))
   const cwd = "/tmp/demo-project"
   const group = join(home, "sessions", encodeSessionCwd(cwd))
@@ -26,11 +26,10 @@ test("readSessionPlan prefers the requested session, then the newest plan.md", (
   const requested = readSessionPlan(cwd, "old-session", grokEnv(home))
   assert.equal(requested?.sessionId, "old-session")
   assert.match(requested?.markdown || "", /Old plan/)
-
-  const latest = readSessionPlan(cwd, undefined, grokEnv(home))
-  assert.equal(latest?.sessionId, "new-session")
-  assert.equal(planTitle(latest?.markdown || ""), "New plan")
-  assert.deepEqual(latest?.todos, { todos: { "1": "write tests" } })
+  assert.equal(planTitle(requested?.markdown || ""), "Old plan")
+  assert.deepEqual(readSessionPlan(cwd, "new-session", grokEnv(home))?.todos, { todos: { "1": "write tests" } })
+  assert.equal(readSessionPlan(cwd, undefined, grokEnv(home)), null)
+  assert.equal(readSessionPlan(cwd, "missing-session", grokEnv(home)), null)
   assert.equal(sessionGroupDir(cwd, grokEnv(home)), group)
 })
 
