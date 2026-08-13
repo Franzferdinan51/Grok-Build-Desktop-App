@@ -260,6 +260,7 @@ pnpm sync:grok-upstream
 - NemoClaw/OpenShell is not installed or required. The Telegram policy layer preserves the existing Grok Build CLI and harness.
 - Search credentials and private SearXNG endpoints are read only from local configuration/environment and are never included in skills, README files, or commits.
 - The app does not automatically load or unload LM Studio models.
+- Conversation history can branch from a selected user instruction into a fresh Grok Build session while preserving the earlier visible turns and pre-filling the selected instruction for editing.
 
 ## Verification
 

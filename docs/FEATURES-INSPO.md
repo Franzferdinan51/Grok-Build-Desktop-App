@@ -50,6 +50,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 - **Terminal continuity:** the chat terminal rail reuses the existing workspace-only command bridge and output cap; it does not add a second shell or broaden command authority.
 - **Transient feedback:** lifecycle notifications are emitted by the existing run/queue path and auto-dismiss; the transcript and inspector remain the durable source of truth.
 - **Session continuity:** history entries can now be forked into a fresh Grok session while preserving the visible transcript as context.
+- **Message branching:** user turns expose **Branch**, which preserves the turns before that instruction, starts a new Grok session, and pre-fills the selected instruction for editing before it runs.
 
 ## Sources checked but not selected as a base
 
