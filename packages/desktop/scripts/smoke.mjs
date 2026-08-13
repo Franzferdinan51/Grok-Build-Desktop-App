@@ -78,8 +78,9 @@ assert.equal(await readWorkspaceFile(root, "src/components/Button.tsx"), "export
 // symlink resolves to a directory (symbolic link) or to a non-directory
 // target (ENOTDIR) — both correctly block the write.
 if (symlinkSmoke) await assert.rejects(writeWorkspaceFile(root, "escape/new.txt", "blocked"), /symbolic link|ENOTDIR|ENOENT/)
-assert.equal((await listWorkspaceFiles(root)).some((file) => file.path.startsWith("newdir/")), true)
-assert.equal((await listWorkspaceFiles(root)).some((file) => file.path.startsWith("src/")), true)
+const listedPaths = (await listWorkspaceFiles(root)).map((file) => file.path.replaceAll("\\\\", "/"))
+assert.equal(listedPaths.some((path) => path.startsWith("newdir/")), true)
+assert.equal(listedPaths.some((path) => path.startsWith("src/")), true)
 
 execFileSync("git", ["init", "-q"], { cwd: root })
 execFileSync("git", ["add", "hello.txt"], { cwd: root })
