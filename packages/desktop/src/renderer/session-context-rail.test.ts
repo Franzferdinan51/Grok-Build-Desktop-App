@@ -12,3 +12,10 @@ test("unavailable rails leave the current context untouched", () => {
   assert.equal(nextSessionRail(null, "preview", false), null)
   assert.equal(nextSessionRail("files", "preview", false), "files")
 })
+
+test("review follows the same single-context contract", () => {
+  assert.equal(nextSessionRail(null, "review", true), "review")
+  assert.equal(nextSessionRail("files", "review", true), "review")
+  assert.equal(nextSessionRail("review", "review", true), null)
+  assert.equal(nextSessionRail("files", "review", false), "files")
+})
