@@ -70,6 +70,9 @@ try {
   await earlier.click()
   await page.getByRole("button", { name: /Show 5 earlier messages/ }).waitFor({ state: "visible" })
   assert.equal(await page.locator(".chat-message").count(), 80)
+  await page.locator('button[title="Inspect current task"]').click()
+  await page.getByText("Prepared context", { exact: true }).waitFor({ state: "visible" })
+  await page.getByText("bounded app budget", { exact: true }).waitFor({ state: "visible" })
   console.log("Desktop UI smoke passed: isolated worktree dialog + paged long transcript")
 } finally {
   await app.close()
