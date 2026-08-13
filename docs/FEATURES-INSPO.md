@@ -51,6 +51,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 - **Transient feedback:** lifecycle notifications are emitted by the existing run/queue path and auto-dismiss; the transcript and inspector remain the durable source of truth.
 - **Session continuity:** history entries can now be forked into a fresh Grok session while preserving the visible transcript as context.
 - **Message branching:** user turns expose **Branch**, which preserves the turns before that instruction, starts a new Grok session, and pre-fills the selected instruction for editing before it runs.
+- **Structured activity:** the Task Inspector now groups bounded streamed output into expandable response, reasoning, and error rows, keeping the existing Grok phase indicator as the source of lifecycle truth.
 
 ## Sources checked but not selected as a base
 
