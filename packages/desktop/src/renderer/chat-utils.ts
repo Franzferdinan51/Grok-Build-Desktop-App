@@ -1,5 +1,10 @@
 export type TaskLog = { kind: "text" | "thought" | "error"; content: string }
 
+// Reasoning is useful as an optional diagnostic, not as a second transcript.
+// Keep the renderer and persisted chat responsive when a provider emits a very
+// long chain of internal updates or a MoA advisor returns a large explanation.
+export const MAX_CONSOLIDATED_REASONING_CHARS = 12_000
+
 const reasoningTag = /<(think|thinking|analysis|reasoning)>/i
 const reasoningBlock = /<(think|thinking|analysis|reasoning)>([\s\S]*?)(?:<\/\1>|$)/gi
 const closingReasoningTag = /<\/(?:think|thinking|analysis|reasoning)>/gi
@@ -48,9 +53,18 @@ export function splitThinking(logs: TaskLog[]): TaskLog[] {
     const first = thoughtIndexes[0]!
     const combined = thoughtIndexes.map((index) => parts[index]!.content).filter(Boolean).join("\n\n")
     const firstPart = parts[first]!
-    return parts.filter((_part, index) => !thoughtIndexes.includes(index) || index === first).map((part) => part === firstPart ? { kind: "thought", content: combined } : part)
+    return parts.filter((_part, index) => !thoughtIndexes.includes(index) || index === first).map((part) => part === firstPart ? { kind: "thought", content: boundReasoning(combined) } : part)
   }
-  return parts
+  return parts.map((part) => part.kind === "thought" ? { ...part, content: boundReasoning(part.content) } : part)
+}
+
+function boundReasoning(content: string): string {
+  if (content.length <= MAX_CONSOLIDATED_REASONING_CHARS) return content
+  const marker = "\n\n[… reasoning condensed …]\n\n"
+  const available = MAX_CONSOLIDATED_REASONING_CHARS - marker.length
+  const headLength = Math.floor(available * 0.7)
+  const tailLength = available - headLength
+  return `${content.slice(0, headLength)}${marker}${content.slice(-tailLength)}`
 }
 
 /** Always leave a visible completion message when a model only streams private reasoning. */
