@@ -54,6 +54,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 - **Plan decision gate:** the workbench waits for the session's `plan.md` before enabling decisions, then offers View plan, Approve & build, Revise plan, or Reject & dismiss. Only the explicit approval action starts implementation; revision remains plan-only.
 - **Session-attached review:** Git Review is available as a context overlay over the active chat, reusing the existing workspace-scoped diff and stage/unstage/discard actions instead of creating a second Git authority.
 - **Transcript navigation:** Duck-Agent's jump-to-bottom affordance is adapted to the Grok Build transcript with bounded scroll detection and no change to the streaming backend.
+- **Transcript rendering budget:** the newest 40 persisted messages render immediately; older turns remain available through explicit 40-message pages, reducing long-session DOM and Markdown work without losing history.
 - **Task-loss protection:** the Electron lifecycle now confirms before quitting an active Grok Build run, adapting Duck-Agent's pure quit-prompt decision pattern while keeping Grok Build as the sole execution runtime.
 - **Approval visibility:** the Task Inspector also reports the effective approval mode (automatic, interactive, plan-only, or no-prompts) from the existing Grok Build settings.
 - **Terminal continuity:** the chat terminal rail reuses the existing workspace-only command bridge and output cap; it does not add a second shell or broaden command authority.

@@ -40,7 +40,37 @@ try {
   assert.match(stdout, /qa\/ui-flow/)
   assert.match(stdout, /\.worktrees[\\/]qa-ui-flow/)
   assert.equal(await page.getByRole("dialog", { name: "Create Git worktree" }).count(), 0)
-  console.log("Worktree UI smoke passed: isolated dialog + real Git checkout")
+
+  const [project] = await page.evaluate(() => window.api.projects.list())
+  assert.ok(project?.path, "the fixture project should be registered")
+  const thread = {
+    id: "qa-transcript-window",
+    workspace: project.path,
+    title: "Transcript window fixture",
+    createdAt: Date.now() - 85_000,
+    updatedAt: Date.now(),
+    messages: Array.from({ length: 85 }, (_, index) => ({
+      id: `qa-message-${index}`,
+      role: index % 2 ? "assistant" : "user",
+      logs: [{ kind: "text", content: `Transcript fixture message ${index}` }],
+      createdAt: Date.now() - (85 - index) * 1000,
+    })),
+    sessionId: "",
+    sessionStatus: "new",
+  }
+  await page.evaluate(async ({ root, fixture }) => {
+    await window.api.conversations.save(fixture)
+    await window.api.store.set(`chat.active.${encodeURIComponent(root)}`, fixture.id)
+  }, { root: project.path, fixture: thread })
+  await page.reload()
+  await page.locator(".chat-header").waitFor({ state: "visible", timeout: 30_000 })
+  const earlier = page.getByRole("button", { name: /Show 40 earlier messages/ })
+  await earlier.waitFor({ state: "visible", timeout: 30_000 })
+  assert.equal(await page.locator(".chat-message").count(), 40)
+  await earlier.click()
+  await page.getByRole("button", { name: /Show 5 earlier messages/ }).waitFor({ state: "visible" })
+  assert.equal(await page.locator(".chat-message").count(), 80)
+  console.log("Desktop UI smoke passed: isolated worktree dialog + paged long transcript")
 } finally {
   await app.close()
   await rm(root, { recursive: true, force: true })

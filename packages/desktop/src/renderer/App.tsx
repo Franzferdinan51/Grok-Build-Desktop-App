@@ -10,6 +10,7 @@ import { checkpointFor, visibleConversationContext } from "./chat-context"
 import { validateAppActions } from "./app-actions"
 import { createConversationWriter } from "./conversation-save"
 import { artifactContextKey, STORE_KEYS, draftStoreKey, queueStoreKey } from "./store-keys"
+import { DEFAULT_TRANSCRIPT_PAGE_SIZE, expandTranscript, transcriptPage } from "./transcript-window"
 import { describePromptQueue, enqueuePrompt, parkThreadQueue, parsePromptQueue, promoteQueuedPrompt, removeQueuedPrompt, shouldAutoDrain, unparkThreadQueue, updateQueuedPrompt, type QueuedPrompt } from "./prompt-queue"
 import { composerDraftIsEmpty, composeDraftSnapshot, parseComposerDraft } from "./composer-draft"
 import { createWorkspaceRefreshScheduler, streamingEventMayMutateWorkspace } from "./workspace-events"
@@ -99,6 +100,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [active, setActive] = createSignal("new-task")
   const [events, setEvents] = createSignal<TaskLog[]>([])
   const [messages, setMessages] = createSignal<ChatMessage[]>([])
+  const [transcriptVisibleCount, setTranscriptVisibleCount] = createSignal(DEFAULT_TRANSCRIPT_PAGE_SIZE)
   const [sessionId, setSessionId] = createSignal("")
   const [chatThreads, setChatThreads] = createSignal<ChatThread[]>([])
   const [activeThreadId, setActiveThreadId] = createSignal("")
@@ -472,6 +474,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setChatThreads(stored)
     setActiveThreadId(selected?.id || "")
     setMessages(selectedFull?.messages || legacyMessages)
+    setTranscriptVisibleCount(DEFAULT_TRANSCRIPT_PAGE_SIZE)
     setSessionId(selectedFull?.sessionId || "")
     if (shouldPersistSelected && stored.length) await persistThreads(root, stored, selected?.id || stored[0].id)
     const savedSplitIds = parseDockedSessionIds(await window.api.store.get<string | string[]>(splitThreadKey(root)))
@@ -517,6 +520,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (root) await persistThreads(root, next, id)
     else { setChatThreads(next); setActiveThreadId(id) }
     setMessages([])
+    setTranscriptVisibleCount(DEFAULT_TRANSCRIPT_PAGE_SIZE)
     setSessionId("")
     if (root) { await window.api.store.set(conversationKey(root), []); await window.api.store.delete(sessionKey(root)) }
     setSessionPlan(null)
@@ -538,6 +542,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await loadGoal(thread.workspace)
     }
     setMessages(thread.messages)
+    setTranscriptVisibleCount(DEFAULT_TRANSCRIPT_PAGE_SIZE)
     setSessionId(thread.sessionId)
     await restoreQueue(thread.id)
     await restoreComposerDraft(thread.id)
@@ -676,6 +681,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     return plan
   }
   const loadGoal = async (root: string) => setGoal((await window.api.store.get<WorkspaceGoal>(goalKey(root))) ?? null)
+  const transcriptWindow = () => transcriptPage(messages().length, transcriptVisibleCount())
+  const visibleMessages = () => messages().slice(transcriptWindow().start)
+  const showEarlierMessages = () => setTranscriptVisibleCount((count) => expandTranscript(count))
   const saveGoal = async (next: WorkspaceGoal | null) => {
     setGoal(next)
     if (!workspace()) return
@@ -1960,7 +1968,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <div class="chat-messages" ref={messagesElement} onScroll={(event) => { const element = event.currentTarget; userNearBottom = isNearBottom(element.scrollHeight, element.scrollTop, element.clientHeight); setShowJumpToLatest(!userNearBottom) }}>
             <Show when={showJumpToLatest()}><button class="chat-jump-latest" onClick={jumpToLatest}>↓ Jump to latest</button></Show>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><img class="chat-empty__icon" src={UI_ICONS["new-task"]} alt="" /><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
-          <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? <img src={UI_ICONS["new-task"]} alt="" /> : "You"}</div><div class="chat-message__body"><For each={publicChatLogs(message.logs)}>{(entry) => <Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(publicChatLogs(message.logs).map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) void run(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show><Show when={message.role === "user"}><button disabled={running()} onClick={() => void branchFromMessage(message.id)} title="Create a fresh conversation from this instruction">Branch</button></Show></div></div></article>}</For>
+          <Show when={transcriptWindow().hidden > 0}><button class="chat-show-earlier" onClick={showEarlierMessages}>↑ Show {Math.min(DEFAULT_TRANSCRIPT_PAGE_SIZE, transcriptWindow().hidden)} earlier message{Math.min(DEFAULT_TRANSCRIPT_PAGE_SIZE, transcriptWindow().hidden) === 1 ? "" : "s"} <span>({transcriptWindow().hidden} remaining)</span></button></Show>
+          <For each={visibleMessages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? <img src={UI_ICONS["new-task"]} alt="" /> : "You"}</div><div class="chat-message__body"><For each={publicChatLogs(message.logs)}>{(entry) => <Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(publicChatLogs(message.logs).map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) void run(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show><Show when={message.role === "user"}><button disabled={running()} onClick={() => void branchFromMessage(message.id)} title="Create a fresh conversation from this instruction">Branch</button></Show></div></div></article>}</For>
         <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar"><img src={UI_ICONS["new-task"]} alt="" /></div><div class="chat-message__body"><Show when={publicChatLogs(events()).length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={publicChatLogs(events())}>{(entry) => <Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show>}</For></Show></div></article></Show>
             </Show>
           </div>
