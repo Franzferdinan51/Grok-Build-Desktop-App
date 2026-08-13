@@ -32,6 +32,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Global Quick Entry (`CommandOrControl+Shift+Space`) opens a secure, always-on-top composer from anywhere and routes submissions into the current or a new saved conversation.
 - Workspace file attachments let you select up to eight files from the project rail or drop known workspace files directly onto the composer; only files already returned by the safe workspace listing are accepted and their relative paths become explicit agent context.
 - Action-oriented Git Review now supports per-file stage/unstage controls, staged-diff inspection, and confirmed discard for tracked changes.
+- Git Review stays synchronized after a task settles, when the selected project changes, and when the app regains focus; the selected diff is retained when its file still exists.
 - Background task completion and failure also surface as native desktop notifications when the workbench is unfocused; clicking one restores the existing app window.
 - The Task Inspector includes a durable, per-workspace checklist for breaking work into explicit user-controlled steps alongside the active Grok Build goal.
 - The Task Inspector also shows verified backend phases for startup, advisor consultation, execution, recovery, completion, cancellation, and failure; phase labels come from the Grok Build bridge rather than UI guesses.

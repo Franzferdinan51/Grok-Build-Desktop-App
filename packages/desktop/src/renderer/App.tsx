@@ -37,6 +37,7 @@ import { ArtifactsPanel } from "./views/ArtifactsPanel"
 import { collectArtifacts, type ArtifactRecord } from "./artifact-utils"
 import { nextSessionRail, type SessionRailMode } from "./session-context-rail"
 import { isNearBottom } from "./scroll-position"
+import { preservedReviewPath } from "./review-sync"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
@@ -721,6 +722,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
     window.addEventListener("grok-attach-file", onAttachFile)
     onCleanup(() => window.removeEventListener("grok-attach-file", onAttachFile))
+    const refreshVisibleReview = () => {
+      if (document.visibilityState === "hidden" || contextRailMode() !== "review" || !selectedProject()?.isGit || !workspace()) return
+      void refreshDiff(workspace(), true)
+    }
+    window.addEventListener("focus", refreshVisibleReview)
+    document.addEventListener("visibilitychange", refreshVisibleReview)
+    onCleanup(() => window.removeEventListener("focus", refreshVisibleReview))
+    onCleanup(() => document.removeEventListener("visibilitychange", refreshVisibleReview))
     onCleanup(window.api.telegram.onChange(() => { void refreshTelegram(false) }))
     onCleanup(window.api.schedules.onEvent((event) => {
       setSchedules((current) => current.map((task) => task.id === event.taskId ? { ...task, running: event.status === "running", lastError: event.status === "failed" ? event.detail : undefined, lastStatus: event.status === "completed" ? "completed" : event.status === "failed" ? "failed" : task.lastStatus } : task))
@@ -1142,6 +1151,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         if (checkpoint && thread && nextMessages.length % 10 < 2) await updateThreadMeta(thread, { summary: checkpoint })
       }
       setEvents([])
+      if (!ephemeral && contextRailMode() === "review" && selectedProject()?.isGit && workspace()) await refreshDiff(workspace(), true)
     }
     setRuns(await window.api.grokRuns.list())
     setSkills(await window.api.skills.list(workspace()))
@@ -1309,7 +1319,27 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setTerminalOutput((old) => `${old}${error instanceof Error ? error.message : String(error)}\n[command failed]\n`)
     } finally { setTerminalRunning(false) }
   }
-  const refreshDiff = async (root = workspace()) => { if (root) { setGitChanges(await window.api.workspace.gitChanges(root)); setSelectedDiff(""); setDiffContent("") } }
+  let gitRefreshGeneration = 0
+  const refreshDiff = async (root = workspace(), preserveSelection = false) => {
+    if (!root) return
+    const generation = ++gitRefreshGeneration
+    const selected = selectedDiff()
+    const changes = await window.api.workspace.gitChanges(root)
+    if (generation !== gitRefreshGeneration || root !== workspace()) return
+    const nextSelected = preserveSelection ? preservedReviewPath(changes, selected) : ""
+    setGitChanges(changes)
+    setSelectedDiff(nextSelected)
+    if (!nextSelected) {
+      setDiffContent("")
+      return
+    }
+    try {
+      const diff = await window.api.workspace.gitDiff(root, nextSelected)
+      if (generation === gitRefreshGeneration && root === workspace() && nextSelected === selectedDiff()) setDiffContent(diff)
+    } catch {
+      if (generation === gitRefreshGeneration) setDiffContent("")
+    }
+  }
   const applyReviewAction = async (path: string, action: "stage" | "unstage" | "discard") => {
     if (!workspace()) return
     try {
@@ -1333,7 +1363,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     // prompts, or a half-finished typing indicator from the previous one.
     if (project.path !== workspace()) { setEvents([]); await replaceQueue([]) }
     if (active() === "workspace") await refreshFiles(project.path)
-    if (active() === "review") await refreshDiff(project.path)
+    if (active() === "review" || (contextRailMode() === "review" && project.isGit)) await refreshDiff(project.path)
     if (active() === "skills") setSkills(await window.api.skills.list(project.path))
     await loadConversation(project.path)
     await loadGoal(project.path)
