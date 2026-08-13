@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { droppedWorkspaceFiles, formatAttachedPrompt, MAX_ATTACHED_FILES, toggleAttachedFile } from "./attached-files.ts"
+import { appendPathText, droppedWorkspaceFiles, extractDroppedAbsolutePaths, formatAttachedPrompt, leftoverDroppedPaths, MAX_ATTACHED_FILES, serializeWorkspacePathPayload, toggleAttachedFile, WORKSPACE_PATHS_MIME } from "./attached-files.ts"
 
 const file = (path: string) => ({ path, size: 12 })
 
@@ -34,4 +34,25 @@ test("droppedWorkspaceFiles deduplicates paths and respects the attachment cap",
   const files = Array.from({ length: MAX_ATTACHED_FILES }, (_, index) => file(`src/${index}.ts`))
   const dropped = files.flatMap((entry) => [`/workspace/project/${entry.path}`, `/workspace/project/${entry.path}`])
   assert.deepEqual(droppedWorkspaceFiles("/workspace/project", dropped, files, MAX_ATTACHED_FILES - 2).map((entry) => entry.path), ["src/0.ts", "src/1.ts"])
+})
+
+test("droppedWorkspaceFiles accepts tree-relative workspace paths", () => {
+  const files = [file("src/App.tsx")]
+  assert.deepEqual(droppedWorkspaceFiles("/workspace/project", ["src/App.tsx"], files), [file("src/App.tsx")])
+})
+
+test("leftoverDroppedPaths treats outsiders as path text", () => {
+  const files = [file("src/App.tsx")]
+  assert.deepEqual(leftoverDroppedPaths("/workspace/project", ["/workspace/project/src/App.tsx", "/tmp/secret.png"], files), ["/tmp/secret.png"])
+  assert.equal(appendPathText("Fix this", ["/tmp/secret.png"]), "Fix this\n/tmp/secret.png")
+})
+
+test("extractDroppedAbsolutePaths reads tree payloads and Electron file paths", () => {
+  const payload = serializeWorkspacePathPayload([file("src/App.tsx")])
+  const transfer = {
+    types: [WORKSPACE_PATHS_MIME, "Files"],
+    getData: (type: string) => type === WORKSPACE_PATHS_MIME ? payload : "",
+    files: [{ name: "outside.txt", path: "/tmp/outside.txt" }],
+  } as unknown as DataTransfer
+  assert.deepEqual(extractDroppedAbsolutePaths(transfer, (entry) => entry.path || ""), ["src/App.tsx", "/tmp/outside.txt"])
 })

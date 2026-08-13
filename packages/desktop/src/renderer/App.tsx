@@ -9,8 +9,10 @@ import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
 import { checkpointFor, visibleConversationContext } from "./chat-context"
 import { validateAppActions } from "./app-actions"
 import { createConversationWriter } from "./conversation-save"
-import { artifactContextKey, STORE_KEYS, queueStoreKey } from "./store-keys"
-import { dequeuePrompt, describePromptQueue, enqueuePrompt, parsePromptQueue, removeQueuedPrompt, type QueuedPrompt } from "./prompt-queue"
+import { artifactContextKey, STORE_KEYS, draftStoreKey, queueStoreKey } from "./store-keys"
+import { describePromptQueue, enqueuePrompt, parkThreadQueue, parsePromptQueue, promoteQueuedPrompt, removeQueuedPrompt, shouldAutoDrain, unparkThreadQueue, updateQueuedPrompt, type QueuedPrompt } from "./prompt-queue"
+import { composerDraftIsEmpty, composeDraftSnapshot, parseComposerDraft } from "./composer-draft"
+import { createWorkspaceRefreshScheduler, streamingEventMayMutateWorkspace } from "./workspace-events"
 import { lastUserInstruction, rewindLastTurn } from "./conversation-lifecycle"
 import { buildPaletteItems, filterPaletteItems } from "./command-palette"
 import { catalogModelOptions, groupedModelOptions } from "./provider-availability"
@@ -23,7 +25,7 @@ import { TaskInspector } from "./TaskInspector"
 import { NotificationStack, type DesktopNotification } from "./NotificationStack"
 import { ChatTerminalRail } from "./ChatTerminalRail"
 import { ConversationSplitPane } from "./ConversationSplitPane"
-import { droppedWorkspaceFiles, formatAttachedPrompt, toggleAttachedFile } from "./attached-files"
+import { appendPathText, droppedWorkspaceFiles, dropLooksLikeFiles, extractDroppedAbsolutePaths, leftoverDroppedPaths, formatAttachedPrompt, toggleAttachedFile } from "./attached-files"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
 import { WorkspacePanel } from "./views/WorkspacePanel"
 import { TerminalPanel } from "./views/TerminalPanel"
@@ -117,6 +119,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [sessionSwitcherIndex, setSessionSwitcherIndex] = createSignal(0)
   const [sessionSwitcherNotice, setSessionSwitcherNotice] = createSignal("")
   const [queuedPrompts, setQueuedPrompts] = createSignal<QueuedPrompt[]>([])
+  const [parkedThreadIds, setParkedThreadIds] = createSignal<Set<string>>(new Set())
+  const [queueEdit, setQueueEdit] = createSignal<{ id: string; draft: string; attachments: WorkspaceFile[] } | null>(null)
   const [paletteOpen, setPaletteOpen] = createSignal(false)
   const [paletteQuery, setPaletteQuery] = createSignal("")
   const [paletteSelection, setPaletteSelection] = createSignal(0)
@@ -240,6 +244,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   let backendWasAvailable = false
   let userNearBottom = true
   let notificationId = 0
+  let draftPersistTimer = 0
+  let draftPersistThreadId = ""
+  let workspaceRefresh = createWorkspaceRefreshScheduler(() => {})
   const announce = (kind: DesktopNotification["kind"], title: string, message: string) => {
     const id = ++notificationId
     setNotifications((current) => [...current.slice(-2), { id, kind, title, message }])
@@ -351,6 +358,70 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setQueuedPrompts(queue)
     await persistQueue(queue)
   }
+  const persistComposerDraft = async (threadId: string, text: string, attachments: WorkspaceFile[]) => {
+    if (!threadId) return
+    const draft = composeDraftSnapshot(text, attachments)
+    if (composerDraftIsEmpty(draft)) await window.api.store.delete(draftStoreKey(threadId))
+    else await window.api.store.set(draftStoreKey(threadId), draft)
+  }
+  const restoreComposerDraft = async (threadId?: string) => {
+    if (!threadId) { setPrompt(""); setAttachedFiles([]); return }
+    const draft = parseComposerDraft(await window.api.store.get(draftStoreKey(threadId)))
+    setPrompt(draft.text)
+    setAttachedFiles(draft.attachments)
+    draftPersistThreadId = threadId
+  }
+  const stashComposerDraft = async (threadId = activeThreadId()) => {
+    if (!threadId) return
+    window.clearTimeout(draftPersistTimer)
+    const editing = queueEdit()
+    if (editing) {
+      await persistComposerDraft(threadId, editing.draft, editing.attachments)
+      setQueueEdit(null)
+      return
+    }
+    await persistComposerDraft(threadId, prompt(), attachedFiles())
+  }
+  const queueParked = () => parkedThreadIds().has(activeThreadId())
+  const parkActiveQueue = () => setParkedThreadIds((current) => parkThreadQueue(current, activeThreadId(), queuedPrompts().length))
+  const unparkActiveQueue = () => setParkedThreadIds((current) => unparkThreadQueue(current, activeThreadId()))
+  createEffect(() => {
+    const text = prompt()
+    const attachments = attachedFiles()
+    const threadId = activeThreadId()
+    if (!threadId || queueEdit() || historyIndex() !== -1) return
+    if (threadId !== draftPersistThreadId) {
+      draftPersistThreadId = threadId
+      return
+    }
+    window.clearTimeout(draftPersistTimer)
+    draftPersistTimer = window.setTimeout(() => { void persistComposerDraft(threadId, text, attachments) }, 400)
+  })
+  const cancelQueuedEdit = () => {
+    const editing = queueEdit()
+    if (!editing) return
+    setPrompt(editing.draft)
+    setAttachedFiles(editing.attachments)
+    setQueueEdit(null)
+    setHistoryIndex(-1)
+  }
+  const beginQueuedEdit = (entry: QueuedPrompt) => {
+    if (queueEdit()) return
+    setQueueEdit({ id: entry.id, draft: prompt(), attachments: attachedFiles() })
+    setPrompt(entry.text)
+    setAttachedFiles([])
+    setHistoryIndex(-1)
+  }
+  const saveQueuedEdit = async () => {
+    const editing = queueEdit()
+    if (!editing) return
+    const next = prompt().trim()
+    if (!next) return
+    await replaceQueue(updateQueuedPrompt(queuedPrompts(), editing.id, next))
+    setPrompt(editing.draft)
+    setAttachedFiles(editing.attachments)
+    setQueueEdit(null)
+  }
   const loadConversation = async (root: string) => {
     let stored = await window.api.conversations.list(root) as ChatThread[]
     const settingsThreads = (await window.api.store.get<ChatThread[]>(threadsKey(root))) ?? []
@@ -378,6 +449,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setSplitActiveId(savedSplit[0]?.id || "")
     setSplitOpen(Boolean(savedSplit.length))
     await restoreQueue(selected?.id)
+    await restoreComposerDraft(selected?.id)
     await restoreArtifactContext(root, selected?.id)
     setHistoryIndex(-1); setHistoryDraft("")
   }
@@ -406,6 +478,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     void refreshSessionPlan(root, nextSessionId)
   }
   const newConversation = async () => {
+    await stashComposerDraft()
     const root = workspace()
     const id = crypto.randomUUID()
     const now = Date.now()
@@ -418,12 +491,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setSessionPlan(null)
     setEvents([])
     await replaceQueue([])
+    setPrompt(""); setAttachedFiles([]); setQueueEdit(null)
     setHistoryOpen(false)
   }
   const openConversation = async (entry: ChatThread | StoredChatSummary) => {
     if (running()) return
     const thread = "messageCount" in entry ? await window.api.conversations.get(entry.id) : entry
     if (!thread) return
+    await stashComposerDraft()
     if (thread.workspace && thread.workspace !== workspace()) {
       setWorkspace(thread.workspace)
       setSelectedProject(projects().find((project) => project.path === thread.workspace) || null)
@@ -434,6 +509,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setMessages(thread.messages)
     setSessionId(thread.sessionId)
     await restoreQueue(thread.id)
+    await restoreComposerDraft(thread.id)
     setEvents([]); setHistoryOpen(false)
     const root = thread.workspace || workspace()
     if (root) {
@@ -697,7 +773,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     else if (command.name === "preview") {
       const next = setToggle(parsed.args, previewOpen()); setPreviewEnabled(true); setPreviewOpen(next)
       await window.api.store.set(STORE_KEYS.previewEnabled, true); setSlashNotice(`Preview ${next ? "opened" : "closed"}`)
-    } else if (command.name === "stop") { await window.api.backend.cancel(); setSlashNotice("Stop requested") }
+    } else if (command.name === "stop") { parkActiveQueue(); await window.api.backend.cancel(); setSlashNotice(queuedPrompts().length ? "Stop requested. Queued work is parked until you send one or tap Resume queue." : "Stop requested") }
     else if (command.name === "retry") {
       const instruction = lastUserInstruction(messages())
       if (!instruction) setSlashNotice("No previous user instruction to retry")
@@ -801,6 +877,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
 
   onMount(async () => {
+    workspaceRefresh = createWorkspaceRefreshScheduler(() => { void refreshAttachedWorkspaceViews() })
+    onCleanup(() => workspaceRefresh.dispose())
+    const flushComposerDraft = () => {
+      const editing = queueEdit()
+      void persistComposerDraft(activeThreadId(), editing?.draft ?? prompt(), editing?.attachments ?? attachedFiles())
+    }
+    window.addEventListener("pagehide", flushComposerDraft)
+    onCleanup(() => window.removeEventListener("pagehide", flushComposerDraft))
     const onAttachFile = (event: Event) => {
       const path = (event as CustomEvent<string>).detail
       const file = files().find((entry) => entry.path === path)
@@ -952,6 +1036,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       }
       if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
       if (event.type === "cancelled") queueBackendEvent({ kind: "text", content: event.data || "Task cancelled." })
+      if (streamingEventMayMutateWorkspace(event as unknown as Record<string, unknown>)) workspaceRefresh.notify()
     })
     const unsubscribeQuickEntry = window.api.onQuickEntrySubmit((payload) => {
       if (payload.target === "new") void newConversation().then(() => void run(payload.text))
@@ -975,6 +1060,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       } else if (event.key === "Escape" && sessionSwitcherOpen()) {
         event.preventDefault()
         setSessionSwitcherOpen(false)
+      } else if (event.key === "Escape" && queueEdit()) {
+        event.preventDefault()
+        cancelQueuedEdit()
       }
     }
     window.addEventListener("keydown", onGlobalKey)
@@ -1056,15 +1144,15 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       })
   }
 
-  const composerHasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes("Files")
   const handleComposerDragEnter = (event: DragEvent) => {
-    if (!workspace() || !composerHasFiles(event)) return
+    if (!workspace() || !dropLooksLikeFiles(event.dataTransfer)) return
     event.preventDefault()
     setComposerDropActive(true)
+    if (!files().length) void refreshFiles()
   }
   const handleComposerDragOver = (event: DragEvent) => {
     const transfer = event.dataTransfer
-    if (!workspace() || !transfer || !composerHasFiles(event)) return
+    if (!workspace() || !transfer || !dropLooksLikeFiles(transfer)) return
     event.preventDefault()
     transfer.dropEffect = "copy"
     setComposerDropActive(true)
@@ -1075,34 +1163,43 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
   const handleComposerDrop = (event: DragEvent) => {
     const transfer = event.dataTransfer
-    if (!workspace() || !transfer || !composerHasFiles(event)) return
+    if (!workspace() || !transfer || !dropLooksLikeFiles(transfer)) return
     event.preventDefault()
     setComposerDropActive(false)
-    const paths = Array.from(transfer.files).map((file) => (file as File & { path?: string }).path).filter((path): path is string => Boolean(path))
+    const paths = extractDroppedAbsolutePaths(transfer, (file) => {
+      try { return window.api.workspace.pathForFile(file) }
+      catch { return file.path || "" }
+    })
     const accepted = droppedWorkspaceFiles(workspace(), paths, files(), attachedFiles().length)
-    if (!accepted.length) {
-      setSlashNotice(paths.length ? "Only known files inside the selected workspace can be attached." : "Drop a workspace file from the file system or project tree.")
-      return
-    }
-    setAttachedFiles((current) => accepted.reduce((next, file) => toggleAttachedFile(next, file), current))
-    setSlashNotice(`${accepted.length} workspace file${accepted.length === 1 ? "" : "s"} attached.`)
+    const leftovers = leftoverDroppedPaths(workspace(), paths, files())
+    if (accepted.length) setAttachedFiles((current) => accepted.reduce((next, file) => toggleAttachedFile(next, file), current))
+    if (leftovers.length) setPrompt((current) => appendPathText(current, leftovers))
+    if (!accepted.length && leftovers.length) setSlashNotice("Outside-workspace paths were added as text.")
+    else if (accepted.length) setSlashNotice(`${accepted.length} workspace file${accepted.length === 1 ? "" : "s"} attached.`)
+    else setSlashNotice(paths.length ? "Only known files inside the selected workspace can be attached." : "Drop a workspace file from the file system or project tree.")
   }
 
-  const run = async (requested?: string, options?: { ephemeral?: boolean; modelOverride?: string; permissionMode?: AdvancedSettings["permissionMode"]; noPlan?: boolean; officialSlash?: boolean }): Promise<TaskLog[]> => {
+  const run = async (requested?: string, options?: { ephemeral?: boolean; modelOverride?: string; permissionMode?: AdvancedSettings["permissionMode"]; noPlan?: boolean; officialSlash?: boolean; fromQueue?: boolean }): Promise<TaskLog[]> => {
     const rawSubmitted = (requested ?? prompt()).trim()
     const ephemeral = options?.ephemeral === true
+    const fromQueue = options?.fromQueue === true
     if (!rawSubmitted) return []
-    if (!ephemeral && await executeSlashCommand(rawSubmitted)) return []
-    const submitted = formatAttachedPrompt(rawSubmitted, attachedFiles())
-    setAttachedFiles([])
+    if (!ephemeral && !fromQueue && await executeSlashCommand(rawSubmitted)) return []
+    const submitted = fromQueue ? rawSubmitted : formatAttachedPrompt(rawSubmitted, attachedFiles())
+    if (!fromQueue) {
+      setAttachedFiles([])
+      void persistComposerDraft(activeThreadId(), "", [])
+    }
     if (running()) {
       if (ephemeral) return [{ kind: "error", content: "Grok is already running another task." }]
       await replaceQueue(enqueuePrompt(queuedPrompts(), submitted, crypto.randomUUID()))
-      setPrompt(""); setHistoryIndex(-1)
+      unparkActiveQueue()
+      if (!fromQueue) { setPrompt(""); setHistoryIndex(-1) }
       announce("info", "Task queued", "Grok Build will start this instruction when the active run finishes.")
       return []
     }
-    setPrompt(""); setEvents([]); setRunning(true)
+    if (!fromQueue) setPrompt("")
+    setEvents([]); setRunning(true)
     if (!ephemeral) announce("info", "Task started", "Grok Build is working in the selected workspace.")
     let completedLogs: TaskLog[] = []
     try {
@@ -1264,13 +1361,36 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setSkills(await window.api.skills.list(workspace()))
     if (!ephemeral) await refreshSessionPlan(workspace(), sessionId())
     if (!ephemeral && !submitted.startsWith("[/learn]")) await maybeAutoLearn()
-    const drained = ephemeral ? undefined : dequeuePrompt(queuedPrompts())
-    const queued = drained?.next
-    if (queued) {
-      await replaceQueue(drained.remaining)
-      queueMicrotask(() => void run(queued.text))
+    const skipId = queueEdit()?.id
+    const nextQueued = ephemeral || !shouldAutoDrain({ isBusy: false, parked: queueParked(), queueLength: queuedPrompts().length })
+      ? undefined
+      : queuedPrompts().find((entry) => entry.id !== skipId)
+    if (nextQueued) {
+      await replaceQueue(removeQueuedPrompt(queuedPrompts(), nextQueued.id))
+      queueMicrotask(() => void run(nextQueued.text, { fromQueue: true }))
     }
     return completedLogs
+  }
+  const sendQueuedNow = async (id: string) => {
+    if (queueEdit()?.id === id) return
+    const entry = queuedPrompts().find((item) => item.id === id)
+    if (!entry) return
+    unparkActiveQueue()
+    if (running()) {
+      await replaceQueue(promoteQueuedPrompt(queuedPrompts(), id))
+      await window.api.backend.cancel()
+      return
+    }
+    await replaceQueue(removeQueuedPrompt(queuedPrompts(), id))
+    void run(entry.text, { fromQueue: true })
+  }
+  const resumeParkedQueue = async () => {
+    unparkActiveQueue()
+    if (running() || !queuedPrompts().length) return
+    const next = queuedPrompts()[0]
+    if (!next) return
+    await replaceQueue(removeQueuedPrompt(queuedPrompts(), next.id))
+    void run(next.text, { fromQueue: true })
   }
 
   const browsePromptHistory = (direction: -1 | 1) => {
@@ -1357,6 +1477,23 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setCustomName(""); setCustomURL(""); setCustomModel("")
   }
   const refreshFiles = async (root = workspace()) => { if (root) setFiles(await window.api.workspace.files(root)) }
+  const refreshAttachedWorkspaceViews = async () => {
+    const wantFiles = filesOpen() || contextRailMode() === "files" || active() === "workspace"
+    const wantReview = contextRailMode() === "review" || active() === "review"
+    if (!wantFiles && !wantReview) return
+    if (wantFiles) {
+      await refreshFiles()
+      if (openFile() && fileNotice() !== "Modified" && workspace()) {
+        try { setFileContent(await window.api.workspace.read(workspace(), openFile())) } catch { /* keep the last readable buffer */ }
+      }
+    }
+    if (wantReview) await refreshDiff(workspace(), true)
+    const snapshots = await window.api.projects.list()
+    if (!snapshots.length) return
+    setProjects(snapshots)
+    const current = selectedProject()
+    if (current) setSelectedProject(snapshots.find((project) => project.path === current.path) || current)
+  }
   const refreshGitWorktrees = async (root = workspace()) => { if (root) setGitWorktrees(await window.api.workspace.gitWorktrees(root)); else setGitWorktrees([]) }
   const selectFile = async (path: string) => { setOpenFile(path); setFileContent(await window.api.workspace.read(workspace(), path)); setFileNotice(""); await saveArtifactContext({ selectedPath: path }) }
   const applyContextRail = (next: ContextRailMode | null) => {
@@ -1598,7 +1735,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={workspace() || contextRailMode()}><nav class="context-rail-tabs" aria-label="Session context rail"><span>Session tools</span><button class={contextRailMode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()}>Files</button><button class={contextRailMode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail}>Terminal</button><button class={contextRailMode() === "activity" ? "active" : ""} onClick={toggleActivityRail}>Activity</button><Show when={previewEnabled()}><button class={contextRailMode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>Preview</button></Show><Show when={selectedProject()?.isGit}><button class={contextRailMode() === "review" ? "active" : ""} onClick={() => void toggleReviewRail()}>Review</button></Show></nav></Show>
         <Show when={planMode() || sessionPlan()?.markdown}><section class={`goal-banner ${planMode() ? "" : "goal-banner--completed"}`}><div><span>{planMode() ? "PLAN MODE" : "SAVED PLAN"}</span><strong>{sessionPlan()?.markdown?.split(/\r?\n/).find((line) => line.startsWith("#"))?.replace(/^#+\s*/, "") || (planMode() ? "Grok Build will explore and write plan.md before editing other files." : "Saved Grok Build plan")}</strong><small>{sessionPlan()?.sessionId || "No plan.md yet"}</small></div><div><Show when={sessionPlan()?.markdown}><button onClick={() => void executeSlashCommand("/view-plan")}>View</button></Show><Show when={sessionPlan()?.markdown}><button onClick={() => { setPlanMode(false); void window.api.store.set(STORE_KEYS.defaultsPlanMode, false); void run("Approve the saved plan.md and start implementing it.", { permissionMode: "auto", noPlan: true }) }}>Approve & build</button></Show><Show when={planMode()}><button onClick={() => void executeSlashCommand("/plan off")}>Exit plan</button></Show></div></section></Show>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
-        <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For></section></Show>
+        <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued{queueParked() ? " · parked" : ""}</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button disabled={Boolean(queueEdit()) && queueEdit()?.id !== entry.id} onClick={() => queueEdit()?.id === entry.id ? void saveQueuedEdit() : beginQueuedEdit(entry)}>{queueEdit()?.id === entry.id ? "Save" : "Edit"}</button><Show when={queueEdit()?.id === entry.id}><button onClick={cancelQueuedEdit}>Cancel</button></Show><button disabled={queueEdit()?.id === entry.id} onClick={() => void sendQueuedNow(entry.id)}>Send now</button><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For><Show when={queueParked()}><button onClick={() => void resumeParkedQueue()}>Resume queue</button></Show></section></Show>
         <Show when={splitOpen() && splitThreads().length}><ConversationSplitPane threads={splitThreads()} activeId={splitActiveId()} onSelect={setSplitActiveId} onClose={(id) => void closeSplitConversation(id)} onFocus={() => void focusSplitConversation()} /></Show>
         <section class={`chat-composer chat-composer--docked ${composerDropActive() ? "chat-composer--drop-active" : ""}`} aria-label="Grok Build task composer" onDragEnter={handleComposerDragEnter} onDragOver={handleComposerDragOver} onDragLeave={handleComposerDragLeave} onDrop={handleComposerDrop}>
           <Show when={composerDropActive()}><div class="chat-drop-overlay" aria-live="polite"><span>Drop workspace files to attach</span></div></Show>
@@ -1639,7 +1776,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
               }</For>
             </select>
             <button class="composer-send" disabled={!prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (Enter)" : "Send (Enter)"}>{running() ? "+" : "↑"}</button>
-            <Show when={running()}><button class="composer-stop" onClick={() => window.api.backend.cancel()} title="Stop current task"><span /></button></Show>
+            <Show when={running()}><button class="composer-stop" onClick={() => { parkActiveQueue(); void window.api.backend.cancel() }} title="Stop current task"><span /></button></Show>
           </div>
         </section>
         </div><Show when={terminalRailOpen()}><ChatTerminalRail workspace={workspace()} command={terminalCommand()} output={terminalOutput()} running={terminalRunning()} onCommand={setTerminalCommand} onRun={() => void runCommand()} onClear={() => setTerminalOutput("")} /></Show><Show when={inspectorOpen()}><TaskInspector running={running()} events={events()} goal={goal()} queuedCount={queuedPrompts().length} model={model() || catalog().defaultModel || ""} workspace={workspace()} approvalMode={autoApprove() && !planMode() ? "Automatic" : planMode() || advanced().permissionMode === "plan" ? "Plan only" : advanced().permissionMode === "dontAsk" ? "No prompts" : "Interactive"} runs={runs()} onStop={() => void window.api.backend.cancel()} onOpenRuns={() => void navigate("runs")} /></Show><Show when={filesOpen()}><aside class={`project-files-rail ${filesRailCollapsed() ? "project-files-rail--collapsed" : ""}`} aria-label="Project files"><header><div><strong>Project files</strong><span>{selectedProject()?.name || "Scratch"} · {files().length} files</span></div><div class="project-files-actions"><button onClick={() => void refreshFiles()} title="Refresh project files">↻</button><button onClick={() => setFilesRailCollapsed((value) => !value)} title={filesRailCollapsed() ? "Expand files" : "Collapse files"}>{filesRailCollapsed() ? "›" : "‹"}</button><button onClick={() => setFilesOpen(false)} title="Close project files">×</button></div></header><Show when={!filesRailCollapsed()}><div class="project-files-search"><input value={fileSearch()} onInput={(event) => setFileSearch(event.currentTarget.value)} placeholder="Filter files…" aria-label="Filter project files" /></div><div class="project-files-list"><Show when={files().length} fallback={<div class="project-files-empty"><span>▤</span><strong>No files loaded</strong><p>Refresh this project to browse its files.</p><button onClick={() => void refreshFiles()}>Load files</button></div>}><div class="project-files-tree"><ProjectFileTree files={files()} query={fileSearch()} activePath={openFile()} onSelect={(path) => { void selectFile(path); setActive("workspace") }} onPreview={previewFile} /></div><For each={files().filter((file) => file.path.toLowerCase().includes(fileSearch().toLowerCase()))}>{(file) => <button class={`project-file ${openFile() === file.path ? "active" : ""}`} onClick={() => { void selectFile(file.path); setActive("workspace") }}><span class="project-file__icon">{file.path.match(/\.(tsx?|jsx?|css|json|md)$/i) ? "◇" : "□"}</span><span class="project-file__path">{file.path}</span><small>{file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`}</small></button>}</For></Show></div><footer><span>Click a file to open it in Workspace</span><button onClick={() => { setFilesOpen(false); setActive("workspace") }}>Open editor</button></footer></Show></aside></Show><Show when={previewEnabled() && previewOpen()}><aside class={`preview-rail ${previewCollapsed() ? "preview-rail--collapsed" : ""}`}><header><div><strong>Preview</strong><span>{previewStatus()}</span></div><div class="preview-actions"><button onClick={async () => { const next = !previewCollapsed(); setPreviewCollapsed(next); await window.api.store.set(STORE_KEYS.layoutPreviewCollapsed, next) }} title={previewCollapsed() ? "Expand preview" : "Collapse preview"}>{previewCollapsed() ? "‹" : "›"}</button><Show when={!previewCollapsed()}><button class={previewDevice() === "desktop" ? "active" : ""} onClick={() => setPreviewDevice("desktop")} title="Desktop">▰</button><button class={previewDevice() === "tablet" ? "active" : ""} onClick={() => setPreviewDevice("tablet")} title="Tablet">▯</button><button class={previewDevice() === "mobile" ? "active" : ""} onClick={() => setPreviewDevice("mobile")} title="Mobile">▯</button><button onClick={() => setPreviewReload((value) => value + 1)} title="Reload">↻</button><button onClick={() => window.api.app.openExternal(previewURL())} title="Open in browser">↗</button></Show><button onClick={() => setPreviewOpen(false)} title="Close preview">×</button></div></header><Show when={!previewCollapsed()}><div class="preview-location"><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} onKeyDown={async (event) => { if (event.key === "Enter") { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set(STORE_KEYS.previewUrl, value) } } }} /><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set(STORE_KEYS.previewUrl, value) } }}>Go</button></div><div class={`preview-viewport preview-viewport--${previewDevice()}`}><iframe src={`${previewURL()}${previewURL().includes("?") ? "&" : "?"}grok-preview-reload=${previewReload()}`} title="Coding preview" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-presentation allow-downloads" onLoad={() => setPreviewStatus("Connected")} /></div></Show></aside></Show></div>

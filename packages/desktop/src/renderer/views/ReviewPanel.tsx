@@ -21,8 +21,13 @@ export function ReviewPanel(props: {
   const [mode, setMode] = createSignal<"tree" | "list">("tree")
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set())
 
-  createEffect(() => {
-    setExpanded(new Set(defaultReviewExpanded(props.changes, query())))
+  createEffect((previous?: { query: string; workspace: string }) => {
+    const currentQuery = query()
+    const root = props.workspace
+    if (!previous || previous.query !== currentQuery || previous.workspace !== root) {
+      setExpanded(new Set(defaultReviewExpanded(props.changes, currentQuery)))
+    }
+    return { query: currentQuery, workspace: root }
   })
 
   const summary = createMemo(() => summarizeReview(props.changes))
