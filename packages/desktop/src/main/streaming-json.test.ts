@@ -15,6 +15,13 @@ test("parseStreamLine accepts SSE data: prefixes used by some provider bridges",
   assert.equal(event?.data, "planning")
 })
 
+test("parseStreamLine preserves typed backend phase metadata", () => {
+  const [event] = parseStreamLine(`{"type":"phase","phase":"recovering","data":"restoring transcript"}`)
+  assert.equal(event?.type, "phase")
+  assert.equal(event?.phase, "recovering")
+  assert.equal(event?.data, "restoring transcript")
+})
+
 test("parseStreamLine recovers two concatenated JSON objects on one line", () => {
   const events = parseStreamLine(`{"type":"text","data":"a"}{"type":"end","session_id":"x"}`)
   assert.equal(events.length, 2)

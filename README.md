@@ -34,6 +34,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Action-oriented Git Review now supports per-file stage/unstage controls, staged-diff inspection, and confirmed discard for tracked changes.
 - Background task completion and failure also surface as native desktop notifications when the workbench is unfocused; clicking one restores the existing app window.
 - The Task Inspector includes a durable, per-workspace checklist for breaking work into explicit user-controlled steps alongside the active Grok Build goal.
+- The Task Inspector also shows verified backend phases for startup, advisor consultation, execution, recovery, completion, cancellation, and failure; phase labels come from the Grok Build bridge rather than UI guesses.
 - Configurable reasoning, turn limits, self-verification, web search, subagents, and visible automatic-approval controls.
 
 ### Models and authentication

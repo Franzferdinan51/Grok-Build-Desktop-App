@@ -14,7 +14,7 @@ export type OAuthProviderStatus = {
   detail: string
 }
 export type OAuthStatusSnapshot = { providers: OAuthProviderStatus[] }
-export type BackendEvent = { type: string; data?: string; message?: string; sessionId?: string; usage?: unknown }
+export type BackendEvent = { type: string; data?: string; message?: string; phase?: "starting" | "advising" | "executing" | "recovering" | "completed" | "failed" | "cancelled"; sessionId?: string; usage?: unknown }
 export type TelegramStatus = {
   connected: boolean
   hasToken?: boolean

@@ -50,6 +50,7 @@ const execFileAsync = promisify(execFile)
 export type GrokBuildEvent =
   | { type: "text"; data: string }
   | { type: "thought"; data: string }
+  | { type: "phase"; phase: "starting" | "advising" | "executing" | "recovering" | "completed" | "failed" | "cancelled"; data?: string }
   | { type: "end"; sessionId?: string; usage?: unknown; num_turns?: number }
   | { type: "error"; message: string }
   | { type: string; [key: string]: unknown }
@@ -423,6 +424,7 @@ export class GrokBuildBackend {
       }
       deliver(event)
     }
+    onEvent({ type: "phase", phase: "starting", data: `Preparing Grok Build in ${input.cwd}` })
     if (input.moa?.referenceModels.length) {
       this.moaAbort = new AbortController()
       // Hermes caps fan-out at eight workers. References are intentionally
@@ -430,6 +432,7 @@ export class GrokBuildBackend {
       // Keep repeated model slots: Hermes allows multiple independent samples
       // from the same provider/model, which is useful when only one is configured.
       const references = input.moa.referenceModels.filter(Boolean).slice(0, 8)
+      onEvent({ type: "phase", phase: "advising", data: `Consulting ${references.length} reference advisor${references.length === 1 ? "" : "s"}` })
       onEvent({ type: "thought", data: `Mixture of Agents: consulting ${references.length} reference model${references.length === 1 ? "" : "s"} in parallel…` })
       try {
         const runReference = async (referenceModel: string, index: number) => {
@@ -534,6 +537,7 @@ ${referenceSection}
     if (omittedFlags.size) onEvent({ type: "thought", data: `Installed Grok Build does not support ${[...omittedFlags].join(", ")}; those optional settings were skipped for this run.\n` })
 
     const runChild = (childArgs: string[]) => new Promise<string>((resolve, reject) => {
+      onEvent({ type: "phase", phase: "executing", data: effectiveModel ? `Acting model: ${effectiveModel}` : "Using the configured Grok Build model" })
       writeLog("info", `Starting Grok Build task in ${input.cwd}`)
       const child = spawn(command, childArgs, { stdio: ["ignore", "pipe", "pipe"], env: this.environment(), detached: process.platform !== "win32" })
       this.current = child
@@ -602,8 +606,12 @@ ${referenceSection}
         this.cancelRequested = false
         if (cancelled) {
           onEvent({ type: "cancelled", data: "Task cancelled." })
+          onEvent({ type: "phase", phase: "cancelled", data: "Stopped by the user" })
           finish(() => resolve(stderr))
-        } else if (code === 0 || protocolEnded) finish(() => resolve(stderr))
+        } else if (code === 0 || protocolEnded) {
+          onEvent({ type: "phase", phase: "completed", data: "Grok Build finished its run" })
+          finish(() => resolve(stderr))
+        }
         else finish(() => reject(new Error(inactivityTimeout || normalizeBackendStderr(stderr) || `Grok Build exited ${code ?? `from ${signal || "an unknown signal"}`}`)))
       })
     })
@@ -620,6 +628,7 @@ ${referenceSection}
       const message = error instanceof Error ? error.message : String(error)
       const transientSerializationFailure = !input.resume && /serialization error:|error decoding response body/i.test(message)
       if (transientSerializationFailure) {
+        onEvent({ type: "phase", phase: "recovering", data: "Retrying after malformed provider output" })
         onEvent({ type: "thought", data: "The model provider returned a malformed streaming event. Retrying this clean turn once…\n" })
         try {
           await runChild(compatibleArgs)
@@ -648,6 +657,7 @@ ${referenceSection}
         && /max turns reached|structured output|model did not produce|invalid json/i.test(message)
       )
       if (browserPlannerFailed) {
+        onEvent({ type: "phase", phase: "recovering", data: `Retrying browser planning with ${browserFallbackModel}` })
         onEvent({ type: "thought", data: `The selected model did not produce a valid browser directive. Finishing this browser step with ${browserFallbackModel} instead…\n` })
         const fallbackArgs = [...compatibleArgs]
         const modelIndex = fallbackArgs.indexOf("--model")
@@ -659,6 +669,7 @@ ${referenceSection}
       }
       const aggregatorProviderFailed = Boolean(input.moa && input.model && effectiveModel && input.model !== effectiveModel && /no output for \d+ minutes|auth|unauthorized|forbidden|rate.?limit|serialization|connection|timed? ?out/i.test(message))
       if (aggregatorProviderFailed) {
+        onEvent({ type: "phase", phase: "recovering", data: "Retrying with the session model" })
         onEvent({ type: "thought", data: `The configured MoA aggregator (${effectiveModel}) was unavailable. Retrying once with the session model (${input.model}).\n` })
         // Rebuild the fallback arg list from the compatible set so we never
         // resurrect a flag the installed Grok Build does not support.
@@ -673,6 +684,7 @@ ${referenceSection}
       }
       const resumeFailed = Boolean(input.resume && input.resumeFallbackPrompt?.trim() && /session.{0,40}(?:not found|missing|invalid|failed|does not exist)|failed.{0,40}resume/i.test(message))
       if (resumeFailed) {
+        onEvent({ type: "phase", phase: "recovering", data: "Starting a fresh session from the saved transcript" })
         onEvent({ type: "thought", data: "The saved Grok session could not be resumed. Recovered the conversation from the desktop transcript and continued in a new session.\n" })
         const withoutResume: string[] = []
         for (let index = promptArgs.length; index < compatibleArgs.length; index++) {
@@ -691,6 +703,7 @@ ${referenceSection}
         }
       }
       onEvent({ type: "error", message })
+      onEvent({ type: "phase", phase: "failed", data: message })
       throw error
     }
   }
