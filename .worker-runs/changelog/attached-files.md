@@ -1,1 +1,2 @@
 - Added Duck-Agent-inspired workspace-file attachments to the chat composer, with an eight-file cap, visible context chips, and explicit prompt routing.
+- Added action-oriented Git Review with per-file stage/unstage, staged-diff fallback, and confirmed tracked-file discard.

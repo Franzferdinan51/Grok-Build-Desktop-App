@@ -120,17 +120,17 @@ export async function runWorkspaceCommand(root: string, command: string): Promis
   }
 }
 
-export async function gitChangedFiles(root: string): Promise<{ status: string; path: string }[]> {
+export async function gitChangedFiles(root: string): Promise<{ status: string; path: string; staged?: boolean }[]> {
   const cwd = await realpath(root)
   let stdout: string
   try { ({ stdout } = await execFileAsync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=normal"], { cwd, timeout: 10_000 })) }
   catch { return [] }
   const records = stdout.split("\0").filter(Boolean)
-  const changes: { status: string; path: string }[] = []
+  const changes: { status: string; path: string; staged?: boolean }[] = []
   for (let index = 0; index < records.length; index++) {
     const record = records[index]!
     const status = record.slice(0, 2).trim() || "M"
-    changes.push({ status, path: record.slice(3) })
+    changes.push({ status, staged: record[0] !== " ", path: record.slice(3) })
     if (/^[RC]/.test(status) || /[RC]$/.test(status)) index++
   }
   return changes
@@ -140,5 +140,25 @@ export async function gitFileDiff(root: string, path: string): Promise<string> {
   const status = (await gitChangedFiles(cwd)).find((entry) => entry.path === path)?.status
   if (status === "??") return `--- /dev/null\n+++ b/${path}\n` + (await readWorkspaceFile(cwd, path)).split("\n").map((line) => `+${line}`).join("\n")
   const { stdout } = await execFileAsync("git", ["diff", "--", path], { cwd, timeout: 10_000, maxBuffer: 5_000_000 })
-  return stdout || "No unstaged diff. The change may already be staged."
+  if (stdout) return stdout
+  const staged = await execFileAsync("git", ["diff", "--cached", "--", path], { cwd, timeout: 10_000, maxBuffer: 5_000_000 })
+  return staged.stdout || "No diff for this file."
+}
+
+export type GitFileAction = "stage" | "unstage" | "discard"
+export async function applyGitFileAction(root: string, path: string, action: GitFileAction): Promise<void> {
+  const cwd = await realpath(root)
+  await safePath(cwd, path)
+  const change = (await gitChangedFiles(cwd)).find((entry) => entry.path === path)
+  if (!change) throw new Error("File is no longer changed")
+  if (action === "stage") {
+    await execFileAsync("git", ["add", "--", path], { cwd, timeout: 10_000 })
+    return
+  }
+  if (action === "unstage") {
+    await execFileAsync("git", ["restore", "--staged", "--", path], { cwd, timeout: 10_000 })
+    return
+  }
+  if (change.status === "??") throw new Error("Untracked files cannot be discarded from the review panel")
+  await execFileAsync("git", ["restore", "--staged", "--worktree", "--", path], { cwd, timeout: 10_000 })
 }

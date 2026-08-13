@@ -7,11 +7,12 @@ export function ReviewPanel(props: {
   projectName: string
   branch?: string
   isGit?: boolean
-  changes: { status: string; path: string }[]
+  changes: { status: string; path: string; staged?: boolean }[]
   selectedPath: string
   diff: string
   onRefresh: () => void
   onSelect: (path: string) => void
+  onAction: (path: string, action: "stage" | "unstage" | "discard") => void
   onAskReview: () => void
   onOpenProject: () => void
 }) {
@@ -75,15 +76,19 @@ export function ReviewPanel(props: {
           }>
             <Show when={rows().length} fallback={<p class="tree-pane__hint">No changes match this filter.</p>}>
               <For each={rows()}>{(row) =>
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   class={`tree-row ${row.node.isDir ? "tree-row--dir" : `tree-row--${row.node.data ? reviewKind(row.node.data.status) : "other"}`} ${props.selectedPath === row.node.path ? "active" : ""}`}
                   style={{ "padding-left": `${10 + row.depth * 12}px` }}
                   title={row.node.path}
                   onClick={() => row.node.isDir ? toggleDir(row.node.id) : props.onSelect(row.node.path)}
+                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click() } }}
                 >
                   <i>{row.node.isDir ? (expanded().has(row.node.id) ? "▾" : "▸") : reviewStatusLabel(row.node.data?.status || "")}</i>
                   <span>{row.node.name}</span>
-                </button>
+                  <Show when={!row.node.isDir && row.node.data}><small class="tree-row__actions"><button onClick={(event) => { event.stopPropagation(); props.onAction(row.node.path, row.node.data?.staged ? "unstage" : "stage") }}>{row.node.data?.staged ? "Unstage" : "Stage"}</button><Show when={row.node.data?.status !== "??"}><button class="tree-row__discard" onClick={(event) => { event.stopPropagation(); if (window.confirm(`Discard changes in ${row.node.path}? This cannot be undone.`)) props.onAction(row.node.path, "discard") }}>Discard</button></Show></small></Show>
+                </div>
               }</For>
             </Show>
           </Show>

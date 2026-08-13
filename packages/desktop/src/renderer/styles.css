@@ -104,7 +104,7 @@
 .tree-pane__meta,.tree-pane__hint{padding:6px 10px 8px;color:var(--ui-text-tertiary);font-size:10px;letter-spacing:.04em}
 .tree-row{display:flex;align-items:center;gap:7px;width:100%;border:0;background:transparent;color:var(--ui-text-secondary);text-align:left;padding:4px 8px;border-radius:5px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer}
 .tree-row i{flex:0 0 18px;color:var(--ui-text-tertiary);font-style:normal;font-size:9px;text-align:center}
-.tree-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-row span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tree-row__actions{display:flex;gap:3px;opacity:0;transition:opacity .12s}.tree-row:hover .tree-row__actions,.tree-row:focus-within .tree-row__actions,.tree-row.active .tree-row__actions{opacity:1}.tree-row__actions button{border:1px solid #37425a;border-radius:4px;background:#20283a;color:#aebee4;padding:3px 5px;font-size:9px;cursor:pointer}.tree-row__actions button:hover{background:#30405f;color:#fff}.tree-row__actions .tree-row__discard{color:#e1a2a2;border-color:#5a383d}
 .tree-row:hover,.tree-row.active{background:#1d2637;color:#fff}
 .tree-row--dir{color:#c5cce0}
 .tree-row--added i,.review-chip--added{color:#79dfa4}

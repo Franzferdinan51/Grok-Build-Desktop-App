@@ -1,6 +1,6 @@
 import { buildPathTree, filterByPath, firstLevelDirIds, flattenPathTree, type PathTreeNode, type VisibleTreeRow } from "./path-tree.ts"
 
-export type GitChange = { status: string; path: string }
+export type GitChange = { status: string; path: string; staged?: boolean }
 export type ReviewKind = "added" | "modified" | "deleted" | "renamed" | "untracked" | "other"
 export type ReviewTreeNode = PathTreeNode<GitChange>
 export type ReviewTreeRow = VisibleTreeRow<GitChange>
