@@ -56,6 +56,7 @@ export type ScheduledGrokTask = {
   runAt: number; repeatMinutes?: number; enabled: boolean
   running?: boolean; lastError?: string
   lastRunAt?: number; nextRunAt: number; lastStatus?: "completed" | "failed"
+  lastRunId?: string; lastThreadId?: string
 }
 
 export type TelegramGoal = {

@@ -18,8 +18,8 @@ test("filterSkills searches and scopes", () => {
 
 test("schedule helpers", () => {
   const tasks = [
-    { id: "1", name: "Nightly", prompt: "test", cwd: "/repo", enabled: true, nextRunAt: 200, lastStatus: "completed" as const },
-    { id: "2", name: "Paused", prompt: "docs", cwd: "/repo", enabled: false, nextRunAt: 100, lastStatus: "failed" as const },
+    { id: "1", name: "Nightly", prompt: "test", cwd: "/repo", enabled: true, runAt: 200, nextRunAt: 200, lastStatus: "completed" as const },
+    { id: "2", name: "Paused", prompt: "docs", cwd: "/repo", enabled: false, runAt: 100, nextRunAt: 100, lastStatus: "failed" as const },
   ]
   assert.equal(scheduleState(tasks[0]!), "active")
   assert.equal(scheduleState(tasks[1]!), "failed")

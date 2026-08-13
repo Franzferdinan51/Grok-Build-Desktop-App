@@ -551,6 +551,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await openConversation(thread)
     setActive("new-task")
   }
+  const openScheduledResult = async (task: ScheduledGrokTask) => {
+    if (!task.lastThreadId) { setSlashNotice("This schedule has no stored result yet."); return }
+    const thread = await window.api.conversations.get(task.lastThreadId) as ChatThread | undefined
+    if (!thread) { setSlashNotice("The scheduled result is unavailable."); return }
+    await openConversation(thread)
+    setActive("new-task")
+    setSlashNotice(`Opened the latest result for ${task.name}.`)
+  }
   const resumeRun = async (run: GrokRunRecord) => {
     const thread = await threadForRun(run)
     if (!thread || !run.grokSessionId) { setSlashNotice("This run has no resumable Grok session."); return }
@@ -937,7 +945,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     onCleanup(() => document.removeEventListener("visibilitychange", refreshVisibleReview))
     onCleanup(window.api.telegram.onChange(() => { void refreshTelegram(false) }))
     onCleanup(window.api.schedules.onEvent((event) => {
-      setSchedules((current) => current.map((task) => task.id === event.taskId ? { ...task, running: event.status === "running", lastError: event.status === "failed" ? event.detail : undefined, lastStatus: event.status === "completed" ? "completed" : event.status === "failed" ? "failed" : task.lastStatus } : task))
+      setSchedules((current) => current.map((task) => task.id === event.taskId ? { ...task, running: event.status === "running", lastError: event.status === "failed" ? event.detail : undefined, lastStatus: event.status === "completed" ? "completed" : event.status === "failed" ? "failed" : task.lastStatus, lastRunId: event.runId || task.lastRunId, lastThreadId: event.threadId || task.lastThreadId } : task))
       if (event.status === "completed") announce("success", `Scheduled task finished · ${event.name}`, event.detail || "Grok Build completed the scheduled task.")
       if (event.status === "failed") announce("error", `Scheduled task failed · ${event.name}`, event.detail || "Review the scheduled task and try again.")
     }))
@@ -2033,6 +2041,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           onRepeat={setRepeatMinutes}
           onCreate={() => void createSchedule()}
           onRun={async (id) => { await window.api.schedules.runNow(id); setSchedules(await window.api.schedules.list()) }}
+          onOpenResult={(task) => void openScheduledResult(task)}
           onToggle={async (id, enabled) => { await window.api.schedules.toggle(id, enabled); setSchedules(await window.api.schedules.list()) }}
           onRemove={async (id) => { await window.api.schedules.remove(id); setSchedules(await window.api.schedules.list()) }}
         />

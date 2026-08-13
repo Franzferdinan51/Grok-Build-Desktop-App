@@ -452,10 +452,11 @@ export class GrokBuildBackend {
     for (const requiredFlag of ["-p", "--cwd", "--output-format"]) {
       if (!supportedFlags.has(requiredFlag)) throw new Error(`Installed Grok Build no longer supports required headless flag ${requiredFlag}. Update Grok Build Desktop to a compatible release.`)
     }
-    // Grok CLI owns standard cross-session memory. The external DuckBot RAG
-    // bridge is opt-in (Telegram), preventing duplicate context and startup
-    // work for ordinary desktop runs.
-    const memoryContext = input.longTermMemory ? await this.longTermMemory.context(input.prompt) : ""
+    // DuckBot RAG is the desktop's primary long-term memory. The browser
+    // planner explicitly opts out; ordinary and scheduled runs use bounded
+    // local recall unless a caller deliberately disables it. Grok's own
+    // default memory is disabled below to avoid duplicate, token-heavy context.
+    const memoryContext = input.longTermMemory !== false ? await this.longTermMemory.context(input.prompt) : ""
     const hostResolved = resolveHostControls({
       config: getStore().get("host"),
       env: process.env,
@@ -580,8 +581,11 @@ ${referenceSection}
     }
 
     const structuredOutput = Boolean(input.jsonSchema?.trim())
-    const promptArgs = promptArgsFor({ ...input, prompt: effectivePrompt }, effectivePrompt)
-    const args = buildBaseArgs({ ...input, prompt: effectivePrompt }, promptArgs)
+    const cliInput = input.memory === "experimental" || input.memory === "disabled"
+      ? input
+      : { ...input, memory: "disabled" as const }
+    const promptArgs = promptArgsFor({ ...cliInput, prompt: effectivePrompt }, effectivePrompt)
+    const args = buildBaseArgs({ ...cliInput, prompt: effectivePrompt }, promptArgs)
 
     const omittedFlags = new Set<string>()
     const compatibleArgs = this.compatibleCliArgs(args, supportedFlags, (flag) => omittedFlags.add(flag))

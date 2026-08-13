@@ -62,6 +62,7 @@ export type ScheduleEntry = {
   name: string
   prompt: string
   cwd: string
+  runAt: number
   enabled: boolean
   running?: boolean
   lastError?: string
@@ -70,6 +71,8 @@ export type ScheduleEntry = {
   lastRunAt?: number
   repeatMinutes?: number
   model?: string
+  lastRunId?: string
+  lastThreadId?: string
 }
 
 export type ScheduleState = "active" | "paused" | "running" | "failed"

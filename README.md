@@ -12,7 +12,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - **Remote agent:** Telegram includes pairing, queues, steering, interruption, lifecycle controls, rich formatting, live progress, model/project pickers, and private reasoning.
 - **Telegram security mode:** NemoClaw-inspired host policy with default-deny guidance, sensitive-task approvals, bounded audit events, secret-leak prevention, `/security`, `/sandbox`, `/approve`, and `/deny`—without replacing the Grok Build harness with OpenShell.
 - **Research-ready skills:** Bundled skills install into the local Grok skill directory for Tavily, Brave, X search via `xurl`, private SearXNG, BrowserOS/browser-control, source verification, and tool discovery. Private endpoints and credentials stay local and are never committed.
-- **Hybrid durable memory:** OpenClaw/Hermes-style `SOUL.md`, `USER.md`, `AGENTS.md`, and curated `MEMORY.md` files provide identity and policy, while the optional local [duckbot-rag-memory](https://github.com/Franzferdinan51/duckbot-rag-memory) layer recalls only relevant long-term context and captures successful turns episodically.
+- **DuckBot-primary durable memory:** OpenClaw/Hermes-style `SOUL.md`, `USER.md`, `AGENTS.md`, and curated `MEMORY.md` files provide identity and policy, while the local [duckbot-rag-memory](https://github.com/Franzferdinan51/duckbot-rag-memory) layer is the primary long-term recall/capture store. Its injected context is deliberately bounded; Telegram use remains explicit opt-in.
 - **Provider choice:** xAI, OpenAI Codex OAuth, MiniMax OAuth/API, NVIDIA Build/NIM, OpenRouter, LM Studio, ODS, and OpenAI-compatible endpoints.
 - **Built and tested cross-platform:** macOS arm64 DMG/ZIP artifacts and Windows x64 NSIS installers are produced by the release workflow. macOS signing depends on the machine's configured Apple identity.
 
@@ -28,6 +28,8 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Grok session IDs are bound to each conversation and workspace and resume across turns, stops, relaunches, and project switches. Token-aware visible-only context and automatic checkpoints recover long conversations without injecting thoughts, advisor transcripts, preview DOM, action tags, or tool noise.
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
 - Searchable Grok run history, scheduled tasks, project skills, official Rhai workflows, and durable workspace goals.
+- Scheduled runs now create distinct persisted conversations; **Open last result** returns to the transcript and native session for review or continuation.
+- DuckBot RAG Memory is the primary desktop memory source; recall is bounded to relevant local context, while Grok Build's duplicate default memory is disabled unless experimental memory is explicitly selected.
 - Run History is an actionable session inspector: open the owning conversation, resume a verified native session, fork a run, stop the active run, or copy bounded diagnostics.
 - If the Electron main process restarts during a task, Run History marks the run **Interrupted · outcome unknown**, preserves a bounded last-known activity tail, and requires an explicit review before resume or fork.
 - Slash-command palette with keyboard completion and dynamically discovered Grok Build skills and workflows.

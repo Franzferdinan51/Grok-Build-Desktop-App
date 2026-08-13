@@ -2,7 +2,7 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import { withScheduleFinishPatch, withScheduleRunningPatch } from "./scheduled-tasks-utils.ts"
 
-const task = { id: "s1", name: "Nightly", prompt: "test", cwd: "/repo", enabled: true, runAt: 100, nextRunAt: 100, repeatMinutes: 60 }
+const task = { id: "s1", name: "Nightly", prompt: "test", cwd: "/repo", enabled: true, runAt: 100, nextRunAt: 100, repeatMinutes: 60, lastRunId: "run-1", lastThreadId: "thread-1" }
 
 test("scheduled task patches expose running and failed detail without losing repeat timing", () => {
   const running = withScheduleRunningPatch(task, true)
@@ -13,4 +13,6 @@ test("scheduled task patches expose running and failed detail without losing rep
   assert.equal(final.lastStatus, "failed")
   assert.equal(final.lastError, "provider unavailable")
   assert.equal(final.nextRunAt, 3_600_200)
+  assert.equal(final.lastRunId, "run-1")
+  assert.equal(final.lastThreadId, "thread-1")
 })

@@ -17,6 +17,7 @@ export function ScheduledPanel(props: {
   onRepeat: (value: number) => void
   onCreate: () => void
   onRun: (id: string) => void
+  onOpenResult: (task: ScheduledGrokTask) => void
   onToggle: (id: string, enabled: boolean) => void
   onRemove: (id: string) => void
 }) {
@@ -67,6 +68,7 @@ export function ScheduledPanel(props: {
               </dl>
               <div class="detail-actions">
                 <button class="primary" onClick={() => props.onRun(task().id)}>Run now</button>
+                <button disabled={!task().lastThreadId} onClick={() => props.onOpenResult(task())}>Open last result</button>
                 <button onClick={() => props.onToggle(task().id, !task().enabled)}>{task().enabled ? "Pause" : "Enable"}</button>
                 <button onClick={() => props.onRemove(task().id)}>Delete</button>
               </div>

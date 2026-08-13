@@ -359,7 +359,7 @@ export function SettingsPanel(props: {
             </label>
             <label>Memory
               <select value={props.advanced.memory} onChange={(event) => props.onAdvanced("memory", event.currentTarget.value as AdvancedSettings["memory"])}>
-                <option value="default">Configured default</option>
+                <option value="default">DuckBot RAG primary</option>
                 <option value="experimental">Experimental cross-session memory</option>
                 <option value="disabled">Disable memory</option>
               </select>
@@ -400,7 +400,7 @@ export function SettingsPanel(props: {
         <div class="settings-card">
           <div><strong>Grok backend toolbox</strong><span>Native Grok Build subcommands: MCP, plugins, sessions, worktrees, doctor, disk usage, models, and the Agent Dashboard.</span></div>
           <div class="backend-tool-presets">
-            <For each={["inspect --json", "doctor --json", "du --json", "models", "version", "mcp list", "mcp doctor", "plugin list", "plugin marketplace list", "sessions list", "worktree list", "setup --json", "dashboard"]}>{(command) =>
+            <For each={["inspect --json", "doctor --json", "du --json", "models", "version", "mcp list", "mcp doctor", "plugin list", "plugin marketplace list", "sessions list", "sessions search", "worktree list", "memory --help", "trace --help", "export --help", "completions --help", "setup --json", "dashboard"]}>{(command) =>
               <button onClick={() => props.onRunBackendTool(command)}>{command}</button>
             }</For>
           </div>

@@ -5,6 +5,7 @@
 - Node.js 20.19+ (or 22.12+; Node 22.22+ is recommended for the desktop toolchain)
 - pnpm 9+
 - Grok Build installed from [xAI’s official instructions](https://github.com/xai-org/grok-build#installing-the-released-binary)
+- [DuckBot RAG Memory](https://github.com/Franzferdinan51/duckbot-rag-memory) installed locally with its `.venv`; the desktop auto-detects `~/.openclaw/workspace/duckbot-rag-memory` first, then the other supported local locations.
 
 ## Development
 
@@ -14,6 +15,13 @@ cd Grok-Build-Desktop-App
 pnpm install
 grok --version
 pnpm dev
+```
+
+Verify the primary memory bridge before relying on semantic recall:
+
+```bash
+test -x ~/.openclaw/workspace/duckbot-rag-memory/.venv/bin/python
+test -f ~/.openclaw/workspace/duckbot-rag-memory/src/extensions/duckbot_brain/adapter.py
 ```
 
 If the executable is not on `PATH`, set `GROK_BUILD_PATH` to the installed `grok` executable before launching the app.
