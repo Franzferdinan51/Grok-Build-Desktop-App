@@ -435,9 +435,13 @@ assert.deepEqual(mergeLogs([{ kind: "text", content: "kept" }], []), [{ kind: "t
   buffer.append(oversized)
   const snap = buffer.snapshot()
   assert.ok(snap.length <= MAX_LIVE_LOG_ENTRIES, "LiveEventBuffer must respect MAX_LIVE_LOG_ENTRIES")
-  // Adjacent alternating-kind entries coalesce by pair. The last surviving
-  // entry must contain the most recent token at its tail.
-  assert.match(snap[snap.length - 1].content, /e549$/, "most recent entry must survive")
+  // Reasoning is intentionally consolidated into one bounded diagnostic row,
+  // so the final raw row is the latest public response while the latest
+  // thought token must remain in the consolidated reasoning record.
+  const thought = snap.find((entry) => entry.kind === "thought")
+  assert.ok(thought, "consolidated reasoning row must survive")
+  assert.match(thought.content, /e549$/, "most recent thought must survive")
+  assert.match(snap[snap.length - 1].content, /e548$/, "most recent public entry must survive")
 }
 {
   const buffer = new LiveEventBuffer()

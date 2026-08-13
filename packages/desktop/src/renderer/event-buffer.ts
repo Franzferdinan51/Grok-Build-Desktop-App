@@ -12,8 +12,38 @@
 
 export const MAX_LIVE_LOG_CHARS = 2 * 1024 * 1024
 export const MAX_LIVE_LOG_ENTRIES = 500
+export const MAX_CONSOLIDATED_THOUGHT_CHARS = 12_000
 
 export type EventLog = { kind: "text" | "thought" | "error"; content: string }
+
+/**
+ * Keep provider reasoning as one diagnostic record per run. Grok can emit
+ * thought chunks before, between, and after response/tool updates; retaining
+ * each phase as a separate row makes the live transcript look like multiple
+ * assistant turns and needlessly increases renderer work. Public response and
+ * error ordering remains unchanged.
+ */
+export function consolidateThoughts(logs: EventLog[]): EventLog[] {
+  const firstThought = logs.findIndex((log) => log.kind === "thought")
+  if (firstThought < 0) return logs
+  const thought = logs
+    .filter((log) => log.kind === "thought")
+    .map((log) => log.content.trim())
+    .filter(Boolean)
+    .join("\n\n")
+  const marker = "\n\n[… reasoning condensed …]\n\n"
+  const available = MAX_CONSOLIDATED_THOUGHT_CHARS - marker.length
+  const headLength = Math.floor(available * 0.7)
+  const bounded = thought.length <= MAX_CONSOLIDATED_THOUGHT_CHARS
+    ? thought
+    : `${thought.slice(0, headLength)}${marker}${thought.slice(-(available - headLength))}`
+  const result: EventLog[] = []
+  logs.forEach((log, index) => {
+    if (log.kind !== "thought") result.push(log)
+    else if (index === firstThought && bounded) result.push({ kind: "thought", content: bounded })
+  })
+  return result
+}
 
 /**
  * Track running totals so each call does NOT redo an O(n) sum over the
@@ -53,6 +83,9 @@ export class LiveEventBuffer {
       }
       this.evict()
     }
+    this.target = consolidateThoughts(this.target)
+    this.totals.entries = this.target.length
+    this.totals.chars = this.target.reduce((sum, log) => sum + log.content.length, 0)
     return this.target
   }
 
@@ -129,5 +162,5 @@ export function mergeLogs(target: EventLog[], incoming: EventLog[]): EventLog[] 
       chars -= removed.content.length
     }
   }
-  return next
+  return consolidateThoughts(next)
 }

@@ -1,3 +1,5 @@
+import { consolidateThoughts } from "./event-buffer.ts"
+
 export type TaskLog = { kind: "text" | "thought" | "error"; content: string }
 
 // Reasoning is useful as an optional diagnostic, not as a second transcript.
@@ -48,14 +50,7 @@ export function splitThinking(logs: TaskLog[]): TaskLog[] {
   // Providers may emit reasoning in several phases, separated by tool and
   // status events. Keep one collapsible thinking section per assistant turn
   // so the transcript does not become a stack of nearly identical panels.
-  const thoughtIndexes = parts.flatMap((part, index) => part.kind === "thought" ? [index] : [])
-  if (thoughtIndexes.length > 1) {
-    const first = thoughtIndexes[0]!
-    const combined = thoughtIndexes.map((index) => parts[index]!.content).filter(Boolean).join("\n\n")
-    const firstPart = parts[first]!
-    return parts.filter((_part, index) => !thoughtIndexes.includes(index) || index === first).map((part) => part === firstPart ? { kind: "thought", content: boundReasoning(combined) } : part)
-  }
-  return parts.map((part) => part.kind === "thought" ? { ...part, content: boundReasoning(part.content) } : part)
+  return consolidateThoughts(parts).map((part) => part.kind === "thought" ? { ...part, content: boundReasoning(part.content) } : part)
 }
 
 function boundReasoning(content: string): string {
