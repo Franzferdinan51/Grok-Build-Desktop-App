@@ -38,6 +38,7 @@ import { collectArtifacts, type ArtifactRecord } from "./artifact-utils"
 import { nextSessionRail, type SessionRailMode } from "./session-context-rail"
 import { isNearBottom } from "./scroll-position"
 import { preservedReviewPath } from "./review-sync"
+import { addDockedSessionId, parseDockedSessionIds, removeDockedSessionId } from "./session-dock"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
@@ -101,7 +102,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [sessionId, setSessionId] = createSignal("")
   const [chatThreads, setChatThreads] = createSignal<ChatThread[]>([])
   const [activeThreadId, setActiveThreadId] = createSignal("")
-  const [splitThread, setSplitThread] = createSignal<ChatThread | null>(null)
+  const [splitThreads, setSplitThreads] = createSignal<ChatThread[]>([])
+  const [splitActiveId, setSplitActiveId] = createSignal("")
   const [splitOpen, setSplitOpen] = createSignal(false)
   const [historyOpen, setHistoryOpen] = createSignal(false)
   const [historySearch, setHistorySearch] = createSignal("")
@@ -361,10 +363,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setMessages(selected?.messages || legacyMessages)
     setSessionId(selected?.sessionId || legacySession)
     if (stored.length) await persistThreads(root, stored, selected?.id || stored[0].id)
-    const savedSplitId = await window.api.store.get<string>(splitThreadKey(root))
-    const savedSplit = savedSplitId ? stored.find((thread) => thread.id === savedSplitId && thread.id !== selected?.id) : undefined
-    setSplitThread(savedSplit || null)
-    setSplitOpen(Boolean(savedSplit))
+    const savedSplitIds = parseDockedSessionIds(await window.api.store.get<string | string[]>(splitThreadKey(root)))
+    const savedSplit = savedSplitIds.map((id) => stored.find((thread) => thread.id === id && thread.id !== selected?.id)).filter((thread): thread is ChatThread => Boolean(thread))
+    setSplitThreads(savedSplit)
+    setSplitActiveId(savedSplit[0]?.id || "")
+    setSplitOpen(Boolean(savedSplit.length))
     await restoreQueue(selected?.id)
     await restoreArtifactContext(root, selected?.id)
     setHistoryIndex(-1); setHistoryDraft("")
@@ -440,23 +443,33 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (fork.workspace === workspace()) setChatThreads((current) => [fork, ...current])
     await openConversation(fork)
   }
+  const persistSplitDock = async (root = workspace(), ids = splitThreads().map((thread) => thread.id)) => {
+    if (!root) return
+    if (ids.length) await window.api.store.set(splitThreadKey(root), ids)
+    else await window.api.store.delete(splitThreadKey(root))
+  }
   const openSplitConversation = async (thread: ChatThread) => {
     if (thread.id === activeThreadId()) return
     const full = await window.api.conversations.get(thread.id) as ChatThread | undefined
     if (!full) return
     setFilesOpen(false); setTerminalRailOpen(false); setInspectorOpen(false); setPreviewOpen(false)
-    setSplitThread(full); setSplitOpen(true)
-    await window.api.store.set(splitThreadKey(workspace()), full.id)
+    const nextIds = addDockedSessionId(splitThreads().map((entry) => entry.id), full.id)
+    const next = nextIds.map((id) => id === full.id ? full : splitThreads().find((entry) => entry.id === id)).filter((entry): entry is ChatThread => Boolean(entry))
+    setSplitThreads(next); setSplitActiveId(full.id); setSplitOpen(true)
+    await persistSplitDock(workspace(), next.map((entry) => entry.id))
   }
-  const closeSplitConversation = async () => {
-    setSplitOpen(false); setSplitThread(null)
-    await window.api.store.delete(splitThreadKey(workspace()))
+  const closeSplitConversation = async (id?: string) => {
+    const next = id ? removeDockedSessionId(splitThreads().map((entry) => entry.id), id).map((entryId) => splitThreads().find((entry) => entry.id === entryId)).filter((entry): entry is ChatThread => Boolean(entry)) : []
+    setSplitThreads(next)
+    setSplitActiveId((current) => current === id ? (next[0]?.id || "") : current)
+    setSplitOpen(Boolean(next.length))
+    await persistSplitDock(workspace(), next.map((entry) => entry.id))
   }
   const focusSplitConversation = async () => {
-    const thread = splitThread()
+    const thread = splitThreads().find((entry) => entry.id === splitActiveId()) || splitThreads()[0]
     if (!thread || running()) return
     await openConversation(thread)
-    await closeSplitConversation()
+    await closeSplitConversation(thread.id)
   }
   const openLatestSplitConversation = async () => {
     const candidate = chatThreads().find((thread) => thread.id !== activeThreadId() && thread.messages.length)
@@ -1479,7 +1492,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={workspace() || contextRailMode()}><nav class="context-rail-tabs" aria-label="Session context rail"><span>Session tools</span><button class={contextRailMode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()}>Files</button><button class={contextRailMode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail}>Terminal</button><button class={contextRailMode() === "activity" ? "active" : ""} onClick={toggleActivityRail}>Activity</button><Show when={previewEnabled()}><button class={contextRailMode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>Preview</button></Show><Show when={selectedProject()?.isGit}><button class={contextRailMode() === "review" ? "active" : ""} onClick={() => void toggleReviewRail()}>Review</button></Show></nav></Show>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For></section></Show>
-        <Show when={splitOpen() && splitThread()}>{(thread) => <ConversationSplitPane thread={thread()} onClose={() => void closeSplitConversation()} onFocus={() => void focusSplitConversation()} />}</Show>
+        <Show when={splitOpen() && splitThreads().length}><ConversationSplitPane threads={splitThreads()} activeId={splitActiveId()} onSelect={setSplitActiveId} onClose={(id) => void closeSplitConversation(id)} onFocus={() => void focusSplitConversation()} /></Show>
         <section class={`chat-composer chat-composer--docked ${composerDropActive() ? "chat-composer--drop-active" : ""}`} aria-label="Grok Build task composer" onDragEnter={handleComposerDragEnter} onDragOver={handleComposerDragOver} onDragLeave={handleComposerDragLeave} onDrop={handleComposerDrop}>
           <Show when={composerDropActive()}><div class="chat-drop-overlay" aria-live="polite"><span>Drop workspace files to attach</span></div></Show>
           <div class="chat-composer__context">

@@ -38,6 +38,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - The Task Inspector also shows verified backend phases for startup, advisor consultation, execution, recovery, completion, cancellation, and failure; phase labels come from the Grok Build bridge rather than UI guesses.
 - Scheduled Grok Build work now reports live running phases and final failures back to the Scheduled page, with background completion/failure notifications and the last error retained for recovery.
 - The Artifacts page indexes links, files, and images mentioned in persisted conversations, with search, type filters, and direct links back to the originating chat.
+- The session dock keeps up to four saved conversations visible as read-only tabs; focus one to continue working in it without introducing a second agent runtime.
 - The coding chat now coordinates Files, Terminal, Activity, and Preview through one session context rail, so switching tools keeps the conversation mounted and makes the active context obvious.
 - Git Review can now open from that same session context rail, keeping the active conversation visible while inspecting and staging workspace changes; the dedicated Review page remains available for full-screen work.
 - Long streamed conversations now expose a sticky **Jump to latest** control when you scroll upward, so you can inspect earlier output without losing the live tail.

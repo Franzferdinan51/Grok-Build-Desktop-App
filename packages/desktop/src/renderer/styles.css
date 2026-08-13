@@ -189,6 +189,7 @@
 .oauth-status--ok{color:#72dfa0}
 .oauth-status--warn{color:#e0af8c}
 .oauth-status--missing{color:#e5a4b1}
+.conversation-split-pane__tabs{display:flex;gap:4px;overflow:auto;padding:7px 10px;border-bottom:1px solid #2b3445;background:#151b27}.conversation-split-pane__tabs button{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid #303d55;border-radius:6px;background:#1a2230;color:#8f9db5;padding:5px 8px;font-size:9px;cursor:pointer}.conversation-split-pane__tabs button.active,.conversation-split-pane__tabs button:hover{border-color:#7088c3;background:#293654;color:#eef2ff}
 .settings-page .settings-brand{margin:8px 0 6px}
 .settings-page .settings-brand h1{font-size:28px}
 @media(max-width:760px){.oauth-provider-row{grid-template-columns:1fr}.oauth-status{justify-self:start}}
