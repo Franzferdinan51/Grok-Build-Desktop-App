@@ -48,11 +48,13 @@ export type GrokRunRecord = { id: string; threadId?: string; cwd: string; prompt
 export type LocalStudioSnapshot = { configured: boolean; reachable: boolean; baseUrl: string; health?: unknown; status?: unknown; gpus?: unknown; error?: string }
 export type HostControlResult = { ok: boolean; backend: string; action: string; observed?: unknown; error?: string | null; permission_required?: boolean; missing_permissions?: unknown[] }
 export type GrokSkill = { name: string; description: string; path: string; scope: "project" | "user" | "compatible" }
+export type GrokWorkflow = { name: string; description: string; path: string; scope: "project" | "user" }
+export type SessionPlan = { sessionId: string; cwd: string; path: string; markdown: string; todos?: unknown; updatedAt: number }
+export type GitWorktree = { path: string; branch?: string; head?: string; detached: boolean; isMain: boolean }
 export type ScheduledGrokTask = { id: string; name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number; enabled: boolean; running?: boolean; lastError?: string; lastRunAt?: number; nextRunAt: number; lastStatus?: "completed" | "failed" }
 export type ScheduledTaskEvent = { taskId: string; name: string; status: "running" | "completed" | "failed"; detail?: string; at: number; runId?: string }
 export type ProviderSecret = { id: string; label: string; envKey: string; baseUrl: string; modelId: string; configured: boolean }
 export type WorkspaceFile = { path: string; size: number }
-export type GitWorktree = { path: string; branch?: string; head?: string; detached: boolean; isMain: boolean }
 export type StoredChatThread = { id: string; workspace: string; title: string; createdAt: number; updatedAt: number; messages: { id: string; role: "user" | "assistant"; logs: { kind: "text" | "thought" | "error"; content: string }[]; createdAt: number }[]; sessionId: string; model?: string; summary?: string; pinned?: boolean; archived?: boolean; sessionStatus?: "new" | "resumable" | "recovered" | "broken" }
 export type StoredChatSummary = Omit<StoredChatThread, "messages"> & { messageCount: number }
 export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; embeddingProvider: string; embeddingModel?: string; error?: string }
@@ -72,6 +74,8 @@ export type ElectronAPI = {
     checkUpdate: () => Promise<GrokBuildUpdateStatus>
     installUpdate: (channel: "stable" | "alpha") => Promise<GrokBuildUpdateStatus>
     tool: (command: string, cwd?: string) => Promise<{ stdout: string; stderr: string }>
+    workflows: (workspace?: string) => Promise<GrokWorkflow[]>
+    sessionPlan: (cwd: string, sessionId?: string) => Promise<SessionPlan | null>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
   }
   telegram: {
@@ -125,6 +129,8 @@ const api: ElectronAPI = {
     oauthLogin: (provider) => ipcRenderer.invoke("backend:oauth-login", provider),
     oauthStatus: () => ipcRenderer.invoke("backend:oauth-status"),
     checkUpdate: () => ipcRenderer.invoke("backend:update-check"), installUpdate: (channel) => ipcRenderer.invoke("backend:update-install", channel), tool: (command, cwd) => ipcRenderer.invoke("backend:tool", command, cwd),
+    workflows: (workspace) => ipcRenderer.invoke("backend:workflows", workspace),
+    sessionPlan: (cwd, sessionId) => ipcRenderer.invoke("backend:session-plan", cwd, sessionId),
     onEvent: (handler) => {
       const listener = (_event: IpcRendererEvent, update: BackendEvent) => handler(update)
       ipcRenderer.on("backend:event", listener)

@@ -31,6 +31,32 @@ export function groupSkills(skills: SkillEntry[]): { scope: SkillScope; items: S
     .filter((group) => group.items.length > 0)
 }
 
+export type WorkflowEntry = { name: string; description: string; path: string; scope: "project" | "user" }
+export type WorkflowFilter = "all" | WorkflowEntry["scope"]
+
+export function filterWorkflows(workflows: WorkflowEntry[], query: string, scope: WorkflowFilter = "all"): WorkflowEntry[] {
+  const needle = query.trim().toLowerCase()
+  return workflows
+    .filter((workflow) => scope === "all" || workflow.scope === scope)
+    .filter((workflow) => !needle || `${workflow.name} ${workflow.description} ${workflow.path} ${workflow.scope}`.toLowerCase().includes(needle))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function workflowScopeCounts(workflows: WorkflowEntry[]): Record<WorkflowFilter, number> {
+  return {
+    all: workflows.length,
+    project: workflows.filter((workflow) => workflow.scope === "project").length,
+    user: workflows.filter((workflow) => workflow.scope === "user").length,
+  }
+}
+
+export function groupWorkflows(workflows: WorkflowEntry[]): { scope: WorkflowEntry["scope"]; items: WorkflowEntry[] }[] {
+  const order: WorkflowEntry["scope"][] = ["project", "user"]
+  return order
+    .map((scope) => ({ scope, items: workflows.filter((workflow) => workflow.scope === scope) }))
+    .filter((group) => group.items.length > 0)
+}
+
 export type ScheduleEntry = {
   id: string
   name: string

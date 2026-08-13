@@ -391,16 +391,16 @@ export function SettingsPanel(props: {
             <label>Prompt file<input value={props.advanced.promptFile} onInput={(event) => props.onAdvanced("promptFile", event.currentTarget.value)} placeholder="workspace prompt file path" /></label>
             <label>New or forked session UUID<input value={props.advanced.sessionId} onInput={(event) => props.onAdvanced("sessionId", event.currentTarget.value)} placeholder="optional UUID" /></label>
             <label>Prompt JSON content blocks<textarea value={props.advanced.promptJson} onInput={(event) => props.onAdvanced("promptJson", event.currentTarget.value)} placeholder='[{"type":"text","text":"Task"}]' /></label>
-            <label class="settings-switch"><input type="checkbox" checked={props.advanced.noPlan} onChange={(event) => props.onAdvanced("noPlan", event.currentTarget.checked)} /><span />Disable plan mode</label>
+            <label class="settings-switch"><input type="checkbox" checked={props.advanced.noPlan} onChange={(event) => props.onAdvanced("noPlan", event.currentTarget.checked)} /><span />Disable plan mode (<code>--no-plan</code>)</label>
           </div>
         </div>
       </Show>
 
-      <Show when={showCard("Grok backend toolbox", "mcp plugin sessions dashboard")}>
+      <Show when={showCard("Grok backend toolbox", "mcp plugin sessions dashboard doctor du models version")}>
         <div class="settings-card">
-          <div><strong>Grok backend toolbox</strong><span>Native management for MCP, plugins, sessions, worktrees, and the Agent Dashboard.</span></div>
+          <div><strong>Grok backend toolbox</strong><span>Native Grok Build subcommands: MCP, plugins, sessions, worktrees, doctor, disk usage, models, and the Agent Dashboard.</span></div>
           <div class="backend-tool-presets">
-            <For each={["inspect --json", "mcp list", "mcp doctor", "plugin list", "plugin marketplace list", "sessions list", "worktree list", "setup --json", "dashboard"]}>{(command) =>
+            <For each={["inspect --json", "doctor --json", "du --json", "models", "version", "mcp list", "mcp doctor", "plugin list", "plugin marketplace list", "sessions list", "worktree list", "setup --json", "dashboard"]}>{(command) =>
               <button onClick={() => props.onRunBackendTool(command)}>{command}</button>
             }</For>
           </div>

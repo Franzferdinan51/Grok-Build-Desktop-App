@@ -97,7 +97,8 @@ export function buildBaseArgs(input: RunTaskInput, promptArgs: string[]): string
   if (input.resume && input.forkSession) args.push("--fork-session")
   if (input.resume && input.restoreCode) args.push("--restore-code")
   if (input.sessionId?.trim() && (!input.resume || input.forkSession)) args.push("--session-id", input.sessionId.trim())
-  if (input.noPlan || (input.moa && permissionMode !== "plan")) args.push("--no-plan")
+  // Official plan mode is --permission-mode plan. --no-plan would cancel it.
+  if (permissionMode !== "plan" && (input.noPlan || input.moa)) args.push("--no-plan")
   if (!input.resume && input.worktree) args.push(input.worktreeName?.trim() ? `--worktree=${input.worktreeName.trim()}` : "--worktree")
   if (!input.resume && input.worktree && input.worktreeRef?.trim()) args.push("--worktree-ref", input.worktreeRef.trim())
   if (input.jsonSchema) { JSON.parse(input.jsonSchema); args.push("--json-schema", input.jsonSchema) }

@@ -555,7 +555,7 @@ Available models:
   const help = execFileSync("grok", ["--help"], { encoding: "utf8" })
   const names = parseGrokSubcommandNames(help)
   // The live CLI ships these and the desktop must accept them.
-  for (const expected of ["agent", "mcp", "models", "update", "version", "help", "wrap", "leader", "inspect"]) {
+  for (const expected of ["agent", "mcp", "models", "update", "version", "help", "wrap", "leader", "inspect", "doctor", "du"]) {
     assert.ok(names.includes(expected), `live subcommand list missing ${expected}: ${names.join(", ")}`)
   }
   assert.ok(names.length >= 15, `expected at least 15 documented subcommands, got ${names.length}`)
@@ -799,6 +799,15 @@ assert.equal(isSafeExternalUrl("  https://example.com/  "), true)
   assert.ok(moa.includes("auto"))
   // MoA also defaults --no-plan unless permissionMode === "plan".
   assert.ok(moa.includes("--no-plan"))
+}
+{
+  const plan = buildBaseArgs({ prompt: "x", cwd: "/p", permissionMode: "plan", noPlan: true }, ["-p", "x"])
+  assert.ok(plan.includes("--permission-mode"))
+  assert.ok(plan.includes("plan"))
+  assert.ok(!plan.includes("--no-plan"), "official plan mode must not emit --no-plan")
+  const moaPlan = buildBaseArgs({ prompt: "x", cwd: "/p", permissionMode: "plan", moa: { referenceModels: ["m"] } }, ["-p", "x"])
+  assert.ok(moaPlan.includes("plan"))
+  assert.ok(!moaPlan.includes("--no-plan"), "MoA preserves plan mode without --no-plan")
 }
 // promptArgsFor dispatches to the right prefix. Most desktop runs use -p.
 {

@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, OAuthStatusSnapshot, GitWorktree } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, OAuthStatusSnapshot, GitWorktree } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -15,7 +15,7 @@ import { lastUserInstruction, rewindLastTurn } from "./conversation-lifecycle"
 import { buildPaletteItems, filterPaletteItems } from "./command-palette"
 import { catalogModelOptions, groupedModelOptions } from "./provider-availability"
 import { ADVANCED_DEFAULTS, FRIENDLY_DEFAULTS, resolveFriendlyDefaults, type AdvancedSettings, type SettingsTab } from "./settings-defaults"
-import { frameWorkflowPrompt, parseWorkflowName, WORKFLOWS } from "./workflow-presets"
+import { formatWorkflowCatalog, resolveWorkflowLaunch } from "./workflow-launch"
 import { summarizeHarnessDoctor } from "./harness-doctor"
 import { RunsPanel } from "./views/RunsPanel"
 import { ProjectFileTree } from "./ProjectFileTree"
@@ -29,6 +29,7 @@ import { WorkspacePanel } from "./views/WorkspacePanel"
 import { TerminalPanel } from "./views/TerminalPanel"
 import { ReviewPanel } from "./views/ReviewPanel"
 import { SkillsPanel } from "./views/SkillsPanel"
+import { WorkflowsPanel } from "./views/WorkflowsPanel"
 import { ScheduledPanel } from "./views/ScheduledPanel"
 import { RuntimePanel } from "./views/RuntimePanel"
 import { TelegramConnectionPanel } from "./views/TelegramConnectionPanel"
@@ -84,6 +85,7 @@ const NAV = [
   { id: "artifacts", label: "Artifacts", icon: "◇" },
   { id: "review", label: "Review", icon: "⌘" },
   { id: "skills", label: "Skills", icon: "◇" },
+  { id: "workflows", label: "Workflows", icon: "⟳" },
   { id: "scheduled", label: "Scheduled", icon: "◷" },
   { id: "runtime", label: "Local runtimes", icon: "▣" },
   { id: "telegram", label: "Agent", icon: "◈" },
@@ -135,6 +137,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [catalog, setCatalog] = createSignal<GrokBuildModelCatalog>({ models: [] })
   const [model, setModel] = createSignal("")
   const [skills, setSkills] = createSignal<GrokSkill[]>([])
+  const [workflows, setWorkflows] = createSignal<GrokWorkflow[]>([])
+  const [workflowSearch, setWorkflowSearch] = createSignal("")
+  const [sessionPlan, setSessionPlan] = createSignal<SessionPlan | null>(null)
+  const [planMode, setPlanMode] = createSignal(false)
   const [schedules, setSchedules] = createSignal<ScheduledGrokTask[]>([])
   const [providerSecrets, setProviderSecrets] = createSignal<ProviderSecret[]>([])
   const [scheduleName, setScheduleName] = createSignal("")
@@ -397,6 +403,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (!id) return
     const updated = chatThreads().map((thread) => thread.id === id ? { ...thread, sessionId: nextSessionId, sessionStatus: "resumable" as const, updatedAt: Date.now() } : thread)
     await persistThreads(root, updated, id)
+    void refreshSessionPlan(root, nextSessionId)
   }
   const newConversation = async () => {
     const root = workspace()
@@ -408,6 +415,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setMessages([])
     setSessionId("")
     if (root) { await window.api.store.set(conversationKey(root), []); await window.api.store.delete(sessionKey(root)) }
+    setSessionPlan(null)
     setEvents([])
     await replaceQueue([])
     setHistoryOpen(false)
@@ -436,6 +444,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await window.api.store.set(conversationKey(root), thread.messages)
       if (thread.sessionId) await window.api.store.set(sessionKey(root), thread.sessionId); else await window.api.store.delete(sessionKey(root))
       await restoreArtifactContext(root, thread.id)
+      await refreshSessionPlan(root, thread.sessionId)
       await refreshSessionIndex()
     }
   }
@@ -506,6 +515,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await refreshHistory()
   }
   const goalKey = (root = workspace()) => `goal.${encodeURIComponent(root)}`
+  const refreshSessionPlan = async (root = workspace(), grokSession = sessionId()) => {
+    if (!root) { setSessionPlan(null); return }
+    try { setSessionPlan(await window.api.backend.sessionPlan(root, grokSession || undefined)) }
+    catch { setSessionPlan(null) }
+  }
   const loadGoal = async (root: string) => setGoal((await window.api.store.get<WorkspaceGoal>(goalKey(root))) ?? null)
   const saveGoal = async (next: WorkspaceGoal | null) => {
     setGoal(next)
@@ -718,22 +732,67 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       const thread = chatThreads().find((entry) => entry.id === activeThreadId())
       if (!checkpoint || !thread) setSlashNotice("Not enough visible conversation to compress yet")
       else { await updateThreadMeta(thread, { summary: checkpoint }); setSlashNotice("Stored a visible-only conversation checkpoint") }
+    } else if (command.name === "plan") {
+      const action = parsed.args.toLowerCase()
+      if (action === "off") {
+        setPlanMode(false)
+        await window.api.store.set(STORE_KEYS.defaultsPlanMode, false)
+        setSlashNotice("Plan mode off. The next run uses your usual permission settings.")
+      } else {
+        setPlanMode(true)
+        await window.api.store.set(STORE_KEYS.defaultsPlanMode, true)
+        if (!parsed.args) setSlashNotice("Plan mode on. The next prompt uses --permission-mode plan and will not send --no-plan. File edits stay blocked until you approve the plan.")
+        else {
+          setSlashNotice("Planning with Grok Build…")
+          queueMicrotask(() => void run(parsed.args, { permissionMode: "plan", noPlan: false }))
+        }
+      }
+    } else if (command.name === "view-plan") {
+      await refreshSessionPlan()
+      const plan = sessionPlan()
+      setSlashNotice(plan?.markdown ? `Saved plan (${plan.sessionId})\n${plan.path}\n\n${plan.markdown.slice(0, 8000)}` : "No plan.md found for this workspace session. Run /plan <task> first.")
     } else if (command.name === "workflow") {
-      const [name, ...rest] = parsed.args.split(/\s+/)
-      const workflow = parseWorkflowName(name || "")
-      if (!workflow) setSlashNotice(`Workflows: ${Object.keys(WORKFLOWS).join(", ")}`)
+      const catalog = workflows().length ? workflows() : await window.api.backend.workflows(workspace() || undefined)
+      if (!workflows().length) setWorkflows(catalog)
+      const launch = resolveWorkflowLaunch(parsed.args, catalog)
+      if (launch.kind === "list") {
+        setSlashNotice(formatWorkflowCatalog(catalog))
+        void navigate("workflows")
+      } else if (launch.kind === "preset") {
+        setSlashNotice(`Starting Duck-Agent ${launch.name} preset through Grok Build…`)
+        queueMicrotask(() => void run(launch.prompt, { permissionMode: launch.permissionMode, noPlan: launch.noPlan }))
+      } else {
+        setSlashNotice(launch.kind === "control" ? "Sending official Grok Build workflow control…" : `Launching official Grok Build workflow ${launch.kind === "official" ? launch.name : ""}…`)
+        queueMicrotask(() => void run(launch.prompt, { officialSlash: true }))
+      }
+    } else if (command.name === "deep-research") {
+      if (!parsed.args) setSlashNotice("Usage: /deep-research <query>")
       else {
-        const goal = rest.join(" ").trim()
-        setSlashNotice(`Starting Duck-Agent ${workflow} workflow through Grok Build…`)
-        queueMicrotask(() => void run(frameWorkflowPrompt(workflow, goal)))
+        setSlashNotice("Starting official Grok Build deep research…")
+        queueMicrotask(() => void run(`/deep-research ${parsed.args}`, { officialSlash: true }))
+      }
+    } else if (command.name === "dashboard") {
+      try {
+        const result = await window.api.backend.tool("dashboard")
+        setSlashNotice((result.stdout || result.stderr || "Opened the Grok Agent Dashboard").trim())
+      } catch (error) {
+        setSlashNotice(error instanceof Error ? error.message : String(error))
       }
     } else if (command.name === "doctor") {
       const status = props.backendStatus()
       const report = summarizeHarnessDoctor({ available: status.available, command: status.command, version: status.version, error: status.error })
-      setSlashNotice(report.lines.join("\n"))
+      const lines = [...report.lines]
+      try {
+        const result = await window.api.backend.tool("doctor --json")
+        const text = (result.stdout || result.stderr).trim()
+        if (text) lines.push("", "grok doctor --json", text.slice(0, 4000))
+      } catch (error) {
+        lines.push("", `grok doctor: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      setSlashNotice(lines.join("\n"))
     }
     else {
-      const destinations: Record<string, string> = { workspace: "workspace", terminal: "terminal", review: "review", skills: "skills", runs: "runs", scheduled: "scheduled", settings: "settings" }
+      const destinations: Record<string, string> = { workspace: "workspace", terminal: "terminal", review: "review", skills: "skills", workflows: "workflows", runs: "runs", scheduled: "scheduled", settings: "settings" }
       const destination = destinations[command.name]
       if (destination) await navigate(destination)
     }
@@ -783,6 +842,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await refreshTelegram()
     setRuns(await window.api.grokRuns.list())
     setSkills(await window.api.skills.list(workspace()))
+    setWorkflows(await window.api.backend.workflows(workspace()))
+    await refreshSessionPlan(current?.path)
     const runtime = await window.api.localStudio.status()
     setLocalStudio(runtime); setLocalStudioURL(runtime.baseUrl)
     setCatalog(await window.api.backend.models())
@@ -840,6 +901,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setMoaReferenceTokenBudget(Math.min(2000, Math.max(200, (await window.api.store.get<number>(STORE_KEYS.moaReferenceTokenBudget)) || 600)))
     setThinking(friendly.values.thinking)
     setAutoApprove(friendly.values.autoApprove)
+    setPlanMode((await window.api.store.get<boolean>(STORE_KEYS.defaultsPlanMode)) ?? false)
     setSelfVerify(friendly.values.selfVerify)
     setMaxTurns(Math.min(100, Math.max(0, friendly.values.maxTurns || 0)))
     setSessionIdleHours(Math.min(168, Math.max(0, (await window.api.store.get<number>(STORE_KEYS.agentSessionIdleHours)) || 0)))
@@ -1026,7 +1088,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setSlashNotice(`${accepted.length} workspace file${accepted.length === 1 ? "" : "s"} attached.`)
   }
 
-  const run = async (requested?: string, options?: { ephemeral?: boolean; modelOverride?: string }): Promise<TaskLog[]> => {
+  const run = async (requested?: string, options?: { ephemeral?: boolean; modelOverride?: string; permissionMode?: AdvancedSettings["permissionMode"]; noPlan?: boolean; officialSlash?: boolean }): Promise<TaskLog[]> => {
     const rawSubmitted = (requested ?? prompt()).trim()
     const ephemeral = options?.ephemeral === true
     if (!rawSubmitted) return []
@@ -1057,16 +1119,17 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       }
       const priorMessages = messages()
       if (!ephemeral) await saveConversation([...priorMessages, { id: crypto.randomUUID(), role: "user", logs: [{ kind: "text", content: submitted }], createdAt: Date.now() }])
-      const activeGoal = !ephemeral && goal()?.status === "active" ? goal() : null
+      const officialSlash = options?.officialSlash === true
+      const activeGoal = !ephemeral && !officialSlash && goal()?.status === "active" ? goal() : null
       let executionPrompt = activeGoal
         ? `## Durable workspace goal\n${activeGoal.objective}\n\n## Current instruction\n${submitted}\n\nMake concrete progress toward the durable goal, verify your work, and report remaining work clearly.\nThis is iteration ${activeGoal.iterations + 1}. ${activeGoal.iterations > 0 ? "Previous iterations have already made progress; do not repeat completed work. Summarize what is left at the end of this turn." : "Start with the highest-leverage sub-task you can fully verify."}`
         : submitted
       const resumeSession = ephemeral ? "" : sessionId()
       const activeThread = chatThreads().find((thread) => thread.id === activeThreadId())
-      const recentContext = ephemeral ? "" : visibleConversationContext(priorMessages, activeThread?.summary)
+      const recentContext = ephemeral || officialSlash ? "" : visibleConversationContext(priorMessages, activeThread?.summary)
       const withRecentContext = (instruction: string) => `## Recent conversation context\nContinue this workspace conversation without repeating completed work. Preserve decisions, unfinished tasks, and the user's intent.\n\n${recentContext}\n\n## Current instruction\n${instruction}`
-      if (!resumeSession && recentContext) executionPrompt = withRecentContext(executionPrompt)
-      if (!ephemeral && agentAppControls()) {
+      if (!officialSlash && !resumeSession && recentContext) executionPrompt = withRecentContext(executionPrompt)
+      if (!ephemeral && !officialSlash && agentAppControls()) {
         executionPrompt += `\n\n## Desktop host controls\nYou may control safe app features by ending your response with one or more exact action tags. Use only when useful:\n<app_action>{"type":"preview.open"}</app_action>\n<app_action>{"type":"browser.open","url":"https://example.com"}</app_action>\n<app_action>{"type":"desktop.status"}</app_action>\n<app_action>{"type":"schedule.create","name":"Task name","prompt":"Task prompt","runAt":1770000000000,"repeatMinutes":60}</app_action>\nThese actions are schema-validated by the host. Browser and desktop actions only count as successful when the host returns ok:true with observed state. Never place shell commands or secrets in an action.`
         if (previewOpen()) {
           try {
@@ -1077,7 +1140,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           }
         }
       }
-      if (!ephemeral && subagentsEnabled()) {
+      if (!ephemeral && !officialSlash && subagentsEnabled()) {
         executionPrompt += delegationMode() === "aggressive"
           ? `\n\n## Subagent delegation\nUse Grok Build subagents proactively for independent research, code inspection, testing, and rendered-preview review. Parallelize bounded non-overlapping work, keep one primary agent responsible for integration, and verify every delegated result before applying it. Do not delegate trivial work or let multiple agents edit the same files.`
           : `\n\n## Subagent delegation\nUse Grok Build subagents when two or more independent workstreams would materially improve speed or quality (for example code inspection plus tests, or implementation plus rendered-preview review). Keep one primary integrator, avoid overlapping edits, and verify delegated results.`
@@ -1088,6 +1151,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       // CLI cannot represent with a single native command.
       const mixedModelMoA = references.length >= 2 && new Set(references).size > 1
       const advancedRun = advanced()
+      const planRun = !ephemeral && (planMode() || options?.permissionMode === "plan")
+      const runPermissionMode = planRun ? "plan" : (options?.permissionMode ?? advancedRun.permissionMode)
+      const runNoPlan = planRun ? false : (options?.noPlan ?? advancedRun.noPlan)
+      const runVerbatim = officialSlash || advancedRun.verbatim
       const selectedRunModel = options?.modelOverride?.trim() || model() || undefined
       // Prefer the catalog default for browser failover. MiniMax M3 currently
       // emits malformed streaming events, while M2.7 often spends its only
@@ -1115,7 +1182,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             longTermMemory: false,
             hostControls: false,
           }
-        : { prompt: executionPrompt, cwd: runWorkspace, threadId: activeThreadId() || undefined, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, resumeFallbackPrompt: resumeSession && recentContext ? withRecentContext(executionPrompt) : undefined, bestOfN: moaEnabled() && !mixedModelMoA ? moaCandidates() : undefined, moa: moaEnabled() && mixedModelMoA ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined, referenceReasoningEffort: moaReferenceEffort(), aggregatorReasoningEffort: moaAggregatorEffort(), referenceTokenBudget: moaReferenceTokenBudget(), context: recentContext || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled(), agent: advancedRun.agent || undefined, agents: advancedRun.agents || undefined, permissionMode: advancedRun.permissionMode, allow: advancedRun.allow.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), deny: advancedRun.deny.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), tools: advancedRun.tools || undefined, disallowedTools: advancedRun.disallowedTools || undefined, memory: advancedRun.memory, sandbox: advancedRun.sandbox || undefined, rules: advancedRun.rules || undefined, systemPrompt: advancedRun.systemPrompt || undefined, verbatim: advancedRun.verbatim, forkSession: advancedRun.forkSession, restoreCode: advancedRun.restoreCode, worktree: advancedRun.worktree, worktreeName: advancedRun.worktreeName || undefined, worktreeRef: advancedRun.worktreeRef || undefined, jsonSchema: advancedRun.jsonSchema || undefined, promptFile: advancedRun.promptFile || undefined, promptJson: advancedRun.promptJson || undefined, sessionId: advancedRun.sessionId || undefined, noPlan: advancedRun.noPlan })
+        : { prompt: executionPrompt, cwd: runWorkspace, threadId: activeThreadId() || undefined, model: model() || undefined, thinking: thinking(), autoApprove: autoApprove(), resume: resumeSession || undefined, resumeFallbackPrompt: resumeSession && recentContext ? withRecentContext(executionPrompt) : undefined, bestOfN: moaEnabled() && !mixedModelMoA ? moaCandidates() : undefined, moa: moaEnabled() && mixedModelMoA ? { referenceModels: references, aggregatorModel: moaAggregatorModel() || model() || undefined, referenceReasoningEffort: moaReferenceEffort(), aggregatorReasoningEffort: moaAggregatorEffort(), referenceTokenBudget: moaReferenceTokenBudget(), context: recentContext || undefined } : undefined, selfVerify: selfVerify() || Boolean(activeGoal), maxTurns: maxTurns() || undefined, disableWebSearch: !webSearchEnabled(), subagents: subagentsEnabled(), agent: advancedRun.agent || undefined, agents: advancedRun.agents || undefined, permissionMode: runPermissionMode, allow: advancedRun.allow.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), deny: advancedRun.deny.split(/[,\n]/).map((item) => item.trim()).filter(Boolean), tools: advancedRun.tools || undefined, disallowedTools: advancedRun.disallowedTools || undefined, memory: advancedRun.memory, sandbox: advancedRun.sandbox || undefined, rules: advancedRun.rules || undefined, systemPrompt: advancedRun.systemPrompt || undefined, verbatim: runVerbatim, forkSession: advancedRun.forkSession, restoreCode: advancedRun.restoreCode, worktree: advancedRun.worktree, worktreeName: advancedRun.worktreeName || undefined, worktreeRef: advancedRun.worktreeRef || undefined, jsonSchema: advancedRun.jsonSchema || undefined, promptFile: advancedRun.promptFile || undefined, promptJson: advancedRun.promptJson || undefined, sessionId: advancedRun.sessionId || undefined, noPlan: runNoPlan })
       if (!ephemeral && result.grokSessionId) await persistSessionId(result.grokSessionId)
       if (activeGoal) await saveGoal({ ...activeGoal, iterations: activeGoal.iterations + 1, updatedAt: Date.now() })
     } catch (error) {
@@ -1195,6 +1262,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
     setRuns(await window.api.grokRuns.list())
     setSkills(await window.api.skills.list(workspace()))
+    if (!ephemeral) await refreshSessionPlan(workspace(), sessionId())
     if (!ephemeral && !submitted.startsWith("[/learn]")) await maybeAutoLearn()
     const drained = ephemeral ? undefined : dequeuePrompt(queuedPrompts())
     const queued = drained?.next
@@ -1392,6 +1460,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
   }
   const useSkillInChat = (name: string) => { setPrompt(`/${name} `); setSlashNotice(""); void navigate("new-task") }
+  const runOfficialWorkflow = (name: string) => {
+    setSlashNotice(`Launching official Grok Build workflow ${name}…`)
+    void navigate("new-task")
+    queueMicrotask(() => void run(`/workflow ${name}`, { officialSlash: true }))
+  }
   const askReviewInChat = () => {
     const paths = gitChanges().slice(0, 24).map((change) => `${change.status} ${change.path}`).join("\n")
     setPrompt(paths ? `Review the current Git changes and propose the highest-impact next steps.\n\n${paths}` : "Review this codebase and suggest the highest-impact improvements.")
@@ -1407,8 +1480,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (active() === "review" || (contextRailMode() === "review" && project.isGit)) await refreshDiff(project.path)
     await refreshGitWorktrees(project.isGit ? project.path : "")
     if (active() === "skills") setSkills(await window.api.skills.list(project.path))
+    if (active() === "workflows") setWorkflows(await window.api.backend.workflows(project.path))
     await loadConversation(project.path)
     await loadGoal(project.path)
+    await refreshSessionPlan(project.path)
   }
 
   const selectProject = async (project: ProjectSnapshot) => {
@@ -1422,6 +1497,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (view === "workspace") await refreshFiles()
     if (view === "review") await refreshDiff()
     if (view === "skills") setSkills(await window.api.skills.list(workspace() || undefined))
+    if (view === "workflows") setWorkflows(await window.api.backend.workflows(workspace() || undefined))
     if (view === "runs") setRuns(await window.api.grokRuns.list())
     if (view === "artifacts") await refreshArtifacts()
     if (view === "scheduled") setSchedules(await window.api.schedules.list())
@@ -1497,11 +1573,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     </aside>
 
     <Show when={active() === "new-task" && contextRailMode() === "review"}><aside class="session-review-rail" aria-label="Session Git review"><ReviewPanel workspace={workspace()} projectName={selectedProject()?.name || "Scratch"} branch={selectedProject()?.branch} isGit={selectedProject()?.isGit} changes={gitChanges()} selectedPath={selectedDiff()} diff={diffContent()} onRefresh={() => void refreshDiff()} onSelect={async (path) => { setSelectedDiff(path); setDiffContent(await window.api.workspace.gitDiff(workspace(), path)) }} onAction={(path, action) => void applyReviewAction(path, action)} onAskReview={askReviewInChat} onOpenProject={chooseWorkspace} /></aside></Show>
-    <main class={`main-content ${active() === "new-task" ? "main-content--chat" : ""} ${active() === "browser-agent" ? "main-content--browser-agent" : ""} ${["workspace", "terminal", "review"].includes(active()) ? "main-content--ide" : ""} ${["artifacts", "skills", "scheduled", "runtime", "runs", "settings", "telegram"].includes(active()) ? "main-content--page" : ""} ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
+    <main class={`main-content ${active() === "new-task" ? "main-content--chat" : ""} ${active() === "browser-agent" ? "main-content--browser-agent" : ""} ${["workspace", "terminal", "review"].includes(active()) ? "main-content--ide" : ""} ${["artifacts", "skills", "workflows", "scheduled", "runtime", "runs", "settings", "telegram"].includes(active()) ? "main-content--page" : ""} ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
       <Show when={active() === "artifacts"} fallback={<Show when={active() === "review"} fallback={
       <Show when={active() === "workspace"} fallback={
       <Show when={active() === "terminal"} fallback={
       <Show when={active() === "skills"} fallback={
+      <Show when={active() === "workflows"} fallback={
       <Show when={active() === "scheduled"} fallback={
       <Show when={active() === "settings"} fallback={
       <Show when={active() === "telegram"} fallback={
@@ -1519,6 +1596,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           </div>
         </section>
         <Show when={workspace() || contextRailMode()}><nav class="context-rail-tabs" aria-label="Session context rail"><span>Session tools</span><button class={contextRailMode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()}>Files</button><button class={contextRailMode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail}>Terminal</button><button class={contextRailMode() === "activity" ? "active" : ""} onClick={toggleActivityRail}>Activity</button><Show when={previewEnabled()}><button class={contextRailMode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>Preview</button></Show><Show when={selectedProject()?.isGit}><button class={contextRailMode() === "review" ? "active" : ""} onClick={() => void toggleReviewRail()}>Review</button></Show></nav></Show>
+        <Show when={planMode() || sessionPlan()?.markdown}><section class={`goal-banner ${planMode() ? "" : "goal-banner--completed"}`}><div><span>{planMode() ? "PLAN MODE" : "SAVED PLAN"}</span><strong>{sessionPlan()?.markdown?.split(/\r?\n/).find((line) => line.startsWith("#"))?.replace(/^#+\s*/, "") || (planMode() ? "Grok Build will explore and write plan.md before editing other files." : "Saved Grok Build plan")}</strong><small>{sessionPlan()?.sessionId || "No plan.md yet"}</small></div><div><Show when={sessionPlan()?.markdown}><button onClick={() => void executeSlashCommand("/view-plan")}>View</button></Show><Show when={sessionPlan()?.markdown}><button onClick={() => { setPlanMode(false); void window.api.store.set(STORE_KEYS.defaultsPlanMode, false); void run("Approve the saved plan.md and start implementing it.", { permissionMode: "auto", noPlan: true }) }}>Approve & build</button></Show><Show when={planMode()}><button onClick={() => void executeSlashCommand("/plan off")}>Exit plan</button></Show></div></section></Show>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For></section></Show>
         <Show when={splitOpen() && splitThreads().length}><ConversationSplitPane threads={splitThreads()} activeId={splitActiveId()} onSelect={setSplitActiveId} onClose={(id) => void closeSplitConversation(id)} onFocus={() => void focusSplitConversation()} /></Show>
@@ -1546,6 +1624,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <div class="chat-composer__footer">
             <button class="composer-icon" onClick={() => { applyContextRail("files"); setFilesRailCollapsed(false); void refreshFiles() }} title="Attach workspace files">＋</button>
             <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsThinking, event.currentTarget.checked) }} />◇ Think</label>
+            <label class={`composer-toggle ${planMode() ? "composer-toggle--plan" : ""}`} title="Official Grok Build plan mode: --permission-mode plan, no --no-plan. Edits outside plan.md are blocked."><input type="checkbox" checked={planMode()} onChange={async (event) => { setPlanMode(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsPlanMode, event.currentTarget.checked) }} />☰ Plan</label>
             <label class={`composer-toggle ${autoApprove() ? "composer-toggle--warning" : ""}`} title="Allow Grok Build to execute tools without asking"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, event.currentTarget.checked) }} />⚡ Auto</label>
             <label class={`composer-toggle ${moaEnabled() ? "composer-toggle--moa" : ""}`} title={`Run ${moaCandidates()} candidates in parallel and synthesize the best result`}><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} />⌘ MoA ×{moaCandidates()}</label>
             <select class="composer-model" value={modelPickerValue()} onFocus={() => void refreshModelCatalog()} onChange={(event) => void selectModelValue(event.currentTarget.value)} aria-label="Model">
@@ -1563,7 +1642,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <Show when={running()}><button class="composer-stop" onClick={() => window.api.backend.cancel()} title="Stop current task"><span /></button></Show>
           </div>
         </section>
-        </div><Show when={terminalRailOpen()}><ChatTerminalRail workspace={workspace()} command={terminalCommand()} output={terminalOutput()} running={terminalRunning()} onCommand={setTerminalCommand} onRun={() => void runCommand()} onClear={() => setTerminalOutput("")} /></Show><Show when={inspectorOpen()}><TaskInspector running={running()} events={events()} goal={goal()} queuedCount={queuedPrompts().length} model={model() || catalog().defaultModel || ""} workspace={workspace()} approvalMode={autoApprove() ? "Automatic" : advanced().permissionMode === "plan" ? "Plan only" : advanced().permissionMode === "dontAsk" ? "No prompts" : "Interactive"} runs={runs()} onStop={() => void window.api.backend.cancel()} onOpenRuns={() => void navigate("runs")} /></Show><Show when={filesOpen()}><aside class={`project-files-rail ${filesRailCollapsed() ? "project-files-rail--collapsed" : ""}`} aria-label="Project files"><header><div><strong>Project files</strong><span>{selectedProject()?.name || "Scratch"} · {files().length} files</span></div><div class="project-files-actions"><button onClick={() => void refreshFiles()} title="Refresh project files">↻</button><button onClick={() => setFilesRailCollapsed((value) => !value)} title={filesRailCollapsed() ? "Expand files" : "Collapse files"}>{filesRailCollapsed() ? "›" : "‹"}</button><button onClick={() => setFilesOpen(false)} title="Close project files">×</button></div></header><Show when={!filesRailCollapsed()}><div class="project-files-search"><input value={fileSearch()} onInput={(event) => setFileSearch(event.currentTarget.value)} placeholder="Filter files…" aria-label="Filter project files" /></div><div class="project-files-list"><Show when={files().length} fallback={<div class="project-files-empty"><span>▤</span><strong>No files loaded</strong><p>Refresh this project to browse its files.</p><button onClick={() => void refreshFiles()}>Load files</button></div>}><div class="project-files-tree"><ProjectFileTree files={files()} query={fileSearch()} activePath={openFile()} onSelect={(path) => { void selectFile(path); setActive("workspace") }} onPreview={previewFile} /></div><For each={files().filter((file) => file.path.toLowerCase().includes(fileSearch().toLowerCase()))}>{(file) => <button class={`project-file ${openFile() === file.path ? "active" : ""}`} onClick={() => { void selectFile(file.path); setActive("workspace") }}><span class="project-file__icon">{file.path.match(/\.(tsx?|jsx?|css|json|md)$/i) ? "◇" : "□"}</span><span class="project-file__path">{file.path}</span><small>{file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`}</small></button>}</For></Show></div><footer><span>Click a file to open it in Workspace</span><button onClick={() => { setFilesOpen(false); setActive("workspace") }}>Open editor</button></footer></Show></aside></Show><Show when={previewEnabled() && previewOpen()}><aside class={`preview-rail ${previewCollapsed() ? "preview-rail--collapsed" : ""}`}><header><div><strong>Preview</strong><span>{previewStatus()}</span></div><div class="preview-actions"><button onClick={async () => { const next = !previewCollapsed(); setPreviewCollapsed(next); await window.api.store.set(STORE_KEYS.layoutPreviewCollapsed, next) }} title={previewCollapsed() ? "Expand preview" : "Collapse preview"}>{previewCollapsed() ? "‹" : "›"}</button><Show when={!previewCollapsed()}><button class={previewDevice() === "desktop" ? "active" : ""} onClick={() => setPreviewDevice("desktop")} title="Desktop">▰</button><button class={previewDevice() === "tablet" ? "active" : ""} onClick={() => setPreviewDevice("tablet")} title="Tablet">▯</button><button class={previewDevice() === "mobile" ? "active" : ""} onClick={() => setPreviewDevice("mobile")} title="Mobile">▯</button><button onClick={() => setPreviewReload((value) => value + 1)} title="Reload">↻</button><button onClick={() => window.api.app.openExternal(previewURL())} title="Open in browser">↗</button></Show><button onClick={() => setPreviewOpen(false)} title="Close preview">×</button></div></header><Show when={!previewCollapsed()}><div class="preview-location"><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} onKeyDown={async (event) => { if (event.key === "Enter") { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set(STORE_KEYS.previewUrl, value) } } }} /><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set(STORE_KEYS.previewUrl, value) } }}>Go</button></div><div class={`preview-viewport preview-viewport--${previewDevice()}`}><iframe src={`${previewURL()}${previewURL().includes("?") ? "&" : "?"}grok-preview-reload=${previewReload()}`} title="Coding preview" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-presentation allow-downloads" onLoad={() => setPreviewStatus("Connected")} /></div></Show></aside></Show></div>
+        </div><Show when={terminalRailOpen()}><ChatTerminalRail workspace={workspace()} command={terminalCommand()} output={terminalOutput()} running={terminalRunning()} onCommand={setTerminalCommand} onRun={() => void runCommand()} onClear={() => setTerminalOutput("")} /></Show><Show when={inspectorOpen()}><TaskInspector running={running()} events={events()} goal={goal()} queuedCount={queuedPrompts().length} model={model() || catalog().defaultModel || ""} workspace={workspace()} approvalMode={autoApprove() && !planMode() ? "Automatic" : planMode() || advanced().permissionMode === "plan" ? "Plan only" : advanced().permissionMode === "dontAsk" ? "No prompts" : "Interactive"} runs={runs()} onStop={() => void window.api.backend.cancel()} onOpenRuns={() => void navigate("runs")} /></Show><Show when={filesOpen()}><aside class={`project-files-rail ${filesRailCollapsed() ? "project-files-rail--collapsed" : ""}`} aria-label="Project files"><header><div><strong>Project files</strong><span>{selectedProject()?.name || "Scratch"} · {files().length} files</span></div><div class="project-files-actions"><button onClick={() => void refreshFiles()} title="Refresh project files">↻</button><button onClick={() => setFilesRailCollapsed((value) => !value)} title={filesRailCollapsed() ? "Expand files" : "Collapse files"}>{filesRailCollapsed() ? "›" : "‹"}</button><button onClick={() => setFilesOpen(false)} title="Close project files">×</button></div></header><Show when={!filesRailCollapsed()}><div class="project-files-search"><input value={fileSearch()} onInput={(event) => setFileSearch(event.currentTarget.value)} placeholder="Filter files…" aria-label="Filter project files" /></div><div class="project-files-list"><Show when={files().length} fallback={<div class="project-files-empty"><span>▤</span><strong>No files loaded</strong><p>Refresh this project to browse its files.</p><button onClick={() => void refreshFiles()}>Load files</button></div>}><div class="project-files-tree"><ProjectFileTree files={files()} query={fileSearch()} activePath={openFile()} onSelect={(path) => { void selectFile(path); setActive("workspace") }} onPreview={previewFile} /></div><For each={files().filter((file) => file.path.toLowerCase().includes(fileSearch().toLowerCase()))}>{(file) => <button class={`project-file ${openFile() === file.path ? "active" : ""}`} onClick={() => { void selectFile(file.path); setActive("workspace") }}><span class="project-file__icon">{file.path.match(/\.(tsx?|jsx?|css|json|md)$/i) ? "◇" : "□"}</span><span class="project-file__path">{file.path}</span><small>{file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`}</small></button>}</For></Show></div><footer><span>Click a file to open it in Workspace</span><button onClick={() => { setFilesOpen(false); setActive("workspace") }}>Open editor</button></footer></Show></aside></Show><Show when={previewEnabled() && previewOpen()}><aside class={`preview-rail ${previewCollapsed() ? "preview-rail--collapsed" : ""}`}><header><div><strong>Preview</strong><span>{previewStatus()}</span></div><div class="preview-actions"><button onClick={async () => { const next = !previewCollapsed(); setPreviewCollapsed(next); await window.api.store.set(STORE_KEYS.layoutPreviewCollapsed, next) }} title={previewCollapsed() ? "Expand preview" : "Collapse preview"}>{previewCollapsed() ? "‹" : "›"}</button><Show when={!previewCollapsed()}><button class={previewDevice() === "desktop" ? "active" : ""} onClick={() => setPreviewDevice("desktop")} title="Desktop">▰</button><button class={previewDevice() === "tablet" ? "active" : ""} onClick={() => setPreviewDevice("tablet")} title="Tablet">▯</button><button class={previewDevice() === "mobile" ? "active" : ""} onClick={() => setPreviewDevice("mobile")} title="Mobile">▯</button><button onClick={() => setPreviewReload((value) => value + 1)} title="Reload">↻</button><button onClick={() => window.api.app.openExternal(previewURL())} title="Open in browser">↗</button></Show><button onClick={() => setPreviewOpen(false)} title="Close preview">×</button></div></header><Show when={!previewCollapsed()}><div class="preview-location"><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} onKeyDown={async (event) => { if (event.key === "Enter") { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set(STORE_KEYS.previewUrl, value) } } }} /><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); setPreviewReload((count) => count + 1); setPreviewStatus("Loading…"); await window.api.store.set(STORE_KEYS.previewUrl, value) } }}>Go</button></div><div class={`preview-viewport preview-viewport--${previewDevice()}`}><iframe src={`${previewURL()}${previewURL().includes("?") ? "&" : "?"}grok-preview-reload=${previewReload()}`} title="Coding preview" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-presentation allow-downloads" onLoad={() => setPreviewStatus("Connected")} /></div></Show></aside></Show></div>
         </>}>
         <RunsPanel runs={runs} onRefresh={async () => setRuns(await window.api.grokRuns.list())} />
         </Show>
@@ -1772,6 +1851,16 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           onRun={async (id) => { await window.api.schedules.runNow(id); setSchedules(await window.api.schedules.list()) }}
           onToggle={async (id, enabled) => { await window.api.schedules.toggle(id, enabled); setSchedules(await window.api.schedules.list()) }}
           onRemove={async (id) => { await window.api.schedules.remove(id); setSchedules(await window.api.schedules.list()) }}
+        />
+      </Show>
+      }>
+        <WorkflowsPanel
+          workflows={workflows()}
+          search={workflowSearch()}
+          onSearch={setWorkflowSearch}
+          onRefresh={async () => setWorkflows(await window.api.backend.workflows(workspace()))}
+          onRun={runOfficialWorkflow}
+          workspaceName={selectedProject()?.name || "Scratch"}
         />
       </Show>
       }>

@@ -1,6 +1,7 @@
 /**
- * Duck-Agent governed workflows, executed only through Grok Build.
- * Source: Franzferdinan51/Duck-Agent `WORKFLOWS` + `run_work` framing.
+ * Duck-Agent governed prompt presets, executed only through Grok Build.
+ * Official Rhai workflows live in .grok/workflows and take precedence
+ * when /workflow matches a discovered script name.
  * This module never starts a second agent runtime.
  */
 
