@@ -35,7 +35,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test:smoke
+      # Hosted runners do not provide the locally installed Grok CLI or the
+      # same filesystem error semantics as the desktop development machine.
+      - run: pnpm test:unit
       - run: pnpm --filter @grok-build/desktop ${{ matrix.script }}
       - uses: actions/upload-artifact@v4
         with:
