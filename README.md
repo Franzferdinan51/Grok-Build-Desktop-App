@@ -21,7 +21,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 
 ### Agentic coding workspace
 
-- Atomic per-conversation storage with sanitized rich Markdown, streamed output, one consolidated and bounded reasoning panel per assistant turn, prompt queues, copy/retry actions, global search, rename, pin, archive, export, model/session labels, and cross-workspace history.
+- Atomic per-conversation storage with sanitized rich Markdown, streamed output, private reasoning kept out of the primary transcript, prompt queues, copy/retry actions, global search, rename, pin, archive, export, model/session labels, and cross-workspace history.
 - Persisted multi-session workspace view: keep a second saved conversation visible in a read-only pane for comparison or monitoring, then focus it when you are ready to work; execution remains serialized through the Grok Build backend.
 - Start in a persistent general-purpose Agent workspace, an isolated Scratch workspace, or an existing project.
 - Workspace file tree/editor, contained terminal with command history, Git review tree with highlighted diffs, and master-detail Skills/Scheduled pages.
@@ -53,7 +53,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Existing linked worktrees can be adopted with **Use**, registering that path as a project and switching the workbench without changing Git state.
 - The coding chat now coordinates Files, Terminal, Activity, and Preview through one session context rail, so switching tools keeps the conversation mounted and makes the active context obvious.
 - The Activity inspector presents a bounded, expandable timeline of response, reasoning, and error updates instead of an unstructured log tail; all reasoning phases from one run are consolidated into one expandable row with an update count.
-- Reasoning chunks are consolidated in the shared live-event buffer before rendering or persistence, so the chat, reload recovery, Activity inspector, and session dock show one bounded thinking panel per run rather than a stream of duplicate thinking turns.
+- Reasoning chunks are consolidated in the shared live-event buffer before rendering or persistence. Private reasoning stays out of the primary chat transcript; the Activity inspector is the single bounded place to inspect it, so long runs do not spam the conversation with thinking turns.
 - A persistent Duck-Agent-inspired workbench status bar keeps Grok availability, workspace/branch, active work, queue depth, changed files, approval mode, model, and DuckBot memory state visible across the app; each actionable item opens the existing relevant surface.
 - Run admission is singleton-safe across renderer startup, long turns, and external Grok activity: new prompts reconnect to an active task and enter the durable FIFO queue instead of failing with a duplicate-run error.
 - If the renderer reloads while Grok Build is still running, the workbench reattaches to the active task, restores its bounded visible output and session ID, and keeps new instructions queued until it finishes.

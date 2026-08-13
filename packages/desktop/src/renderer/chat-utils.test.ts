@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { MAX_CONSOLIDATED_REASONING_CHARS, splitThinking } from "./chat-utils.ts"
+import { MAX_CONSOLIDATED_REASONING_CHARS, publicChatLogs, splitThinking } from "./chat-utils.ts"
 
 test("splitThinking combines separated reasoning phases into one collapsible block", () => {
   assert.deepEqual(splitThinking([
@@ -23,4 +23,16 @@ test("splitThinking bounds a consolidated reasoning block", () => {
   assert.ok(thought)
   assert.equal(thought.content.length, MAX_CONSOLIDATED_REASONING_CHARS)
   assert.match(thought.content, /reasoning condensed/)
+})
+
+test("publicChatLogs keeps the transcript to public output and errors", () => {
+  assert.deepEqual(publicChatLogs([
+    { kind: "thought", content: "inspect" },
+    { kind: "text", content: "Implemented the fix." },
+    { kind: "thought", content: "verify" },
+    { kind: "error", content: "A later check needs attention." },
+  ]), [
+    { kind: "text", content: "Implemented the fix." },
+    { kind: "error", content: "A later check needs attention." },
+  ])
 })

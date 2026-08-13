@@ -53,6 +53,11 @@ export function splitThinking(logs: TaskLog[]): TaskLog[] {
   return consolidateThoughts(parts).map((part) => part.kind === "thought" ? { ...part, content: boundReasoning(part.content) } : part)
 }
 
+/** Keep private provider reasoning out of the primary conversation transcript. */
+export function publicChatLogs(logs: TaskLog[]): TaskLog[] {
+  return splitThinking(logs).filter((log) => log.kind !== "thought")
+}
+
 function boundReasoning(content: string): string {
   if (content.length <= MAX_CONSOLIDATED_REASONING_CHARS) return content
   const marker = "\n\n[… reasoning condensed …]\n\n"
