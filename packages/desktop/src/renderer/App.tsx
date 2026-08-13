@@ -662,6 +662,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const latest = runs().find((run) => run.threadId === thread.id)
     if (latest?.status === "running") return { kind: "running", label: "Running" }
     if (latest?.status === "failed" || thread.sessionStatus === "broken") return { kind: "failed", label: "Needs attention" }
+    if (latest?.status === "interrupted") return { kind: "interrupted", label: "Outcome unknown" }
     if (latest?.status === "cancelled") return { kind: "cancelled", label: "Cancelled" }
     if (latest?.status === "completed" || thread.sessionStatus === "recovered" || thread.sessionStatus === "resumable") return { kind: "completed", label: "Ready" }
     return { kind: "idle", label: "New" }

@@ -147,8 +147,8 @@ const interruptedAt = 1_800_000_000_000
 assert.deepEqual(reconcileInterruptedRuns([{
   id: "run-1", cwd: root, prompt: "test", startedAt: interruptedAt - 1_000, status: "running",
 }], interruptedAt), [{
-  id: "run-1", cwd: root, prompt: "test", startedAt: interruptedAt - 1_000, status: "cancelled",
-  finishedAt: interruptedAt, error: "Interrupted because the app closed before this run finished.",
+  id: "run-1", cwd: root, prompt: "test", startedAt: interruptedAt - 1_000, status: "interrupted",
+  finishedAt: interruptedAt, error: "Outcome unknown: the app closed before this run finished. Review the workspace before resuming.",
 }])
 
 assert.deepEqual(telegramInlineKeyboard({ text: "Models", buttons: [[{ text: "✓ grok-4.5", data: "pick_model:0" }]] }), {

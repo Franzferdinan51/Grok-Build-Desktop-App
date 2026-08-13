@@ -59,6 +59,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 - **Structured activity:** the Task Inspector now groups bounded streamed output into expandable response, reasoning, and error rows, keeping the existing Grok phase indicator as the source of lifecycle truth.
 - **Renderer recovery:** a reloaded workbench can request the main process's bounded active-run snapshot, restore the associated conversation and session ID, and continue receiving future events without starting a second Grok process.
 - **Run inspection:** Run History now uses persisted thread/session identity for a master-detail inspector with safe conversation opening, session resume, run forking, active-run stop, and bounded diagnostics.
+- **Interrupted-run recovery:** The durable run journal preserves bounded phase/event metadata across a main-process restart. Orphaned runs are labeled **Interrupted · outcome unknown** instead of being misreported as user-cancelled; resume/fork remains an explicit user decision.
 
 ## Sources checked but not selected as a base
 

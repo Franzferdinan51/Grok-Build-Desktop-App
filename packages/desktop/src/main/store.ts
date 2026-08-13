@@ -15,7 +15,7 @@ export type GrokRunRecord = {
   model?: string
   startedAt: number
   finishedAt?: number
-  status: "running" | "completed" | "failed" | "cancelled"
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted"
   grokSessionId?: string
   error?: string
   /** Structured local observability. Cost stays absent unless the CLI reports it. */
@@ -26,6 +26,29 @@ export type GrokRunRecord = {
   advisorCount?: number
   advisorFailures?: number
   errorClass?: string
+  /** Bounded tail retained when the main process loses an active run. */
+  eventTail?: GrokRunJournalEvent[]
+}
+
+export type GrokRunJournalEvent = {
+  type: string
+  data?: string
+  message?: string
+  phase?: string
+  sessionId?: string
+}
+
+export type GrokRunJournal = {
+  runId: string
+  threadId?: string
+  cwd: string
+  prompt: string
+  model?: string
+  startedAt: number
+  lastEventAt: number
+  phase?: string
+  sessionId?: string
+  events: GrokRunJournalEvent[]
 }
 
 export type ScheduledGrokTask = {
@@ -45,6 +68,7 @@ export type TelegramGoal = {
 
 type StoreSchema = {
   runs: GrokRunRecord[]
+  activeRunJournal?: GrokRunJournal
   ui: {
     sidebarPinned: boolean
     theme: "dark" | "light"

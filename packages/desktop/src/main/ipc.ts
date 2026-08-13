@@ -9,7 +9,7 @@ import { LocalStudioController } from "./local-studio"
 import { safeOpenExternal, UnsafeExternalUrlError } from "./security"
 import { addProject, inspectProject, listProjects, removeProject } from "./projects"
 import { GrokBuildBackend, type GrokBuildEvent, type RunTaskInput } from "./grok-build-backend"
-import { classifyRunError, finishGrokRun, listGrokRuns, startGrokRun, usageMetrics } from "./grok-runs"
+import { classifyRunError, finishGrokRun, listGrokRuns, recordGrokRunEvent, startGrokRun, usageMetrics } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
 import { listGrokWorkflows } from "./grok-workflows"
 import { readSessionPlan } from "./grok-session-files"
@@ -122,6 +122,13 @@ export function registerIpcHandlers(deps: Deps): void {
     const queueEvent = (update: GrokBuildEvent) => {
       if (update.type === "cancelled") cancelled = true
       if (update.type === "end") usage = update.usage
+      recordGrokRunEvent(run.id, {
+        type: update.type,
+        data: "data" in update && typeof update.data === "string" ? update.data : undefined,
+        message: "message" in update && typeof update.message === "string" ? update.message : undefined,
+        phase: "phase" in update && typeof update.phase === "string" ? update.phase : undefined,
+        sessionId: "sessionId" in update && typeof update.sessionId === "string" ? update.sessionId : grokSessionId,
+      })
       if (update.type === "thought" && typeof update.data === "string" && /Reference \d+ failed and was skipped\./.test(update.data)) advisorFailures += 1
       const previous = pendingEvents[pendingEvents.length - 1]
       if ((update.type === "text" || update.type === "thought") && previous?.type === update.type && typeof previous.data === "string" && typeof update.data === "string") {

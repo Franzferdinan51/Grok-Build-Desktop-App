@@ -3,8 +3,8 @@ import type { GrokRunRecord } from "./store"
 export function reconcileInterruptedRuns(runs: GrokRunRecord[], finishedAt = Date.now()): GrokRunRecord[] {
   return runs.map((record) => record.status === "running" ? {
     ...record,
-    status: "cancelled",
+    status: "interrupted",
     finishedAt,
-    error: "Interrupted because the app closed before this run finished.",
+    error: "Outcome unknown: the app closed before this run finished. Review the workspace before resuming.",
   } : record)
 }

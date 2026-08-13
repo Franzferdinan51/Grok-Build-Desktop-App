@@ -19,6 +19,7 @@ export function runDiagnostics(run: GrokRunRecord): string {
     `Started: ${new Date(run.startedAt).toISOString()}`,
     `Finished: ${run.finishedAt ? new Date(run.finishedAt).toISOString() : "still running"}`,
     `Duration: ${runDurationLabel(run)}`,
+    run.eventTail?.length ? `Last known activity events: ${run.eventTail.length}` : "",
     run.error ? `Error: ${run.error}` : "",
     run.errorClass ? `Error class: ${run.errorClass}` : "",
   ].filter(Boolean).join("\n")

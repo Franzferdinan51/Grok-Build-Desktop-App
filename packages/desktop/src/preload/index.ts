@@ -45,7 +45,7 @@ export type TelegramChat = {
   lastPreview?: string
 }
 export type ProjectSnapshot = { id: string; name: string; path: string; addedAt: number; isGit: boolean; branch?: string; changedFiles: number; diffStat?: string }
-export type GrokRunRecord = { id: string; threadId?: string; cwd: string; prompt: string; model?: string; startedAt: number; finishedAt?: number; status: "running" | "completed" | "failed" | "cancelled"; grokSessionId?: string; error?: string; latencyMs?: number; tokensIn?: number; tokensOut?: number; costUsd?: number; advisorCount?: number; advisorFailures?: number; errorClass?: string }
+export type GrokRunRecord = { id: string; threadId?: string; cwd: string; prompt: string; model?: string; startedAt: number; finishedAt?: number; status: "running" | "completed" | "failed" | "cancelled" | "interrupted"; grokSessionId?: string; error?: string; latencyMs?: number; tokensIn?: number; tokensOut?: number; costUsd?: number; advisorCount?: number; advisorFailures?: number; errorClass?: string; eventTail?: { type: string; data?: string; message?: string; phase?: string; sessionId?: string }[] }
 export type LocalStudioSnapshot = { configured: boolean; reachable: boolean; baseUrl: string; health?: unknown; status?: unknown; gpus?: unknown; error?: string }
 export type HostControlResult = { ok: boolean; backend: string; action: string; observed?: unknown; error?: string | null; permission_required?: boolean; missing_permissions?: unknown[] }
 export type GrokSkill = { name: string; description: string; path: string; scope: "project" | "user" | "compatible" }

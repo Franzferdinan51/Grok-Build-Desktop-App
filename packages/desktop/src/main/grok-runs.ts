@@ -1,14 +1,32 @@
 import { randomUUID } from "crypto"
-import { getStore, type GrokRunRecord } from "./store"
+import { getStore, type GrokRunJournalEvent, type GrokRunRecord } from "./store"
 import { classifyBackendError } from "./backend-error"
 import { reconcileInterruptedRuns } from "./grok-run-utils"
 
 const MAX_RUNS = 100
 const MAX_STORED_PROMPT = 8_000
+const MAX_JOURNAL_EVENTS = 120
+const MAX_JOURNAL_EVENT_CHARS = 32_000
 
 export function recoverInterruptedGrokRuns(): void {
   const runs = listGrokRuns()
-  if (runs.some((record) => record.status === "running")) getStore().set("runs", reconcileInterruptedRuns(runs))
+  const journal = getStore().get("activeRunJournal")
+  const recovered = reconcileInterruptedRuns(runs).map((record) => {
+    if (record.status !== "interrupted" || !journal || journal.runId !== record.id) return record
+    return {
+      ...record,
+      threadId: record.threadId || journal.threadId,
+      cwd: record.cwd || journal.cwd,
+      prompt: record.prompt || journal.prompt,
+      model: record.model || journal.model,
+      grokSessionId: record.grokSessionId || journal.sessionId,
+      eventTail: journal.events,
+    }
+  })
+  if (runs.some((record) => record.status === "running") || journal) {
+    getStore().set("runs", recovered)
+    getStore().set("activeRunJournal", undefined)
+  }
 }
 
 export function listGrokRuns(): GrokRunRecord[] {
@@ -27,7 +45,37 @@ export function startGrokRun(input: { cwd: string; prompt: string; model?: strin
     advisorCount: input.advisorCount,
   }
   getStore().set("runs", [record, ...listGrokRuns()].slice(0, MAX_RUNS))
+  getStore().set("activeRunJournal", {
+    runId: record.id,
+    threadId: record.threadId,
+    cwd: record.cwd,
+    prompt: record.prompt,
+    model: record.model,
+    startedAt: record.startedAt,
+    lastEventAt: record.startedAt,
+    events: [],
+  })
   return record
+}
+
+export function recordGrokRunEvent(runId: string, event: GrokRunJournalEvent): void {
+  const journal = getStore().get("activeRunJournal")
+  if (!journal || journal.runId !== runId) return
+  const bounded = (value?: string) => value?.slice(-MAX_JOURNAL_EVENT_CHARS)
+  const nextEvent: GrokRunJournalEvent = {
+    type: event.type,
+    data: bounded(event.data),
+    message: bounded(event.message),
+    phase: bounded(event.phase),
+    sessionId: bounded(event.sessionId),
+  }
+  getStore().set("activeRunJournal", {
+    ...journal,
+    lastEventAt: Date.now(),
+    phase: nextEvent.phase || journal.phase,
+    sessionId: nextEvent.sessionId || journal.sessionId,
+    events: [...journal.events, nextEvent].slice(-MAX_JOURNAL_EVENTS),
+  })
 }
 
 export function finishGrokRun(
@@ -41,6 +89,8 @@ export function finishGrokRun(
     return updated
   })
   getStore().set("runs", runs)
+  const journal = getStore().get("activeRunJournal")
+  if (journal?.runId === id) getStore().set("activeRunJournal", undefined)
   return updated
 }
 

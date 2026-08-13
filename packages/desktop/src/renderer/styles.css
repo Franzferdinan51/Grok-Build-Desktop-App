@@ -157,6 +157,7 @@
 .status-pill--completed,.status-pill--active,.status-pill--ready{background:#173e2b;color:#79dfa4}
 .status-pill--failed,.status-pill--error{background:#482332;color:#ffadbc}
 .status-pill--running{background:#403516;color:#ffe08a}
+.status-pill--interrupted{background:#4a3020;color:#ffc47d}
 .status-pill--paused{background:#2a3140;color:#a8afbf}
 .skill-scope--project{background:#1a2742;color:#91a9e8}
 .skill-scope--user{background:#1d2a22;color:#79dfa4}

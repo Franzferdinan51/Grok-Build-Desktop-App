@@ -29,6 +29,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
 - Searchable Grok run history, scheduled tasks, project skills, official Rhai workflows, and durable workspace goals.
 - Run History is an actionable session inspector: open the owning conversation, resume a verified native session, fork a run, stop the active run, or copy bounded diagnostics.
+- If the Electron main process restarts during a task, Run History marks the run **Interrupted · outcome unknown**, preserves a bounded last-known activity tail, and requires an explicit review before resume or fork.
 - Slash-command palette with keyboard completion and dynamically discovered Grok Build skills and workflows.
 - Global Quick Entry (`CommandOrControl+Shift+Space`) opens a secure, always-on-top composer from anywhere and routes submissions into the current or a new saved conversation.
 - Workspace file attachments let you select up to eight files from the project rail or drop known workspace files directly onto the composer; only files already returned by the safe workspace listing are accepted and their relative paths become explicit agent context.
