@@ -78,6 +78,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Provider-specific null numeric metadata and metadata-only Responses API control frames are normalized by the maintained Grok backend without changing the selected model.
 - MoA never silently substitutes the Grok default for a chosen reference model; an isolated failed reference is reported and skipped while successful selected references continue.
 - Optional balanced or proactive Grok Build subagent delegation for independent research, inspection, testing, and preview review.
+- The Task Inspector shows a compact live subagent roster sourced from Grok Build's verified spawn/completion events, with bounded labels, status, duration, and tool counts; child reasoning remains out of the main chat transcript.
 - The primary agent remains responsible for integration and final verification.
 
 ### Live coding preview and app controls

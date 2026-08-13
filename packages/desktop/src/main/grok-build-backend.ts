@@ -32,7 +32,7 @@ import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeM
 import { DuckbotMemory } from "./duckbot-memory"
 import { buildBaseArgs, compatibleCliArgs, promptArgsFor } from "./grok-args"
 import { StreamingJsonParser } from "./streaming-json"
-import { runGrokAcp, type GrokAcpPermissionRequest, type GrokAcpPermissionResponse } from "./grok-acp"
+import { runGrokAcp, type GrokAcpPermissionRequest, type GrokAcpPermissionResponse, type GrokAcpSubagentEvent } from "./grok-acp"
 import { reserveActiveRun } from "./active-run-admission"
 import {
   describeOAuthProvider,
@@ -130,6 +130,7 @@ export type RunTaskInput = {
 
 export type GrokBuildRunHooks = {
   onPermissionRequest?: (request: GrokAcpPermissionRequest) => Promise<GrokAcpPermissionResponse>
+  onSubagent?: (event: GrokAcpSubagentEvent) => void
 }
 
 export class GrokBuildBackend {
@@ -556,6 +557,7 @@ export class GrokBuildBackend {
           onThought: (data) => onEvent({ type: "thought", data }),
           onTool: (title) => onEvent({ type: "phase", phase: "executing", data: `ACP tool: ${title}` }),
           onSession: (sessionId) => onEvent({ type: "phase", phase: "executing", data: `ACP session ${sessionId}` }),
+          onSubagent: (event) => onEvent({ type: `subagent.${event.status === "running" ? "started" : event.status}`, id: event.id, label: event.label, durationMs: event.durationMs, toolCalls: event.toolCalls, turns: event.turns }),
           onPermissionRequest: hooks?.onPermissionRequest,
         })
         onEvent({ type: "end", sessionId: result.sessionId })

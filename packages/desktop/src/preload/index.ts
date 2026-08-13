@@ -15,7 +15,7 @@ export type OAuthProviderStatus = {
   detail: string
 }
 export type OAuthStatusSnapshot = { providers: OAuthProviderStatus[] }
-export type BackendEvent = { type: string; data?: string; message?: string; phase?: "starting" | "advising" | "executing" | "recovering" | "completed" | "failed" | "cancelled"; sessionId?: string; usage?: unknown }
+export type BackendEvent = { type: string; data?: string; message?: string; phase?: "starting" | "advising" | "executing" | "recovering" | "completed" | "failed" | "cancelled"; sessionId?: string; usage?: unknown; [key: string]: unknown }
 export type BackendPermissionOption = { optionId?: string; name?: string; kind?: string; description?: string }
 export type BackendPermissionRequest = { requestId: string; runId: string; options: BackendPermissionOption[]; toolCall?: unknown; title?: string }
 export type ActiveRunSnapshot = { runId?: string; threadId?: string; cwd: string; prompt: string; startedAt: number; sessionId?: string; phase?: BackendEvent["phase"]; events: BackendEvent[] }

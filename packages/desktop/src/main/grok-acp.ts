@@ -5,18 +5,50 @@ export type GrokAcpPermissionMode = "default" | "acceptEdits" | "auto" | "dontAs
 export type GrokAcpPermissionOption = { optionId?: string; name?: string; kind?: string; description?: string }
 export type GrokAcpPermissionRequest = { options: GrokAcpPermissionOption[]; toolCall?: unknown; title?: string }
 export type GrokAcpPermissionResponse = { outcome: { outcome: "selected"; optionId: string } | { outcome: "cancelled" } }
+export type GrokAcpSubagentEvent = { id: string; status: "running" | "completed" | "failed" | "cancelled"; label?: string; durationMs?: number; toolCalls?: number; turns?: number }
 
 export type GrokAcpCallbacks = {
   onText?: (text: string) => void
   onThought?: (text: string) => void
   onTool?: (title: string) => void
   onSession?: (sessionId: string) => void
+  onSubagent?: (event: GrokAcpSubagentEvent) => void
   onPermissionRequest?: (request: GrokAcpPermissionRequest) => Promise<GrokAcpPermissionResponse>
 }
 
 export type GrokAcpResult = { text: string; sessionId: string; stopReason: string | null }
 
 type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+
+const object = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {}
+const stringValue = (...values: unknown[]) => values.find((value): value is string => typeof value === "string" && Boolean(value.trim()))?.trim()
+const numberValue = (...values: unknown[]) => values.find((value): value is number => typeof value === "number" && Number.isFinite(value))
+
+export function subagentEventFromMessage(message: Record<string, any>): GrokAcpSubagentEvent | null {
+  const params = object(message.params)
+  const update = object(params.update || object(params.params).update)
+  const sessionUpdate = stringValue(update.sessionUpdate, params.sessionUpdate)?.toLowerCase()
+  const lifecycle = stringValue(message.method)?.replace(/_/g, ".").toLowerCase()
+  const started = sessionUpdate === "subagent_spawned" || lifecycle === "subagent.started" || lifecycle === "subagent.spawned"
+  const finished = sessionUpdate === "subagent_finished" || lifecycle === "subagent.completed" || lifecycle === "subagent.finished"
+  const rawInput = object(update.rawInput || update.raw_input)
+  const rawOutput = object(update.rawOutput || update.raw_output)
+  const toolName = stringValue(update.toolName, update.tool_name, rawInput.toolName, rawInput.tool_name)?.toLowerCase()
+  const toolStart = sessionUpdate === "tool_call" && (toolName === "spawn_subagent" || toolName === "task")
+  const toolFinish = sessionUpdate === "tool_call_update" && (stringValue(rawOutput.type, rawOutput.kind)?.toLowerCase().includes("subagent") || Boolean(rawOutput.subagent_id || rawOutput.subagentId))
+  if (!started && !finished && !toolStart && !toolFinish) return null
+  const id = stringValue(update.subagent_id, update.subagentId, update.child_session_id, update.childSessionId, update.toolCallId, update.tool_call_id, rawOutput.subagent_id, rawOutput.subagentId)
+  if (!id) return null
+  const status = started || toolStart ? "running" : (stringValue(update.status, rawOutput.status)?.toLowerCase().includes("fail") ? "failed" : stringValue(update.status, rawOutput.status)?.toLowerCase().includes("cancel") ? "cancelled" : "completed")
+  return {
+    id,
+    status,
+    label: stringValue(update.description, update.title, rawInput.description, rawInput.prompt),
+    durationMs: numberValue(update.duration_ms, update.durationMs, rawOutput.duration_ms, rawOutput.durationMs),
+    toolCalls: numberValue(update.tool_calls, update.toolCalls, rawOutput.tool_calls, rawOutput.toolCalls),
+    turns: numberValue(update.turns, rawOutput.turns),
+  }
+}
 
 const TIMEOUTS = { initialize: 20_000, authenticate: 20_000, session: 30_000, prompt: 120_000 }
 
@@ -117,7 +149,10 @@ export function runGrokAcp(
             .catch(() => send({ jsonrpc: "2.0", id: message.id, result: { outcome: { outcome: "cancelled" } } }))
           continue
         }
-        if (message.method !== "session/update" || !promptSent || message.params?._meta?.isReplay === true) continue
+        if (!promptSent || message.params?._meta?.isReplay === true) continue
+        const subagentEvent = subagentEventFromMessage(message)
+        if (subagentEvent) callbacks.onSubagent?.(subagentEvent)
+        if (message.method !== "session/update") continue
         const update = message.params?.update || {}
         const text = update.content?.text
         if (update.sessionUpdate === "agent_message_chunk" && typeof text === "string" && text) { output += text; callbacks.onText?.(text) }

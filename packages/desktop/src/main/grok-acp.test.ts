@@ -3,11 +3,23 @@ import test from "node:test"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { permissionResponse, runGrokAcp } from "./grok-acp.ts"
+import { permissionResponse, runGrokAcp, subagentEventFromMessage } from "./grok-acp.ts"
 
 test("ACP permissions fail closed outside bypass mode", () => {
   assert.deepEqual(permissionResponse("default", [{ optionId: "allow", kind: "allow_once" }]), { outcome: { outcome: "cancelled" } })
   assert.deepEqual(permissionResponse("bypassPermissions", [{ optionId: "allow", kind: "allow_once" }]), { outcome: { outcome: "selected", optionId: "allow" } })
+})
+
+test("ACP maps Grok subagent lifecycle notifications", () => {
+  const started = subagentEventFromMessage({ method: "x.ai/session_notification", params: { update: { sessionUpdate: "subagent_spawned", subagent_id: "sub-1", description: "Review tests" } } })
+  assert.equal(started?.id, "sub-1")
+  assert.equal(started?.status, "running")
+  assert.equal(started?.label, "Review tests")
+  const finished = subagentEventFromMessage({ method: "_x.ai/session_notification", params: { params: { update: { sessionUpdate: "subagent_finished", subagent_id: "sub-1", duration_ms: 800, turns: 2 } } } })
+  assert.equal(finished?.id, "sub-1")
+  assert.equal(finished?.status, "completed")
+  assert.equal(finished?.durationMs, 800)
+  assert.equal(finished?.turns, 2)
 })
 
 test("ACP rejects a missing Grok executable cleanly", async () => {
