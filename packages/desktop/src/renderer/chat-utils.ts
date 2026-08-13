@@ -13,7 +13,7 @@ export function splitThinking(logs: TaskLog[]): TaskLog[] {
     return all
   }, [])
 
-  return merged.flatMap((log) => {
+  const parts = merged.flatMap((log) => {
     if (log.kind !== "text") return [log]
     // Always strip orphan closing reasoning tags so a model that streams a
     // closing delimiter without ever sending the opening tag cannot leak
@@ -40,6 +40,17 @@ export function splitThinking(logs: TaskLog[]): TaskLog[] {
     if (after) parts.push({ kind: "text", content: after })
     return parts
   })
+  // Providers may emit reasoning in several phases, separated by tool and
+  // status events. Keep one collapsible thinking section per assistant turn
+  // so the transcript does not become a stack of nearly identical panels.
+  const thoughtIndexes = parts.flatMap((part, index) => part.kind === "thought" ? [index] : [])
+  if (thoughtIndexes.length > 1) {
+    const first = thoughtIndexes[0]!
+    const combined = thoughtIndexes.map((index) => parts[index]!.content).filter(Boolean).join("\n\n")
+    const firstPart = parts[first]!
+    return parts.filter((_part, index) => !thoughtIndexes.includes(index) || index === first).map((part) => part === firstPart ? { kind: "thought", content: combined } : part)
+  }
+  return parts
 }
 
 /** Always leave a visible completion message when a model only streams private reasoning. */

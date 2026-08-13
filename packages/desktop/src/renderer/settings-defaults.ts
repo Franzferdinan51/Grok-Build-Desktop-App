@@ -5,6 +5,7 @@
 export type PermissionMode = "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"
 
 export type AdvancedSettings = {
+  transport: "headless" | "acp"
   agent: string
   agents: string
   permissionMode: PermissionMode
@@ -31,6 +32,7 @@ export type AdvancedSettings = {
 }
 
 export const ADVANCED_DEFAULTS: AdvancedSettings = {
+  transport: "headless",
   agent: "",
   agents: "",
   permissionMode: "auto",

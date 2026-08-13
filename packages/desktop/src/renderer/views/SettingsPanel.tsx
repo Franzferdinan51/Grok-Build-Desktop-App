@@ -343,6 +343,13 @@ export function SettingsPanel(props: {
         <div class="settings-card">
           <div><strong>Advanced Grok Build parity</strong><span>Native agents, permissions, memory, sandboxing, and worktrees.</span></div>
           <div class="advanced-settings-grid">
+            <label>Grok transport
+              <select value={props.advanced.transport} onChange={(event) => props.onAdvanced("transport", event.currentTarget.value as AdvancedSettings["transport"])}>
+                <option value="headless">Headless streaming-json · default</option>
+                <option value="acp">Authenticated ACP · grok login</option>
+              </select>
+              <small>ACP uses the local Grok login and exposes native permission requests.</small>
+            </label>
             <label>Agent name or definition<input value={props.advanced.agent} onInput={(event) => props.onAdvanced("agent", event.currentTarget.value)} placeholder="agent name or file path" /></label>
             <label>Inline subagent definitions (JSON)<textarea value={props.advanced.agents} onInput={(event) => props.onAdvanced("agents", event.currentTarget.value)} placeholder='{"reviewer":{"description":"Review changes"}}' /></label>
             <label>Permission mode

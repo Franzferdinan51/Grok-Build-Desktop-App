@@ -32,6 +32,7 @@ import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeM
 import { DuckbotMemory } from "./duckbot-memory"
 import { buildBaseArgs, compatibleCliArgs, promptArgsFor } from "./grok-args"
 import { StreamingJsonParser } from "./streaming-json"
+import { runGrokAcp } from "./grok-acp"
 import { reserveActiveRun } from "./active-run-admission"
 import {
   describeOAuthProvider,
@@ -123,6 +124,8 @@ export type RunTaskInput = {
     referenceTimeoutMs?: number
     context?: string
   }
+  /** Explicit opt-in to the authenticated Grok Build ACP transport. */
+  transport?: "headless" | "acp"
 }
 
 export class GrokBuildBackend {
@@ -130,6 +133,7 @@ export class GrokBuildBackend {
   private activeRun: GrokBuildActiveRunSnapshot | null = null
   private cancelRequested = false
   private moaAbort: AbortController | null = null
+  private acpAbort: AbortController | null = null
   private readonly codexBridge = new CodexOAuthBridge()
   private readonly longTermMemory = new DuckbotMemory()
 
@@ -159,7 +163,7 @@ export class GrokBuildBackend {
     "trace", "update", "version", "worktree", "wrap",
   ])
 
-  isRunning(): boolean { return this.current !== null || this.moaAbort !== null || this.activeRun !== null }
+  isRunning(): boolean { return this.current !== null || this.moaAbort !== null || this.acpAbort !== null || this.activeRun !== null }
 
   /** Reserve the singleton before any async CLI discovery or persistence. */
   reserveRun(input: Pick<RunTaskInput, "cwd" | "prompt" | "threadId">): string {
@@ -533,6 +537,30 @@ export class GrokBuildBackend {
       deliver(event)
     }
     onEvent({ type: "phase", phase: "starting", data: `Preparing Grok Build in ${input.cwd}` })
+    if (input.transport === "acp") {
+      if (input.moa?.referenceModels.length || input.jsonSchema?.trim()) throw new Error("Grok ACP currently supports ordinary agent turns only; disable MoA and structured browser output for this run.")
+      this.acpAbort = new AbortController()
+      try {
+        const result = await runGrokAcp(effectivePrompt, {
+          cli: command,
+          cwd: input.cwd,
+          model: effectiveModel,
+          permissionMode: input.permissionMode,
+          signal: this.acpAbort.signal,
+        }, {
+          onText: (data) => onEvent({ type: "text", data }),
+          onThought: (data) => onEvent({ type: "thought", data }),
+          onTool: (title) => onEvent({ type: "phase", phase: "executing", data: `ACP tool: ${title}` }),
+          onSession: (sessionId) => onEvent({ type: "phase", phase: "executing", data: `ACP session ${sessionId}` }),
+        })
+        onEvent({ type: "end", sessionId: result.sessionId })
+        onEvent({ type: "phase", phase: result.stopReason === "cancelled" ? "cancelled" : "completed", data: "Grok Build ACP finished its run" })
+        if (input.longTermMemory !== false) void this.longTermMemory.remember(input.prompt, result.text, input.cwd)
+        return
+      } finally {
+        this.acpAbort = null
+      }
+    }
     if (input.moa?.referenceModels.length) {
       this.moaAbort = new AbortController()
       // Hermes caps fan-out at eight workers. References are intentionally
@@ -836,6 +864,8 @@ ${referenceSection}
     if (this.moaAbort) this.cancelRequested = true
     this.moaAbort?.abort()
     this.moaAbort = null
+    this.acpAbort?.abort()
+    this.acpAbort = null
     if (!this.current) {
       if (this.activeRun) this.cancelRequested = true
       return

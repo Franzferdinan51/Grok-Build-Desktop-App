@@ -17,6 +17,14 @@ The app may add documented flags only:
 
 Reference: [Grok Build headless mode](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md).
 
+For signed-in desktop agent sessions, Advanced settings may opt into Grok Build's official ACP stdio surface:
+
+```text
+grok --permission-mode <mode> agent stdio
+```
+
+ACP is intentionally explicit and is not used for structured browser output or mixed-model MoA runs. The default remains headless streaming-json so the desktop can preserve its bounded parser and verified recovery behavior.
+
 ## LM Studio and API models — Grok Build's catalog
 
 LM Studio is a first-class **Grok Build model provider**, not a separate agent path. Configure it as a custom OpenAI-compatible `[model.<name>]` entry in `~/.grok/config.toml`; Grok Build then exposes it through `grok models` and the desktop model picker passes that model id to `grok --model`.

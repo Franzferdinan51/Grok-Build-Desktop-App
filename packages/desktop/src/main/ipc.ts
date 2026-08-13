@@ -106,10 +106,12 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("memory:wake-up", (_event, query?: string) => memory.wakeUp(typeof query === "string" ? query : ""))
   ipcMain.handle("memory:recall", (_event, query: string) => memory.context(query))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
-    const reservedRunId = deps.backend().reserveRun(input)
+    const advancedDefaults = (getStore().get("defaults.advanced") as { transport?: "headless" | "acp" } | undefined) || {}
+    const effectiveInput: RunTaskInput = input.transport ? input : { ...input, transport: advancedDefaults.transport === "acp" ? "acp" : "headless" }
+    const reservedRunId = deps.backend().reserveRun(effectiveInput)
     let run
     try {
-      run = startGrokRun({ ...input, advisorCount: input.moa?.referenceModels.filter(Boolean).slice(0, 8).length }, reservedRunId)
+      run = startGrokRun({ ...effectiveInput, advisorCount: effectiveInput.moa?.referenceModels.filter(Boolean).slice(0, 8).length }, reservedRunId)
     } catch (error) {
       deps.backend().clearActiveRun(reservedRunId)
       throw error
@@ -149,7 +151,7 @@ export function registerIpcHandlers(deps: Deps): void {
       else if (!eventTimer) eventTimer = setTimeout(flushEvents, 16)
     }
     try {
-      await deps.backend().run(input, (update) => {
+      await deps.backend().run(effectiveInput, (update) => {
         if ("sessionId" in update && typeof update.sessionId === "string") grokSessionId = update.sessionId
         queueEvent(update)
       }, reservedRunId)

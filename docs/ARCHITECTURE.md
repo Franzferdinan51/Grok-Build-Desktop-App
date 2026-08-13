@@ -8,7 +8,7 @@
 Electron renderer
   -> context-isolated preload API
   -> Electron main process
-       -> Grok Build CLI streaming headless mode
+       -> Grok Build CLI streaming headless mode (default) or official ACP stdio (explicit opt-in)
        -> protected workspace filesystem / Git / terminal
        -> OS-encrypted secrets and connector settings
 ```
