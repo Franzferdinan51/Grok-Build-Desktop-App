@@ -18,6 +18,7 @@ const KNOWN_BASE_FLAGS = [
   "--model",
   "--reasoning-effort",
   "--always-approve",
+  "--continue",
   "--check",
   "--resume",
   "--best-of-n",
@@ -68,7 +69,10 @@ export function buildBaseArgs(input: RunTaskInput, promptArgs: string[]): string
   const reasoningEffort = input.moa?.aggregatorReasoningEffort || (input.thinking ? "high" : undefined)
   if (reasoningEffort) args.push("--reasoning-effort", reasoningEffort)
   if (input.autoApprove) args.push("--always-approve")
-  if (input.resume) args.push("--resume", input.resume)
+  // `--continue` selects the most recent native session. It is mutually
+  // exclusive with an explicit `--resume <id>`.
+  if (input.continueSession) args.push("--continue")
+  else if (input.resume) args.push("--resume", input.resume)
   if (!input.moa && input.bestOfN && input.bestOfN >= 2) args.push("--best-of-n", String(Math.min(10, Math.floor(input.bestOfN))))
   if (input.selfVerify) args.push("--check")
   if (input.maxTurns && input.maxTurns > 0) args.push("--max-turns", String(Math.min(100, Math.floor(input.maxTurns))))
@@ -94,8 +98,8 @@ export function buildBaseArgs(input: RunTaskInput, promptArgs: string[]): string
   if (input.rules?.trim()) args.push("--rules", input.rules.trim())
   if (input.systemPrompt?.trim()) args.push("--system-prompt-override", input.systemPrompt.trim())
   if (input.verbatim) args.push("--verbatim")
-  if (input.resume && input.forkSession) args.push("--fork-session")
-  if (input.resume && input.restoreCode) args.push("--restore-code")
+  if (input.resume && !input.continueSession && input.forkSession) args.push("--fork-session")
+  if (input.resume && !input.continueSession && input.restoreCode) args.push("--restore-code")
   if (input.sessionId?.trim() && (!input.resume || input.forkSession)) args.push("--session-id", input.sessionId.trim())
   // Official plan mode is --permission-mode plan. --no-plan would cancel it.
   if (permissionMode !== "plan" && (input.noPlan || input.moa)) args.push("--no-plan")

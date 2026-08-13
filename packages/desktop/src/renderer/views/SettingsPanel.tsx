@@ -397,8 +397,9 @@ export function SettingsPanel(props: {
           <div><strong>Advanced prompt and session input</strong><span>Prompt files, JSON content blocks, session UUIDs, and plan control.</span></div>
           <div class="advanced-settings-grid">
             <label>Prompt file<input value={props.advanced.promptFile} onInput={(event) => props.onAdvanced("promptFile", event.currentTarget.value)} placeholder="workspace prompt file path" /></label>
-            <label>New or forked session UUID<input value={props.advanced.sessionId} onInput={(event) => props.onAdvanced("sessionId", event.currentTarget.value)} placeholder="optional UUID" /></label>
+            <label>New or forked session UUID<input value={props.advanced.sessionId} disabled={props.advanced.continueSession} onInput={(event) => props.onAdvanced("sessionId", event.currentTarget.value)} placeholder="optional UUID" /></label>
             <label>Prompt JSON content blocks<textarea value={props.advanced.promptJson} onInput={(event) => props.onAdvanced("promptJson", event.currentTarget.value)} placeholder='[{"type":"text","text":"Task"}]' /></label>
+            <label class="settings-switch"><input type="checkbox" checked={props.advanced.continueSession} onChange={(event) => props.onAdvanced("continueSession", event.currentTarget.checked)} /><span />Continue latest Grok session (<code>--continue</code>)</label>
             <label class="settings-switch"><input type="checkbox" checked={props.advanced.noPlan} onChange={(event) => props.onAdvanced("noPlan", event.currentTarget.checked)} /><span />Disable plan mode (<code>--no-plan</code>)</label>
           </div>
         </div>

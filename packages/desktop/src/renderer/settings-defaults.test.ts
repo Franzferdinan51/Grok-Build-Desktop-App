@@ -10,6 +10,7 @@ test("friendly defaults keep coding sessions CLI-fast", () => {
   assert.equal(FRIENDLY_DEFAULTS.webSearch, true)
   assert.equal(FRIENDLY_DEFAULTS.autoApprove, false)
   assert.equal(ADVANCED_DEFAULTS.permissionMode, "auto")
+  assert.equal(ADVANCED_DEFAULTS.continueSession, false)
   assert.equal(ADVANCED_DEFAULTS.noPlan, true)
 })
 

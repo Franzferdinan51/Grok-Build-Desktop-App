@@ -26,6 +26,7 @@ export type AdvancedSettings = {
   promptFile: string
   promptJson: string
   sessionId: string
+  continueSession: boolean
   noPlan: boolean
 }
 
@@ -51,6 +52,7 @@ export const ADVANCED_DEFAULTS: AdvancedSettings = {
   promptFile: "",
   promptJson: "",
   sessionId: "",
+  continueSession: false,
   noPlan: true,
 }
 

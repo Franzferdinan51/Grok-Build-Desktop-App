@@ -27,6 +27,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Workspace file tree/editor, contained terminal with command history, Git review tree with highlighted diffs, and master-detail Skills/Scheduled pages.
 - Fixed header and composer with an independently scrolling chat transcript; every non-chat page, including the full Settings catalog, has its own reliable viewport scroll.
 - Grok session IDs are bound to each conversation and workspace and resume across turns, stops, relaunches, and project switches. Token-aware visible-only context and automatic checkpoints recover long conversations without injecting thoughts, advisor transcripts, preview DOM, action tags, or tool noise.
+- The Advanced session controls also expose Grok Build's verified `--continue` path for explicitly continuing the most recent native session; it takes precedence over an explicit session UUID.
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
 - Searchable Grok run history, scheduled tasks, project skills, official Rhai workflows, and durable workspace goals.
 - Scheduled runs now create distinct persisted conversations; **Open last result** returns to the transcript and native session for review or continuation.

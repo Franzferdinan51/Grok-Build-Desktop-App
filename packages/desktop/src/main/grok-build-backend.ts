@@ -73,6 +73,8 @@ export type RunTaskInput = {
   model?: string
   thinking?: boolean
   autoApprove?: boolean
+  /** Continue the most recent Grok session in the selected workspace. */
+  continueSession?: boolean
   resume?: string
   bestOfN?: number
   selfVerify?: boolean
