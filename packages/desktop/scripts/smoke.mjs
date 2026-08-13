@@ -343,10 +343,10 @@ assert.deepEqual(afterForget.sessions, { "100": { sessionId: "abc" } })
 // Defensive: when previous state has no fields at all, both helpers still
 // produce well-formed defaults (no crashes, no undefined-typed shapes).
 const emptySoft = withDisconnectedState({})
-assert.deepEqual(emptySoft, { allowedChatIds: [], pendingChatIds: [], updateOffset: 0, sessions: {} })
+assert.deepEqual(emptySoft, { allowedChatIds: [], pendingChatIds: [], chatProfiles: {}, autoApproveFirst: false, updateOffset: 0, sessions: {} })
 const emptyForget = withForgottenTokenState({})
 assert.equal(emptyForget.token, undefined)
-assert.deepEqual(emptyForget, { allowedChatIds: [], pendingChatIds: [], updateOffset: 0, sessions: {} })
+assert.deepEqual(emptyForget, { allowedChatIds: [], pendingChatIds: [], chatProfiles: {}, autoApproveFirst: false, updateOffset: 0, sessions: {} })
 
 // Shell tokenizer for GrokBuildBackend.runTool: the prior regex split
 // command lines incorrectly on embedded escapes, empty quoted strings,

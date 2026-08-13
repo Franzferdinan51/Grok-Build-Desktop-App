@@ -22,7 +22,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 
 - Atomic per-conversation storage with sanitized rich Markdown, streamed output, collapsed reasoning, prompt queues, copy/retry actions, global search, rename, pin, archive, export, model/session labels, and cross-workspace history.
 - Start in a persistent general-purpose Agent workspace, an isolated Scratch workspace, or an existing project.
-- Workspace file browser/editor, contained terminal, Git status, and per-file diffs.
+- Workspace file tree/editor, contained terminal with command history, Git review tree with highlighted diffs, and master-detail Skills/Scheduled pages.
 - Fixed header and composer with an independently scrolling chat transcript; every non-chat page, including the full Settings catalog, has its own reliable viewport scroll.
 - Grok session IDs are bound to each conversation and workspace and resume across turns, stops, relaunches, and project switches. Token-aware visible-only context and automatic checkpoints recover long conversations without injecting thoughts, advisor transcripts, preview DOM, action tags, or tool noise.
 - Collapsible left navigation and right Preview rail with persisted layout preferences.
@@ -101,7 +101,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 
 ### Prerequisites
 
-- Node.js 20.19+ (or 22.12+; Node 22.22+ is recommended for the desktop toolchain)
+- Node.js 20+
 - pnpm 9+
 - Grok Build CLI
 - Optional: Hermes Agent for OpenAI Codex subscription OAuth

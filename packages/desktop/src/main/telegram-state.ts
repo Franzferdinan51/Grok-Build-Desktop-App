@@ -10,41 +10,43 @@ export type TelegramPersistedState = {
   updateOffset?: number
   allowedChatIds?: string[]
   pendingChatIds?: string[]
+  chatProfiles?: Record<string, unknown>
+  autoApproveFirst?: boolean
   sessions?: Record<string, unknown>
 }
 
-/**
- * Build the next persisted-state object for a "soft" disconnect: stop
- * polling, keep the encrypted token so the user can reconnect without
- * re-entering it, preserve allowlist + pending chats + per-chat sessions
- * and reset the offset so the next connect starts fresh.
- */
-export function withDisconnectedState(previous: TelegramPersistedState): TelegramPersistedState {
+function withSharedDisconnectFields(previous: TelegramPersistedState): Omit<TelegramPersistedState, "token"> {
   return {
-    ...previous,
     allowedChatIds: previous.allowedChatIds || [],
     pendingChatIds: previous.pendingChatIds || [],
+    chatProfiles: previous.chatProfiles || {},
+    autoApproveFirst: previous.autoApproveFirst || false,
     updateOffset: 0,
     sessions: previous.sessions || {},
   }
 }
 
 /**
- * Build the next persisted-state object for a "hard" forget: same as
- * the soft disconnect but the encrypted bot token is dropped from disk.
- * Previously `disconnect()` did NOT clear the token, so clicking
- * "Disconnect" left the encrypted token on disk — a privacy defect
- * given the rest of the file's encryption posture and the user's
- * expectation when they ask to remove the bot.
+ * Soft disconnect: stop polling, keep the encrypted token so the user can
+ * reconnect without re-entering the BotFather secret, preserve allowlist,
+ * pending chats, chat identity, and per-chat sessions.
+ */
+export function withDisconnectedState(previous: TelegramPersistedState): TelegramPersistedState {
+  return {
+    ...previous,
+    ...withSharedDisconnectFields(previous),
+  }
+}
+
+/**
+ * Hard forget: same as the soft disconnect but the encrypted bot token is
+ * dropped from disk.
  */
 export function withForgottenTokenState(previous: TelegramPersistedState): TelegramPersistedState {
   const { token: _dropped, ...rest } = previous
   void _dropped
   return {
     ...rest,
-    allowedChatIds: previous.allowedChatIds || [],
-    pendingChatIds: previous.pendingChatIds || [],
-    updateOffset: 0,
-    sessions: previous.sessions || {},
+    ...withSharedDisconnectFields(previous),
   }
 }

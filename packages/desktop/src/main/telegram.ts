@@ -5,16 +5,44 @@ import { telegramInlineKeyboard, type TelegramReply } from "./telegram-format"
 import { write as writeLog } from "./logging"
 import { telegramHtml, telegramTextChunks } from "./telegram-text"
 import { withDisconnectedState, withForgottenTokenState } from "./telegram-state.ts"
+import {
+  ESSENTIAL_BOT_COMMANDS,
+  approveChatState,
+  approvedMessage,
+  denyChatState,
+  deniedMessage,
+  hydrateChats,
+  isPublicPairingCommand,
+  labelChat,
+  pairingMessage,
+  profileFromTelegramChat,
+  revokedMessage,
+  shouldAutoApproveFirst,
+  upsertChatProfile,
+  type TelegramChatProfile,
+  type TelegramChatView,
+} from "./telegram-connection.ts"
 
 export type TelegramStatus = {
   connected: boolean
+  hasToken?: boolean
   polling?: boolean
   username?: string
+  firstName?: string
   botId?: number
   error?: string
+  lastPollAt?: number
+  lastError?: string
+  webhookCleared?: boolean
+  commandMenuOk?: boolean
+  allowedCount?: number
+  pendingCount?: number
+  autoApproveFirst?: boolean
   /** Cooldown remaining before a retried connect attempt will be honoured. */
   coolOffMs?: number
 }
+
+export type { TelegramChatView }
 
 export type TelegramResponse<T> = { status: number; payload: T }
 
@@ -83,6 +111,12 @@ export class TelegramBridge {
   private consecutiveAuthFailures = 0
   private static readonly MAX_COOL_OFF_MS = 5 * 60_000
   private static readonly AUTH_FAILURE_WINDOW_MS = 10 * 60_000
+  private lastPollAt = 0
+  private lastError = ""
+  private webhookCleared = false
+  private commandMenuOk = false
+  private botFirstName = ""
+  private lastUsername = ""
 
   setMessageHandler(handler: (chatId: string, text: string) => Promise<string | TelegramReply>): void { this.handler = handler }
 
@@ -109,10 +143,73 @@ export class TelegramBridge {
   }
 
   /** Persisted mutation: drop a chat into the pending allow-list. */
-  async addPendingChat(chatId: string): Promise<void> {
+  async addPendingChat(chatId: string, profile?: TelegramChatProfile): Promise<void> {
     return enqueueTelegramMutation(async () => {
-      if (this.pendingChats().includes(chatId)) return
-      getStore().set("telegram", { ...getStore().get("telegram"), pendingChatIds: [...this.pendingChats(), chatId] })
+      const current = getStore().get("telegram")
+      const pendingChatIds = this.pendingChats().includes(chatId) ? this.pendingChats() : [...this.pendingChats(), chatId]
+      getStore().set("telegram", {
+        ...current,
+        pendingChatIds,
+        chatProfiles: profile ? upsertChatProfile(current.chatProfiles, profile) : current.chatProfiles,
+      })
+    })
+  }
+
+  chats(): { allowed: TelegramChatView[]; pending: TelegramChatView[] } {
+    const profiles = getStore().get("telegram").chatProfiles
+    return {
+      allowed: hydrateChats(this.allowedChats(), profiles),
+      pending: hydrateChats(this.pendingChats(), profiles),
+    }
+  }
+
+  autoApproveFirst(): boolean {
+    return Boolean(getStore().get("telegram").autoApproveFirst)
+  }
+
+  async setAutoApproveFirst(enabled: boolean): Promise<boolean> {
+    return enqueueTelegramMutation(async () => {
+      getStore().set("telegram", { ...getStore().get("telegram"), autoApproveFirst: enabled })
+      return enabled
+    })
+  }
+
+  async reconnect(): Promise<TelegramStatus> {
+    if (this.coolOffRemaining() > 0) {
+      return this.snapshot({ connected: false, error: `Telegram cooling off for ${Math.ceil(this.coolOffRemaining() / 1000)}s after repeated auth failures. Try again then.` })
+    }
+    if (!this.token()) return this.snapshot({ connected: false, hasToken: false, error: "No saved bot token. Paste a BotFather token to connect." })
+    const probed = await this.status()
+    if (!probed.connected) return probed
+    this.start()
+    return this.status()
+  }
+
+  async approveChat(chatId: string): Promise<string[]> {
+    const next = approveChatState(this.allowedChats(), this.pendingChats(), chatId)
+    const saved = await this.setAllowedChats(next.allowed)
+    await this.send(chatId, approvedMessage(this.lastUsername || undefined))
+    return saved
+  }
+
+  async denyChat(chatId: string): Promise<string[]> {
+    await enqueueTelegramMutation(async () => {
+      getStore().set("telegram", { ...getStore().get("telegram"), pendingChatIds: denyChatState(this.pendingChats(), chatId) })
+    })
+    await this.send(chatId, deniedMessage())
+    return this.pendingChats()
+  }
+
+  async revokeChat(chatId: string): Promise<string[]> {
+    const saved = await this.setAllowedChats(this.allowedChats().filter((id) => id !== chatId.trim()))
+    await this.send(chatId, revokedMessage())
+    return saved
+  }
+
+  private rememberChat(profile: TelegramChatProfile): void {
+    void enqueueTelegramMutation(async () => {
+      const current = getStore().get("telegram")
+      getStore().set("telegram", { ...current, chatProfiles: upsertChatProfile(current.chatProfiles, profile) })
     })
   }
 
@@ -131,43 +228,82 @@ export class TelegramBridge {
     catch { return undefined }
   }
 
+  private snapshot(partial: Partial<TelegramStatus> = {}): TelegramStatus {
+    return {
+      connected: false,
+      hasToken: Boolean(this.token()),
+      polling: this.polling,
+      firstName: this.botFirstName || undefined,
+      lastPollAt: this.lastPollAt || undefined,
+      lastError: this.lastError || undefined,
+      webhookCleared: this.webhookCleared,
+      commandMenuOk: this.commandMenuOk,
+      allowedCount: this.allowedChats().length,
+      pendingCount: this.pendingChats().length,
+      autoApproveFirst: Boolean(getStore().get("telegram").autoApproveFirst),
+      coolOffMs: this.coolOffRemaining(),
+      ...partial,
+    }
+  }
+
   async status(): Promise<TelegramStatus> {
     const token = this.token()
-    if (!token) return { connected: false, coolOffMs: 0 }
+    if (!token) return this.snapshot({ connected: false, hasToken: false, coolOffMs: 0 })
     const coolOffRemaining = this.coolOffRemaining()
     try {
-      const response = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string }; description?: string }>(`https://api.telegram.org/bot${token}/getMe`)
+      const response = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string; first_name?: string }; description?: string }>(`https://api.telegram.org/bot${token}/getMe`)
       const authError = telegramAuthError(response.status, response.payload.description)
-      if (authError) return { connected: false, error: authError.message, coolOffMs: coolOffRemaining }
+      if (authError) {
+        this.lastError = authError.message
+        return this.snapshot({ connected: false, error: authError.message, coolOffMs: coolOffRemaining })
+      }
       const payload = response.payload
-      if (!payload.ok || !payload.result) return { connected: false, error: payload.description || "Telegram rejected the token", coolOffMs: coolOffRemaining }
-      // Successful probe clears the breaker.
+      if (!payload.ok || !payload.result) {
+        const error = payload.description || "Telegram rejected the token"
+        this.lastError = error
+        return this.snapshot({ connected: false, error, coolOffMs: coolOffRemaining })
+      }
       this.coolOffUntil = 0
       this.consecutiveAuthFailures = 0
-      return { connected: true, polling: this.polling, botId: payload.result.id, username: payload.result.username, coolOffMs: 0 }
+      this.botFirstName = payload.result.first_name || ""
+      this.lastUsername = payload.result.username || ""
+      return this.snapshot({
+        connected: true,
+        polling: this.polling,
+        botId: payload.result.id,
+        username: payload.result.username,
+        firstName: payload.result.first_name,
+        coolOffMs: 0,
+        error: undefined,
+      })
     } catch (error) {
-      return { connected: false, error: (error as Error).message, coolOffMs: coolOffRemaining }
+      const message = (error as Error).message
+      this.lastError = message
+      return this.snapshot({ connected: false, error: message, coolOffMs: coolOffRemaining })
     }
   }
 
   async connect(token: string): Promise<TelegramStatus> {
     if (this.coolOffRemaining() > 0) {
-      return { connected: false, error: `Telegram cooling off for ${Math.ceil(this.coolOffRemaining() / 1000)}s after repeated auth failures. Try again then.`, coolOffMs: this.coolOffRemaining() }
+      return this.snapshot({ connected: false, error: `Telegram cooling off for ${Math.ceil(this.coolOffRemaining() / 1000)}s after repeated auth failures. Try again then.` })
     }
-    if (!safeStorage.isEncryptionAvailable()) return { connected: false, error: "OS credential encryption is unavailable" }
+    if (!safeStorage.isEncryptionAvailable()) return this.snapshot({ connected: false, error: "OS credential encryption is unavailable" })
     const clean = token.trim()
     if (!/^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(clean)) return { connected: false, error: "That does not look like a Telegram BotFather token" }
     try {
-      const response = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string }; description?: string }>(`https://api.telegram.org/bot${clean}/getMe`)
+      const response = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string; first_name?: string }; description?: string }>(`https://api.telegram.org/bot${clean}/getMe`)
       const authError = telegramAuthError(response.status, response.payload.description)
       if (authError) {
         this.recordAuthFailure()
-        return { connected: false, error: authError.message, coolOffMs: this.coolOffRemaining() }
+        this.lastError = authError.message
+        return this.snapshot({ connected: false, error: authError.message })
       }
       const payload = response.payload
       if (!payload.ok || !payload.result) {
         this.recordAuthFailure()
-        return { connected: false, error: payload.description || "Telegram rejected the token", coolOffMs: this.coolOffRemaining() }
+        const error = payload.description || "Telegram rejected the token"
+        this.lastError = error
+        return this.snapshot({ connected: false, error })
       }
       // A successful connect clears the breaker and the auth-failure cache
       // so a chat that was auto-paired once can re-pair after a fresh
@@ -179,11 +315,16 @@ export class TelegramBridge {
       await enqueueTelegramMutation(async () => {
         getStore().set("telegram", { ...getStore().get("telegram"), token: safeStorage.encryptString(clean).toString("base64"), updateOffset: 0 })
       })
+      this.botFirstName = payload.result.first_name || ""
+      this.lastUsername = payload.result.username || ""
+      this.lastError = ""
       this.start()
-      return { connected: true, polling: this.polling, botId: payload.result.id, username: payload.result.username }
+      return this.snapshot({ connected: true, polling: this.polling, botId: payload.result.id, username: payload.result.username, firstName: payload.result.first_name, coolOffMs: 0 })
     } catch (error) {
       this.recordAuthFailure()
-      return { connected: false, error: error instanceof Error ? error.message : String(error), coolOffMs: this.coolOffRemaining() }
+      const message = error instanceof Error ? error.message : String(error)
+      this.lastError = message
+      return this.snapshot({ connected: false, error: message })
     }
   }
 
@@ -247,13 +388,18 @@ export class TelegramBridge {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drop_pending_updates: false }),
       })
       if (!payload.ok) throw new Error(payload.description || "Could not clear Telegram webhook")
+      this.webhookCleared = true
+      this.lastError = ""
       await this.configureCommands()
       writeLog("info", `Telegram polling started at update ${this.offset}`)
       await this.poll(generation)
     } catch (error) {
       if (!this.polling || generation !== this.pollGeneration) return
-      writeLog("error", `Telegram bootstrap failed: ${error instanceof Error ? error.message : String(error)}`)
-      this.polling = false
+      this.lastError = error instanceof Error ? error.message : String(error)
+      writeLog("error", `Telegram bootstrap failed: ${this.lastError}`)
+      this.retryDelayMs = Math.min(this.retryDelayMs * 2 + Math.floor(Math.random() * 1_000), TelegramBridge.MAX_RETRY_DELAY_MS)
+      await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs))
+      if (this.polling && generation === this.pollGeneration) await this.poll(generation)
     }
   }
 
@@ -266,7 +412,7 @@ export class TelegramBridge {
         // jitter prevents synchronised retry storms from many desktop clients
         // that lost connectivity at the same moment.
         if (this.retryDelayMs > 1_000) await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs))
-        const response = await telegramRequest<{ ok: boolean; result?: { update_id: number; message?: { text?: string; chat: { id: number } }; callback_query?: { id: string; data?: string; message?: { chat: { id: number } } } }[]; description?: string }>(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${this.offset}`, { signal: AbortSignal.timeout(30_000) })
+        const response = await telegramRequest<{ ok: boolean; result?: { update_id: number; message?: { text?: string; chat: { id: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } }; callback_query?: { id: string; data?: string; message?: { chat: { id: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } } } }[]; description?: string }>(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${this.offset}`, { signal: AbortSignal.timeout(30_000) })
         // An invalid bot token returns HTTP 401/403; rate limiting returns 429.
         // Busily retrying every 2s hammers Telegram and never recovers on its
         // own. Hand the failure to the circuit breaker so a sustained outage
@@ -293,23 +439,31 @@ export class TelegramBridge {
           throw new Error(payload.description || "Telegram polling failed")
         }
         this.retryDelayMs = 1_000
-        // A successful poll resets any breaker state so a recovered network
-        // resumes at the configured fast-cadence polling rate.
         this.consecutiveAuthFailures = 0
         this.coolOffUntil = 0
+        this.lastPollAt = Date.now()
+        this.lastError = ""
         for (const update of payload.result || []) {
           this.offset = Math.max(this.offset, update.update_id + 1)
-          const chatId = String(update.message?.chat.id || update.callback_query?.message?.chat.id || "")
+          const chat = update.message?.chat || update.callback_query?.message?.chat
+          const chatId = String(chat?.id || "")
           const text = update.message?.text?.trim() || update.callback_query?.data?.trim()
           if (update.callback_query) void this.answerCallback(update.callback_query.id)
-          if (!chatId || !text) continue
+          if (!chatId || !text || !chat) continue
+          const profile = profileFromTelegramChat(chat, text)
+          this.rememberChat(profile)
           if (!this.allowedChats().includes(chatId)) {
-            await this.addPendingChat(chatId)
-            if (!this.unauthorizedNotified.has(chatId)) {
-              this.unauthorizedNotified.add(chatId)
-              await this.send(chatId, `Pairing required. Open Grok Build Desktop → Telegram and approve chat ${chatId}. The bot command menu is ready, but tasks stay blocked until you approve this chat.`)
+            if (shouldAutoApproveFirst(this.allowedChats().length, this.autoApproveFirst())) {
+              await this.addPendingChat(chatId, profile)
+              await this.approveChat(chatId)
+            } else {
+              await this.addPendingChat(chatId, profile)
+              if (!this.unauthorizedNotified.has(chatId) || isPublicPairingCommand(text)) {
+                this.unauthorizedNotified.add(chatId)
+                await this.send(chatId, pairingMessage({ chatId, botUsername: this.lastUsername || undefined, label: labelChat(profile) }))
+              }
+              continue
             }
-            continue
           }
           if (!this.handler) { await this.send(chatId, "Grok Build Desktop is connected but its task handler is not ready."); continue }
           // Do not block polling while an agent task runs. This keeps callbacks,
@@ -343,65 +497,15 @@ export class TelegramBridge {
     if (!token) return
     try {
       const response = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/setMyCommands`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commands: [
-          { command: "start", description: "Show setup and available commands" },
-          { command: "help", description: "Show command help" },
-          { command: "commands", description: "List all Telegram commands" },
-          { command: "run", description: "Run a Grok Build task" },
-          { command: "learn", description: "Draft a reusable skill" },
-          { command: "goal", description: "Manage the persistent goal" },
-          { command: "new", description: "Start a fresh agent session" },
-          { command: "status", description: "Show backend and workspace status" },
-          { command: "health", description: "Quick agent health check" },
-          { command: "diagnostics", description: "Show local bridge diagnostics" },
-          { command: "models", description: "List available models" },
-          { command: "model", description: "Select a model" },
-          { command: "project", description: "Choose a project" },
-          { command: "mode", description: "Choose fast, balanced, or deep responses" },
-          { command: "fast", description: "Toggle fast mode" },
-          { command: "think", description: "Set session reasoning" },
-          { command: "queue", description: "Show queued agent work" },
-          { command: "tasks", description: "Show active and queued tasks" },
-          { command: "steer", description: "Prioritize the next instruction" },
-          { command: "interrupt", description: "Stop and redirect the active task" },
-          { command: "retry", description: "Retry the previous instruction" },
-          { command: "undo", description: "Rewind the previous completed turn" },
-          { command: "compress", description: "Checkpoint and compact context" },
-          { command: "reasoning", description: "Control reasoning for this session" },
-          { command: "history", description: "Show recent conversation" },
-          { command: "schedules", description: "Show scheduled agent work" },
-          { command: "tools", description: "Show available agent tools" },
-          { command: "skills", description: "List loaded skills" },
-          { command: "skill", description: "Run a named skill" },
-          { command: "login", description: "Start provider login" },
-          { command: "whoami", description: "Show this chat id" },
-          { command: "menu", description: "Open the control menu" },
-          { command: "workspace", description: "Show the active workspace" },
-          { command: "cancel", description: "Cancel the active task" },
-          { command: "restart", description: "Restart the desktop agent" },
-          { command: "session", description: "Show session settings" },
-          { command: "usage", description: "Show recent usage" },
-          { command: "context", description: "Show session context" },
-          { command: "allowlist", description: "Show or edit allowed chats" },
-          { command: "stop", description: "Stop the active task" },
-          { command: "verbose", description: "Grok compatibility command" },
-          { command: "trace", description: "Grok compatibility command" },
-          { command: "elevated", description: "Grok compatibility command" },
-          { command: "exec", description: "Grok compatibility command" },
-          { command: "config", description: "Grok compatibility command" },
-          { command: "mcp", description: "Grok compatibility command" },
-          { command: "plugins", description: "Grok compatibility command" },
-          { command: "subagents", description: "Grok compatibility command" },
-          { command: "acp", description: "Grok compatibility command" },
-          { command: "focus", description: "Grok compatibility command" },
-          { command: "unfocus", description: "Grok compatibility command" },
-          { command: "agents", description: "Grok compatibility command" },
-          { command: "bash", description: "Grok compatibility command" },
-        ] }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commands: ESSENTIAL_BOT_COMMANDS }),
       })
       if (!response.ok) throw new Error(response.description || "Telegram rejected the command menu")
-      writeLog("info", "Telegram command menu registered: /learn, /goal, and compatibility commands")
-    } catch (error) { writeLog("error", `Telegram command-menu registration failed: ${error instanceof Error ? error.message : String(error)}`) }
+      this.commandMenuOk = true
+      writeLog("info", "Telegram command menu registered")
+    } catch (error) {
+      this.commandMenuOk = false
+      writeLog("error", `Telegram command-menu registration failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   private async answerCallback(id: string): Promise<void> {

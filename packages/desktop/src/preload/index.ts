@@ -4,7 +4,34 @@ export type BackendStatus = { available: boolean; command: string; version?: str
 export type GrokBuildModelCatalog = { defaultModel?: string; models: string[] }
 export type GrokBuildUpdateStatus = { currentVersion: string; latestVersion: string; updateAvailable: boolean; channel: "stable" | "alpha"; error?: string | null }
 export type BackendEvent = { type: string; data?: string; message?: string; sessionId?: string; usage?: unknown }
-export type TelegramStatus = { connected: boolean; polling?: boolean; username?: string; botId?: number; error?: string; coolOffMs?: number }
+export type TelegramStatus = {
+  connected: boolean
+  hasToken?: boolean
+  polling?: boolean
+  username?: string
+  firstName?: string
+  botId?: number
+  error?: string
+  lastPollAt?: number
+  lastError?: string
+  webhookCleared?: boolean
+  commandMenuOk?: boolean
+  allowedCount?: number
+  pendingCount?: number
+  autoApproveFirst?: boolean
+  coolOffMs?: number
+}
+export type TelegramChat = {
+  id: string
+  label: string
+  type?: string
+  title?: string
+  username?: string
+  firstName?: string
+  lastName?: string
+  lastSeenAt?: number
+  lastPreview?: string
+}
 export type ProjectSnapshot = { id: string; name: string; path: string; addedAt: number; isGit: boolean; branch?: string; changedFiles: number; diffStat?: string }
 export type GrokRunRecord = { id: string; threadId?: string; cwd: string; prompt: string; model?: string; startedAt: number; finishedAt?: number; status: "running" | "completed" | "failed" | "cancelled"; grokSessionId?: string; error?: string; latencyMs?: number; tokensIn?: number; tokensOut?: number; costUsd?: number; advisorCount?: number; advisorFailures?: number; errorClass?: string }
 export type LocalStudioSnapshot = { configured: boolean; reachable: boolean; baseUrl: string; health?: unknown; status?: unknown; gpus?: unknown; error?: string }
@@ -36,12 +63,18 @@ export type ElectronAPI = {
   telegram: {
     status: () => Promise<TelegramStatus>
     connect: (token: string) => Promise<TelegramStatus>
+    reconnect: () => Promise<TelegramStatus>
     disconnect: () => Promise<void>
     forgetToken: () => Promise<{ ok: boolean }>
     send: (chatId: string, text: string) => Promise<{ ok: boolean; error?: string }>
     allowedChats: () => Promise<string[]>
     pendingChats: () => Promise<string[]>
+    chats: () => Promise<{ allowed: TelegramChat[]; pending: TelegramChat[] }>
     setAllowedChats: (chatIds: string[]) => Promise<string[]>
+    approveChat: (chatId: string) => Promise<string[]>
+    denyChat: (chatId: string) => Promise<string[]>
+    revokeChat: (chatId: string) => Promise<string[]>
+    setAutoApproveFirst: (enabled: boolean) => Promise<boolean>
   }
   memory: { status: () => Promise<DuckbotMemoryStatus>; recall: (query: string) => Promise<string> }
   projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; scratch: () => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
@@ -81,10 +114,20 @@ const api: ElectronAPI = {
     },
   },
   telegram: {
-    status: () => ipcRenderer.invoke("telegram:status"), connect: (token) => ipcRenderer.invoke("telegram:connect", token),
-    disconnect: () => ipcRenderer.invoke("telegram:disconnect"), forgetToken: () => ipcRenderer.invoke("telegram:forget-token"),
+    status: () => ipcRenderer.invoke("telegram:status"),
+    connect: (token) => ipcRenderer.invoke("telegram:connect", token),
+    reconnect: () => ipcRenderer.invoke("telegram:reconnect"),
+    disconnect: () => ipcRenderer.invoke("telegram:disconnect"),
+    forgetToken: () => ipcRenderer.invoke("telegram:forget-token"),
     send: (chatId, text) => ipcRenderer.invoke("telegram:send", chatId, text),
-    allowedChats: () => ipcRenderer.invoke("telegram:allowed-chats"), pendingChats: () => ipcRenderer.invoke("telegram:pending-chats"), setAllowedChats: (chatIds) => ipcRenderer.invoke("telegram:set-allowed-chats", chatIds),
+    allowedChats: () => ipcRenderer.invoke("telegram:allowed-chats"),
+    pendingChats: () => ipcRenderer.invoke("telegram:pending-chats"),
+    chats: () => ipcRenderer.invoke("telegram:chats"),
+    setAllowedChats: (chatIds) => ipcRenderer.invoke("telegram:set-allowed-chats", chatIds),
+    approveChat: (chatId) => ipcRenderer.invoke("telegram:approve-chat", chatId),
+    denyChat: (chatId) => ipcRenderer.invoke("telegram:deny-chat", chatId),
+    revokeChat: (chatId) => ipcRenderer.invoke("telegram:revoke-chat", chatId),
+    setAutoApproveFirst: (enabled) => ipcRenderer.invoke("telegram:set-auto-approve-first", enabled),
   },
   memory: { status: () => ipcRenderer.invoke("memory:status"), recall: (query) => ipcRenderer.invoke("memory:recall", query) },
   projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), scratch: () => ipcRenderer.invoke("projects:scratch"), remove: (id) => ipcRenderer.invoke("projects:remove", id) },

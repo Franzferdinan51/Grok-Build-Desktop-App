@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -22,6 +22,13 @@ import { TaskInspector } from "./TaskInspector"
 import { NotificationStack, type DesktopNotification } from "./NotificationStack"
 import { ChatTerminalRail } from "./ChatTerminalRail"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
+import { WorkspacePanel } from "./views/WorkspacePanel"
+import { TerminalPanel } from "./views/TerminalPanel"
+import { ReviewPanel } from "./views/ReviewPanel"
+import { SkillsPanel } from "./views/SkillsPanel"
+import { ScheduledPanel } from "./views/ScheduledPanel"
+import { RuntimePanel } from "./views/RuntimePanel"
+import { TelegramConnectionPanel } from "./views/TelegramConnectionPanel"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
@@ -99,6 +106,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [telegramNotice, setTelegramNotice] = createSignal("")
   const [telegramAllowedChats, setTelegramAllowedChats] = createSignal("")
   const [telegramPendingChats, setTelegramPendingChats] = createSignal<string[]>([])
+  const [telegramInbox, setTelegramInbox] = createSignal<{ allowed: TelegramChat[]; pending: TelegramChat[] }>({ allowed: [], pending: [] })
   const [projects, setProjects] = createSignal<ProjectSnapshot[]>([])
   const [selectedProject, setSelectedProject] = createSignal<ProjectSnapshot | null>(null)
   const [runs, setRuns] = createSignal<GrokRunRecord[]>([])
@@ -180,6 +188,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [backendToolCommand, setBackendToolCommand] = createSignal("inspect --json")
   const [backendToolOutput, setBackendToolOutput] = createSignal("")
   const [backendToolRunning, setBackendToolRunning] = createSignal(false)
+  const [settingsTab, setSettingsTab] = createSignal<"backend" | "providers" | "models" | "advanced" | "preview">("backend")
+  const [agentTab, setAgentTab] = createSignal<"overview" | "runtime" | "sessions" | "memory" | "telegram" | "commands">("overview")
   let messagesElement: HTMLDivElement | undefined
   let scrollFrame = 0
   let eventFrame = 0
@@ -634,9 +644,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await loadGoal(current.path)
     }
     await refreshSessionIndex()
-    setTelegram(await window.api.telegram.status())
-    setTelegramAllowedChats((await window.api.telegram.allowedChats()).join(", "))
-    setTelegramPendingChats(await window.api.telegram.pendingChats())
+    await refreshTelegram()
     setRuns(await window.api.grokRuns.list())
     setSkills(await window.api.skills.list(workspace()))
     const runtime = await window.api.localStudio.status()
@@ -996,15 +1004,29 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
   }
 
+  const refreshTelegram = async () => {
+    const status = await window.api.telegram.status()
+    setTelegram(status)
+    setTelegramInbox(await window.api.telegram.chats())
+    setTelegramPendingChats(await window.api.telegram.pendingChats())
+    setTelegramAllowedChats((await window.api.telegram.allowedChats()).join(", "))
+    return status
+  }
   const connectTelegram = async () => {
     setTelegramNotice("")
     try {
       const status = await window.api.telegram.connect(token())
       setTelegram(status)
       setToken("")
+      await refreshTelegram()
       setTelegramNotice(status.connected ? `Connected as @${status.username ?? "bot"}` : status.error ?? "Could not connect")
     } catch (error) { setTelegramNotice(error instanceof Error ? error.message : String(error)) }
   }
+  createEffect(() => {
+    if (active() !== "telegram") return
+    const timer = window.setInterval(() => { void refreshTelegram() }, 4000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   const refreshLocalStudio = async () => setLocalStudio(await window.api.localStudio.status())
   const updateAdvanced = async <K extends keyof AdvancedSettings>(key: K, value: AdvancedSettings[K]) => {
@@ -1077,9 +1099,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
   }
   const saveFile = async () => { if (!openFile()) return; await window.api.workspace.write(workspace(), openFile(), fileContent()); setFileNotice("Saved") }
-  const runCommand = async () => {
-    if (!workspace() || !terminalCommand().trim() || terminalRunning()) return
-    setTerminalRunning(true); const command = terminalCommand(); setTerminalOutput((old) => `${old}${old ? "\n" : ""}$ ${command}\n`)
+  const runCommand = async (commandOverride?: string) => {
+    const command = (commandOverride ?? terminalCommand()).trim()
+    if (!workspace() || !command || terminalRunning()) return
+    if (command !== terminalCommand()) setTerminalCommand(command)
+    setTerminalRunning(true); setTerminalOutput((old) => `${old}${old ? "\n" : ""}$ ${command}\n`)
     try {
       const result = await window.api.workspace.command(workspace(), command); const output = result.stdout + result.stderr
       setTerminalOutput((old) => {
@@ -1100,6 +1124,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     } finally { setTerminalRunning(false) }
   }
   const refreshDiff = async (root = workspace()) => { if (root) { setGitChanges(await window.api.workspace.gitChanges(root)); setSelectedDiff(""); setDiffContent("") } }
+  const useSkillInChat = (name: string) => { setPrompt(`/${name} `); setSlashNotice(""); void navigate("new-task") }
+  const askReviewInChat = () => {
+    const paths = gitChanges().slice(0, 24).map((change) => `${change.status} ${change.path}`).join("\n")
+    setPrompt(paths ? `Review the current Git changes and propose the highest-impact next steps.\n\n${paths}` : "Review this codebase and suggest the highest-impact improvements.")
+    void navigate("new-task")
+  }
 
   const loadProject = async (project: ProjectSnapshot) => {
     setOpenFile(""); setFileContent(""); setFileNotice(""); setSelectedDiff(""); setDiffContent("")
@@ -1131,8 +1161,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setCatalog(await window.api.backend.models())
       setRuns(await window.api.grokRuns.list())
       setSchedules(await window.api.schedules.list())
-      setTelegram(await window.api.telegram.status())
-      setTelegramPendingChats(await window.api.telegram.pendingChats())
+      await refreshTelegram()
     }
     if (view === "settings") {
       setCatalog(await window.api.backend.models())
@@ -1196,7 +1225,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       </div>
     </aside>
 
-    <main class={`main-content ${active() === "new-task" ? "main-content--chat" : ""} ${active() === "browser-agent" ? "main-content--browser-agent" : ""} ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
+    <main class={`main-content ${active() === "new-task" ? "main-content--chat" : ""} ${active() === "browser-agent" ? "main-content--browser-agent" : ""} ${["workspace", "terminal", "review"].includes(active()) ? "main-content--ide" : ""} ${["skills", "scheduled", "runtime", "runs", "settings", "telegram"].includes(active()) ? "main-content--page" : ""} ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
       <Show when={active() === "review"} fallback={
       <Show when={active() === "workspace"} fallback={
       <Show when={active() === "terminal"} fallback={
@@ -1266,23 +1295,30 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         />
         </Show>
         }>
-          <section class="runtime-panel">
-            <span class="eyebrow">LOCAL STUDIO CONTROLLER</span>
-            <h1>Watch local inference without touching model lifecycle.</h1>
-            <p>Optional read-only connection for GPU/runtime status from Local Studio. Grok Build still powers coding; this never launches, evicts, downloads, or loads a model.</p>
-            <div class="token-row"><input value={localStudioURL()} onInput={(event) => setLocalStudioURL(event.currentTarget.value)} placeholder="http://127.0.0.1:8080" /><button class="primary" onClick={saveLocalStudioURL}>Save + Refresh</button></div>
-            <Show when={localStudio().configured} fallback={<p class="telegram-note">Add a controller URL to enable monitoring.</p>}>
-              <div class={localStudio().reachable ? "connected" : "notice notice--error"}>{localStudio().reachable ? `Connected to ${localStudio().baseUrl}` : localStudio().error}</div>
-              <Show when={localStudio().reachable}><pre class="runtime-json">{JSON.stringify({ health: localStudio().health, status: localStudio().status, gpus: localStudio().gpus }, null, 2)}</pre></Show>
-            </Show>
-          </section>
+          <RuntimePanel url={localStudioURL()} studio={localStudio()} onUrl={setLocalStudioURL} onSave={() => void saveLocalStudioURL()} />
         </Show>
       }>
-        <section class="telegram-panel agent-panel">
-          <div class="agent-hero"><div><span class="eyebrow">AGENT CONTROL CENTER</span><h1>Your full Grok Build agent.</h1><p>One persistent agent across desktop and Telegram, using Grok Build as the execution harness with OpenClaw/Hermes-style sessions, queues, delegation, recovery, and safe app actions.</p></div><span class={`agent-health ${props.backendStatus().available ? "agent-health--ready" : ""}`}>{props.backendStatus().available ? "Harness ready" : "Harness offline"}</span></div>
+        <section class="telegram-panel agent-panel page-panel">
+          <header class="page-shell__bar">
+            <div class="page-shell__search" />
+            <div class="page-shell__identity"><span class="eyebrow">AGENT CONTROL CENTER</span><strong>Your full Grok Build agent</strong><span>Desktop and Telegram share one Grok Build harness.</span></div>
+            <div class="page-shell__actions"><span class={`agent-health ${props.backendStatus().available ? "agent-health--ready" : ""}`}>{props.backendStatus().available ? "Harness ready" : "Harness offline"}</span></div>
+          </header>
+          <nav class="page-tabs" aria-label="Agent sections">
+            <button class={agentTab() === "overview" ? "active" : ""} onClick={() => setAgentTab("overview")}>Overview</button>
+            <button class={agentTab() === "runtime" ? "active" : ""} onClick={() => setAgentTab("runtime")}>Runtime</button>
+            <button class={agentTab() === "sessions" ? "active" : ""} onClick={() => setAgentTab("sessions")}>Sessions</button>
+            <button class={agentTab() === "memory" ? "active" : ""} onClick={() => setAgentTab("memory")}>Memory</button>
+            <button class={agentTab() === "telegram" ? "active" : ""} onClick={() => setAgentTab("telegram")}>Telegram</button>
+            <button class={agentTab() === "commands" ? "active" : ""} onClick={() => setAgentTab("commands")}>Commands</button>
+          </nav>
+          <Show when={agentTab() === "overview"}>
+          <p class="page-lede">One persistent agent across desktop and Telegram, using Grok Build as the execution harness with OpenClaw/Hermes-style sessions, queues, delegation, recovery, and safe app actions.</p>
           <div class="agent-status-grid"><article><span>Harness</span><strong>{props.backendStatus().version || "Grok Build CLI"}</strong></article><article><span>Active model</span><strong>{model() || catalog().defaultModel || "Default"}</strong></article><article><span>Current work</span><strong>{runs().some((run) => run.status === "running") ? "Task running" : "Idle"}</strong></article><article><span>Remote channel</span><strong>{telegram().connected ? `@${telegram().username ?? "bot"}${telegram().polling ? " · live" : " · paused"}` : "Not connected"}</strong></article><article><span>Authorized chats</span><strong>{telegramAllowedChats().split(/[\s,]+/).filter(Boolean).length}</strong></article><article><span>Pairing requests</span><strong>{telegramPendingChats().length || "None"}</strong></article></div>
-          <div class="agent-quick-actions"><button onClick={async () => { setRuns(await window.api.grokRuns.list()); setTelegram(await window.api.telegram.status()); setTelegramPendingChats(await window.api.telegram.pendingChats()); setTelegramNotice("Agent health refreshed") }}>Refresh health</button><button class="settings-switch--warning" onClick={() => void window.api.app.restart()}>Restart desktop agent</button></div>
+          <div class="agent-quick-actions"><button onClick={async () => { setRuns(await window.api.grokRuns.list()); await refreshTelegram(); setTelegramNotice("Agent health refreshed") }}>Refresh health</button><button class="settings-switch--warning" onClick={() => void window.api.app.restart()}>Restart desktop agent</button></div>
+          </Show>
 
+          <Show when={agentTab() === "runtime"}>
           <div class="settings-card"><div><strong>Agent runtime</strong><span>Defaults shared by desktop tasks and the Telegram agent.</span></div><div class="agent-defaults-grid"><label>Model<select value={model()} onChange={async (event) => { setModel(event.currentTarget.value); await window.api.store.set(STORE_KEYS.defaultsModel, event.currentTarget.value) }}><option value="">{catalog().defaultModel || "Grok Build default"}</option><For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label><label>Maximum turns<input type="number" min="0" max="100" value={maxTurns()} onInput={async (event) => { const value = Math.min(100, Math.max(0, Number(event.currentTarget.value) || 0)); setMaxTurns(value); await window.api.store.set(STORE_KEYS.defaultsMaxTurns, value) }} /><small>0 uses the CLI default</small></label><label class="settings-switch"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsThinking, event.currentTarget.checked) }} /><span />High reasoning</label><label class="settings-switch"><input type="checkbox" checked={selfVerify()} onChange={async (event) => { setSelfVerify(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsSelfVerify, event.currentTarget.checked) }} /><span />Verify completed work</label><label class="settings-switch"><input type="checkbox" checked={webSearchEnabled()} onChange={async (event) => { setWebSearchEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsWebSearch, event.currentTarget.checked) }} /><span />Web search</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, event.currentTarget.checked) }} /><span />Automatic approvals</label></div></div>
 
           <div class="settings-card"><div><strong>Delegation and MoA</strong><span>Native Grok subagents plus private Hermes-style advisor fan-out.</span></div><div class="agent-defaults-grid"><label class="settings-switch"><input type="checkbox" checked={subagentsEnabled()} onChange={async (event) => { setSubagentsEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.agentSubagents, event.currentTarget.checked) }} /><span />Enable subagents</label><label>Delegation style<select value={delegationMode()} disabled={!subagentsEnabled()} onChange={async (event) => { const value = event.currentTarget.value as "balanced" | "aggressive"; setDelegationMode(value); await window.api.store.set(STORE_KEYS.agentDelegationMode, value) }}><option value="balanced">Balanced</option><option value="aggressive">Proactive parallel</option></select></label><label class="settings-switch"><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} /><span />Enable Mixture of Agents</label><label>Advisor budget<input type="number" min="200" max="2000" step="100" disabled={!moaEnabled()} value={moaReferenceTokenBudget()} onInput={async (event) => { const value = Math.min(2000, Math.max(200, Number(event.currentTarget.value) || 600)); setMoaReferenceTokenBudget(value); await window.api.store.set(STORE_KEYS.moaReferenceTokenBudget, value) }} /><small>tokens · fluid default 600</small></label></div><p class="provider-notice">Advisors remain private and read-only. One acting aggregator owns implementation and verification, while independent subagents can research, inspect, and test without overlapping edits.</p></div>
@@ -1290,20 +1326,44 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <div class="settings-card"><div><strong>Agent authority</strong><span>Typed, allowlisted controls for the app and preview.</span></div><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={agentAppControls()} onChange={async (event) => { setAgentAppControls(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.agentAppControls, event.currentTarget.checked) }} /><span />Allow safe app controls</label><p class="provider-notice">When enabled, the agent may inspect the rendered preview, open it, and create validated schedules. It cannot read credentials, click arbitrary UI, silently broaden permissions, or escape the selected workspace.</p></div>
 
           <div class="settings-card"><div><strong>Host control scripts</strong><span>Optional browser and computer-use helpers.</span></div><p class="provider-notice">Helpers are injected into Grok Build only when the script exists. Set GROK_BROWSER_CONTROL, GROK_DESKTOP_CONTROL, and GROK_SEARCH_HELPER, or keep the discovered local tools.</p></div>
+          </Show>
 
+          <Show when={agentTab() === "sessions"}>
           <div class="settings-card"><div><strong>Hermes-style session lifecycle</strong><span>Recovery, rewinds, compaction, and optional idle resets for remote agent sessions.</span></div><div class="agent-defaults-grid"><label>Idle reset<input type="number" min="0" max="168" value={sessionIdleHours()} onInput={async (event) => { const value = Math.min(168, Math.max(0, Number(event.currentTarget.value) || 0)); setSessionIdleHours(value); await window.api.store.set(STORE_KEYS.agentSessionIdleHours, value) }} /><small>hours · 0 keeps sessions indefinitely</small></label><div class="agent-lifecycle-list"><span>✓ Crash-safe session resume</span><span>✓ Visible transcript recovery</span><span>✓ Retry and turn rewind</span><span>✓ Bounded context checkpoints</span></div></div><p class="provider-notice">Use <code>/retry</code>, <code>/undo</code>, <code>/compress</code>, and <code>/reasoning</code> from Telegram. Rewinds intentionally start a fresh native Grok session and recover from the corrected visible transcript so removed output cannot leak back in.</p></div>
 
+          </Show>
+          <Show when={agentTab() === "memory"}>
           <div class="settings-card"><div><strong>Hybrid soul + long-term memory</strong><span>OpenClaw/Hermes-style identity files layered with DuckBot semantic recall.</span></div><div class="agent-defaults-grid"><label class="settings-switch"><input type="checkbox" checked={memoryStatus()?.enabled ?? true} onChange={async (event) => { await window.api.store.set(STORE_KEYS.memoryEnabled, event.currentTarget.checked); setMemoryStatus(await window.api.memory.status()) }} /><span />Enable DuckBot RAG memory</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={telegramMemoryEnabled()} onChange={async (event) => { setTelegramMemoryEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.memoryTelegramEnabled, event.currentTarget.checked) }} /><span />Use personal memory in Telegram</label><div class="agent-lifecycle-list"><span>{memoryStatus()?.available ? "✓ Semantic brain connected" : "○ Semantic brain unavailable"}</span><span>✓ SOUL, USER, AGENTS, and curated MEMORY files</span><span>✓ Relevant-only recall before each turn</span><span>✓ Episodic capture after successful turns</span></div></div><p class="provider-notice">{memoryStatus()?.error || `Soul files: ${memoryStatus()?.soulDirectory || "initializing"}`}. Telegram access is off by default to prevent personal memories from entering group chats; enable it only for trusted, allowlisted chats.</p></div>
 
-          <div class="settings-card agent-remote-card"><div><strong>Telegram remote agent</strong><span>Persistent per-chat sessions, queueing, steering, history, projects, models, and schedules.</span></div>
-          <Show when={!telegram().connected} fallback={<><div class="connected">Connected as @{telegram().username ?? "bot"} · listening for authorized chats</div><Show when={telegramPendingChats().length}><div class="agent-pairing"><strong>Pairing requests</strong><For each={telegramPendingChats()}>{(id) => <div class="token-row"><span>Chat {id}</span><button class="primary" onClick={async () => { const saved = await window.api.telegram.setAllowedChats([...telegramAllowedChats().split(/[\s,]+/).filter(Boolean), id]); setTelegramAllowedChats(saved.join(", ")); setTelegramPendingChats(await window.api.telegram.pendingChats()); setTelegramNotice(`Chat ${id} approved`) }}>Approve</button></div>}</For></div></Show><div class="provider-fields"><label>Allowed chat IDs<input value={telegramAllowedChats()} onInput={(event) => setTelegramAllowedChats(event.currentTarget.value)} placeholder="-1001234567890, 123456789" /></label><button class="primary" onClick={async () => { const ids = telegramAllowedChats().split(/[\s,]+/).filter(Boolean); const saved = await window.api.telegram.setAllowedChats(ids); setTelegramAllowedChats(saved.join(", ")); setTelegramPendingChats(await window.api.telegram.pendingChats()); setTelegramNotice(saved.length ? `Listening to ${saved.length} authorized chat${saved.length === 1 ? "" : "s"}` : "No chats are authorized yet") }}>Save allowlist</button></div><div class="token-row"><button onClick={async () => { const status = await window.api.telegram.status(); setTelegram(status); setTelegramPendingChats(await window.api.telegram.pendingChats()); setTelegramNotice(status.connected ? `Connection verified · bot ${status.botId}` : status.error || "Connection failed") }}>Test + refresh</button><button onClick={async () => { await window.api.telegram.disconnect(); setTelegram({ connected: false }); setTelegramNotice("Disconnected. Encrypted bot token is kept on disk for quick reconnect.") }}>Disconnect</button><button class="settings-switch--warning" onClick={async () => { await window.api.telegram.forgetToken(); setTelegram({ connected: false }); setTelegramAllowedChats(""); setTelegramPendingChats([]); setToken(""); setTelegramNotice("Bot token removed from disk. You will need to paste it again to reconnect.") }}>Remove token</button></div><Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show></>}>
-            <p>Enter a BotFather token. It is verified with <code>getMe</code> and stored only through credential encryption.</p><div class="token-row"><input type="password" value={token()} onInput={(event) => setToken(event.currentTarget.value)} placeholder="123456:ABC…" /><button class="primary" disabled={!token().trim()} onClick={connectTelegram}>Connect bot</button></div><Show when={telegramNotice()}><p class={telegram().connected ? "notice" : "notice notice--error"}>{telegramNotice()}</p></Show>
-          </Show></div>
-
+          </Show>
+          <Show when={agentTab() === "telegram"}>
+          <TelegramConnectionPanel
+            status={telegram()}
+            allowed={telegramInbox().allowed}
+            pending={telegramInbox().pending}
+            token={token()}
+            notice={telegramNotice()}
+            onToken={setToken}
+            onConnect={() => void connectTelegram()}
+            onReconnect={async () => { setTelegramNotice(""); setTelegram(await window.api.telegram.reconnect()); await refreshTelegram(); setTelegramNotice(telegram().polling ? "Polling restarted" : telegram().error || "Reconnect finished") }}
+            onDisconnect={async () => { await window.api.telegram.disconnect(); await refreshTelegram(); setTelegramNotice("Polling paused. Encrypted bot token is kept on disk for reconnect.") }}
+            onForget={async () => { await window.api.telegram.forgetToken(); setToken(""); setTelegramInbox({ allowed: [], pending: [] }); await refreshTelegram(); setTelegramNotice("Bot token removed from disk. Paste it again to reconnect.") }}
+            onApprove={async (id) => { await window.api.telegram.approveChat(id); await refreshTelegram(); setTelegramNotice(`${id} approved`) }}
+            onDeny={async (id) => { await window.api.telegram.denyChat(id); await refreshTelegram(); setTelegramNotice(`${id} denied`) }}
+            onRevoke={async (id) => { await window.api.telegram.revokeChat(id); await refreshTelegram(); setTelegramNotice(`${id} revoked`) }}
+            onAutoApproveFirst={async (enabled) => { await window.api.telegram.setAutoApproveFirst(enabled); await refreshTelegram() }}
+            onOpenBot={() => { const name = telegram().username; if (name) void window.api.app.openExternal(`https://t.me/${name}`) }}
+            onOpenBotFather={() => void window.api.app.openExternal("https://t.me/BotFather")}
+            onRefresh={() => void refreshTelegram()}
+            onCopy={(value) => void navigator.clipboard.writeText(value)}
+          />
+          </Show>
+          <Show when={agentTab() === "commands"}>
           <div class="settings-card"><div><strong>Remote commands</strong><span>Full agent control without returning to the desktop.</span></div><div class="agent-command-grid"><code>/help</code><span>Interactive command menu</span><code>/status</code><span>Session, queue, model, project, and harness</span><code>/health</code><span>Quick alias for agent status</span><code>/models</code><span>Choose a model with buttons</span><code>/project</code><span>Choose a project, Scratch, or Agent mode</span><code>/mode</code><span>Fast, balanced, or deep response profile</span><code>/queue</code><span>Inspect queued work</span><code>/steer</code><span>Redirect the active task</span><code>/interrupt</code><span>Stop and replace active work</span><code>/cancel</code><span>Stop this chat’s active task</span><code>/retry</code><span>Retry the previous instruction</span><code>/undo</code><span>Rewind the previous completed turn</span><code>/compress</code><span>Checkpoint and compact old context</span><code>/reasoning</code><span>Override reasoning for this session</span><code>/history</code><span>Recent persistent turns</span><code>/workspace</code><span>Show the active working directory</span><code>/schedules</code><span>Inspect scheduled work</span><code>/new</code><span>Start a clean session</span><code>/restart</code><span>Safely restart Desktop and polling</span></div></div>
 
           <div class="settings-card"><div><strong>Scheduled autonomy</strong><span>{schedules().length} configured task{schedules().length === 1 ? "" : "s"}.</span></div><div class="agent-schedule-summary"><span>{schedules().filter((task) => task.enabled).length} active</span><button onClick={() => void navigate("scheduled")}>Manage schedules</button></div></div>
           <p class="telegram-note">Telegram is a channel for the same Grok Build agent—not a separate stateless bot. Per-chat sessions, transcript recovery, selected models, projects, queue state, and update offsets persist across app restarts.</p>
+          </Show>
         </section>
       </Show>
       }>
@@ -1327,24 +1387,77 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         </section>
       </Show>
       }>
-        <section class="runs-panel"><span class="eyebrow">GROK BUILD SCHEDULES</span><h1>Run coding tasks on a schedule.</h1><p>Schedules execute through Grok Build while the desktop app is running.</p>
-          <div class="form-grid"><input value={scheduleName()} onInput={(e) => setScheduleName(e.currentTarget.value)} placeholder="Task name"/><input type="datetime-local" value={scheduleAt()} onInput={(e) => setScheduleAt(e.currentTarget.value)}/><textarea value={schedulePrompt()} onInput={(e) => setSchedulePrompt(e.currentTarget.value)} placeholder="Coding task prompt"/><input type="number" min="0" value={repeatMinutes()} onInput={(e) => setRepeatMinutes(Number(e.currentTarget.value))} placeholder="Repeat minutes (optional)"/><button class="primary" onClick={createSchedule}>Create schedule</button></div>
-          <For each={schedules()}>{(task) => <article class="run-row"><div><strong>{task.name}</strong><span>{new Date(task.nextRunAt).toLocaleString()} · {task.cwd}{task.lastStatus ? ` · last ${task.lastStatus}` : ""}</span></div><div class="row-actions"><button onClick={async () => { await window.api.schedules.runNow(task.id); setSchedules(await window.api.schedules.list()) }}>Run now</button><button onClick={async () => { await window.api.schedules.toggle(task.id, !task.enabled); setSchedules(await window.api.schedules.list()) }}>{task.enabled ? "Pause" : "Enable"}</button><button onClick={async () => { await window.api.schedules.remove(task.id); setSchedules(await window.api.schedules.list()) }}>Delete</button></div></article>}</For>
-        </section>
+        <ScheduledPanel
+          schedules={schedules()}
+          name={scheduleName()}
+          at={scheduleAt()}
+          prompt={schedulePrompt()}
+          repeatMinutes={repeatMinutes()}
+          workspace={workspace()}
+          onName={setScheduleName}
+          onAt={setScheduleAt}
+          onPrompt={setSchedulePrompt}
+          onRepeat={setRepeatMinutes}
+          onCreate={() => void createSchedule()}
+          onRun={async (id) => { await window.api.schedules.runNow(id); setSchedules(await window.api.schedules.list()) }}
+          onToggle={async (id, enabled) => { await window.api.schedules.toggle(id, enabled); setSchedules(await window.api.schedules.list()) }}
+          onRemove={async (id) => { await window.api.schedules.remove(id); setSchedules(await window.api.schedules.list()) }}
+        />
       </Show>
       }>
-        <section class="runs-panel"><span class="eyebrow">GROK BUILD SKILLS</span><h1>Project and user skills.</h1><p>Discovered from Grok, agent, Claude, and Cursor-compatible skill directories. Project skills win on name conflicts.</p><div class="token-row"><input value={skillSearch()} onInput={(e) => setSkillSearch(e.currentTarget.value)} placeholder="Search skills"/><button onClick={async () => setSkills(await window.api.skills.list(workspace()))}>Refresh</button></div>
-          <For each={skills().filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(skillSearch().toLowerCase()))}>{(skill) => <article class="run-row"><div><strong>{skill.name}</strong><span>{skill.description || skill.path}</span></div><div class="skill-scope">{skill.scope}</div></article>}</For>
-        </section>
+        <SkillsPanel
+          skills={skills()}
+          search={skillSearch()}
+          onSearch={setSkillSearch}
+          onRefresh={async () => setSkills(await window.api.skills.list(workspace()))}
+          onUseSkill={useSkillInChat}
+          workspaceName={selectedProject()?.name || "Scratch"}
+        />
       </Show>
       }>
-        <section class="ide-panel"><div class="terminal-toolbar"><div><span class="eyebrow">PROJECT TERMINAL</span><strong>{workspace() || "Choose a project"}</strong></div><button onClick={() => setTerminalOutput("")}>Clear</button></div><pre class="terminal-output">{terminalOutput() || "Run project commands here. Commands execute only inside the selected workspace."}</pre><div class="terminal-input"><span>$</span><input value={terminalCommand()} onInput={(e) => setTerminalCommand(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") void runCommand() }} placeholder="pnpm test"/><button class="primary" disabled={terminalRunning() || !workspace()} onClick={runCommand}>{terminalRunning() ? "Running…" : "Run"}</button></div></section>
+        <TerminalPanel
+          workspace={workspace()}
+          projectName={selectedProject()?.name || ""}
+          command={terminalCommand()}
+          output={terminalOutput()}
+          running={terminalRunning()}
+          onCommand={setTerminalCommand}
+          onRun={(command) => void runCommand(command)}
+          onClear={() => setTerminalOutput("")}
+          onOpenProject={chooseWorkspace}
+        />
       </Show>
       }>
-        <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">CODE WORKSPACE</span><strong>{openFile() || "Select a file"}</strong></div><div><button onClick={() => void refreshFiles()}>Refresh files</button><button class="primary" disabled={!openFile()} onClick={saveFile}>Save</button></div></div><div class="ide-grid"><aside class="file-tree"><input value={fileSearch()} onInput={(e) => setFileSearch(e.currentTarget.value)} placeholder="Filter files"/><Show when={files().length} fallback={<button onClick={() => void refreshFiles()}>Load project files</button>}><For each={files().filter((file) => file.path.toLowerCase().includes(fileSearch().toLowerCase()))}>{(file) => <button class={openFile() === file.path ? "active" : ""} onClick={() => selectFile(file.path)}>{file.path}</button>}</For></Show></aside><div class="code-editor"><Show when={openFile()} fallback={<div class="editor-empty">Choose a project file to inspect and edit.</div>}><textarea spellcheck={false} value={fileContent()} onInput={(e) => { setFileContent(e.currentTarget.value); setFileNotice("Modified") }} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); void saveFile() } }}/><span class="editor-status">{fileNotice()} · ⌘S to save</span></Show></div></div></section>
+        <WorkspacePanel
+          workspace={workspace()}
+          projectName={selectedProject()?.name || "Scratch"}
+          files={files()}
+          fileSearch={fileSearch()}
+          onFileSearch={setFileSearch}
+          openFile={openFile()}
+          fileContent={fileContent()}
+          fileNotice={fileNotice()}
+          onRefresh={() => void refreshFiles()}
+          onSelectFile={(path) => void selectFile(path)}
+          onContentChange={(value) => { setFileContent(value); setFileNotice("Modified") }}
+          onSave={() => void saveFile()}
+          onOpenProject={chooseWorkspace}
+        />
       </Show>
       }>
-        <section class="ide-panel"><div class="ide-toolbar"><div><span class="eyebrow">GIT REVIEW</span><strong>{selectedProject()?.branch || "Selected project"}</strong></div><button onClick={() => void refreshDiff()}>Refresh changes</button></div><div class="ide-grid"><aside class="file-tree"><Show when={gitChanges().length} fallback={<button onClick={() => void refreshDiff()}>Load changed files</button>}><For each={gitChanges()}>{(change) => <button class={selectedDiff() === change.path ? "active" : ""} onClick={async () => { setSelectedDiff(change.path); setDiffContent(await window.api.workspace.gitDiff(workspace(), change.path)) }}><span class="change-code">{change.status}</span> {change.path}</button>}</For></Show></aside><div class="code-editor"><Show when={selectedDiff()} fallback={<div class="editor-empty">Select a changed file to review its diff.</div>}><pre class="diff-view">{diffContent()}</pre></Show></div></div></section>
+        <ReviewPanel
+          workspace={workspace()}
+          projectName={selectedProject()?.name || "Scratch"}
+          branch={selectedProject()?.branch}
+          isGit={selectedProject()?.isGit}
+          changes={gitChanges()}
+          selectedPath={selectedDiff()}
+          diff={diffContent()}
+          onRefresh={() => void refreshDiff()}
+          onSelect={async (path) => { setSelectedDiff(path); setDiffContent(await window.api.workspace.gitDiff(workspace(), path)) }}
+          onAskReview={askReviewInChat}
+          onOpenProject={chooseWorkspace}
+        />
       </Show>
     </main>
     <footer class="app-status">

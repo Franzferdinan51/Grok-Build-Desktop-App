@@ -66,6 +66,8 @@ type StoreSchema = {
     updateOffset?: number
     allowedChatIds?: string[]
     pendingChatIds?: string[]
+    chatProfiles?: Record<string, { id: string; type?: string; title?: string; username?: string; firstName?: string; lastName?: string; lastSeenAt?: number; lastPreview?: string }>
+    autoApproveFirst?: boolean
     sessions?: Record<string, {
       sessionId?: string; model?: string; workspace?: string; updatedAt: number
       transcript?: { role: "user" | "assistant"; text: string }[]
