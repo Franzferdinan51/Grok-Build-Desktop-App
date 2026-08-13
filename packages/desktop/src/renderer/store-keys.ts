@@ -45,6 +45,7 @@ export const STORE_KEYS = {
   previewEnabled: "preview.enabled",
   previewUrl: "preview.url",
   layoutSidebarCollapsed: "layout.sidebarCollapsed",
+  layoutSessionSidebarOpen: "layout.sessionSidebarOpen",
   layoutPreviewCollapsed: "layout.previewCollapsed",
   hostBrowserScript: "host.browserScript",
   hostDesktopScript: "host.desktopScript",
@@ -98,6 +99,7 @@ export interface StoreShape {
   [STORE_KEYS.previewEnabled]: boolean
   [STORE_KEYS.previewUrl]: string
   [STORE_KEYS.layoutSidebarCollapsed]: boolean
+  [STORE_KEYS.layoutSessionSidebarOpen]: boolean
   [STORE_KEYS.layoutPreviewCollapsed]: boolean
   [STORE_KEYS.hostBrowserScript]: string | undefined
   [STORE_KEYS.hostDesktopScript]: string | undefined

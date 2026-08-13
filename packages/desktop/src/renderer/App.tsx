@@ -43,6 +43,7 @@ import { SettingsPanel } from "./views/SettingsPanel"
 import { ArtifactsPanel } from "./views/ArtifactsPanel"
 import { collectArtifacts, type ArtifactRecord } from "./artifact-utils"
 import { nextSessionRail, type SessionRailMode } from "./session-context-rail"
+import { sessionSidebarEntries } from "./session-sidebar"
 import { isNearBottom } from "./scroll-position"
 import { preservedReviewPath } from "./review-sync"
 import { addDockedSessionId, parseDockedSessionIds, removeDockedSessionId } from "./session-dock"
@@ -112,6 +113,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [historyAllWorkspaces, setHistoryAllWorkspaces] = createSignal(false)
   const [historyResults, setHistoryResults] = createSignal<ChatThread[]>([])
   const [sessionIndex, setSessionIndex] = createSignal<StoredChatSummary[]>([])
+  const [sidebarSessionSearch, setSidebarSessionSearch] = createSignal("")
+  const [sidebarSessionsOpen, setSidebarSessionsOpen] = createSignal(true)
   const [sessionSwitcherOpen, setSessionSwitcherOpen] = createSignal(false)
   const [sessionSwitcherIndex, setSessionSwitcherIndex] = createSignal(0)
   const [sessionSwitcherNotice, setSessionSwitcherNotice] = createSignal("")
@@ -528,6 +531,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     await replaceQueue([])
     setPrompt(""); setAttachedFiles([]); setQueueEdit(null)
     setHistoryOpen(false)
+    void refreshSessionIndex()
   }
   const openConversation = async (entry: ChatThread | StoredChatSummary) => {
     if (running()) return
@@ -721,6 +725,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (latest?.status === "completed" || thread.sessionStatus === "recovered" || thread.sessionStatus === "resumable") return { kind: "completed", label: "Ready" }
     return { kind: "idle", label: "New" }
   }
+  const sidebarSessionThreads = () => sessionSidebarEntries(sessionIndex(), sidebarSessionSearch())
   createEffect(() => {
     const count = switcherThreads().length
     if (!count) { setSessionSwitcherIndex(0); setSessionSwitcherOpen(false) }
@@ -965,6 +970,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
 
   onMount(async () => {
+    setSidebarSessionsOpen((await window.api.store.get<boolean>(STORE_KEYS.layoutSessionSidebarOpen)) ?? true)
     workspaceRefresh = createWorkspaceRefreshScheduler(() => { void refreshAttachedWorkspaceViews() })
     onCleanup(() => workspaceRefresh.dispose())
     const flushComposerDraft = () => {
@@ -1943,6 +1949,21 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <div class="section-heading"><span class="sidebar__section-title">Projects</span><button class="project-add" onClick={chooseWorkspace} title="Add project">+</button></div>
         <Show when={projects().length > 0} fallback={<><button class="sidebar__project" onClick={useScratchWorkspace}>Start agent scratch</button><button class="sidebar__project" onClick={chooseWorkspace}>Add a codebase</button></>}>
           <For each={projects()}>{(project) => <button class={`sidebar__project ${selectedProject()?.id === project.id ? "sidebar__project--active" : ""}`} onClick={() => void selectProject(project)}><span class="project-name">{project.name}</span><Show when={project.changedFiles > 0}><span class="project-changes">{project.changedFiles}</span></Show></button>}</For>
+        </Show>
+      </div>
+      <div class={`sidebar__section sidebar__sessions ${sidebarSessionsOpen() ? "" : "sidebar__sessions--collapsed"}`}>
+        <div class="section-heading"><span class="sidebar__section-title">Recent chats</span><button class="project-add" onClick={async () => { const next = !sidebarSessionsOpen(); setSidebarSessionsOpen(next); await window.api.store.set(STORE_KEYS.layoutSessionSidebarOpen, next) }} title={sidebarSessionsOpen() ? "Collapse recent chats" : "Expand recent chats"}>{sidebarSessionsOpen() ? "−" : "+"}</button></div>
+        <Show when={sidebarSessionsOpen()}>
+          <input class="sidebar__session-search" value={sidebarSessionSearch()} onInput={(event) => setSidebarSessionSearch(event.currentTarget.value)} placeholder="Search chats…" aria-label="Search recent chats" />
+          <div class="sidebar__session-list" aria-label="Recent chats">
+            <For each={sidebarSessionThreads()} fallback={<p class="sidebar__session-empty">{sidebarSessionSearch() ? "No matching chats" : "Your saved chats appear here"}</p>}>
+              {(thread) => <button class={`sidebar__session ${thread.id === activeThreadId() ? "sidebar__session--active" : ""}`} disabled={running()} onClick={() => void openConversation(thread)} title={`${thread.title} · ${sessionWorkspaceLabel(thread.workspace)}`}>
+                <span class={`sidebar__session-dot sidebar__session-dot--${sessionStatus(thread).kind}`} />
+                <span class="sidebar__session-copy"><strong>{thread.pinned ? "📌 " : ""}{thread.title}</strong><small>{sessionWorkspaceLabel(thread.workspace)} · {thread.messageCount} msg{thread.messageCount === 1 ? "" : "s"}</small></span>
+              </button>}
+            </For>
+          </div>
+          <button class="sidebar__session-more" onClick={() => { setHistoryOpen(true); void refreshHistory() }}>Open full history</button>
         </Show>
       </div>
       <div class="sidebar__footer">
