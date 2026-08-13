@@ -1,10 +1,10 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { execFile } from "node:child_process"
-import { mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { promisify } from "node:util"
-import { applyGitFileAction, gitChangedFiles, gitFileDiff, parseGitWorktrees } from "./workspace-tools.ts"
+import { applyGitFileAction, createGitWorktree, gitBranches, gitChangedFiles, gitFileDiff, parseGitWorktrees } from "./workspace-tools.ts"
 
 test("parseGitWorktrees reads main, linked, and detached worktrees", () => {
   const output = [
@@ -40,4 +40,24 @@ test("Git review actions stage, unstage, discard, and read staged diffs", async 
   await applyGitFileAction(root, "note.txt", "discard")
   assert.equal((await readFile(`${root}/note.txt`, "utf8")).replaceAll("\r\n", "\n"), "before\n")
   assert.deepEqual(await gitChangedFiles(root), [])
+})
+
+test("creates a named branch worktree and rejects unsafe names", async () => {
+  const root = await mkdtemp(`${tmpdir()}/grok-worktree-`)
+  try {
+    await run("git", ["init", "-q"], { cwd: root })
+    await run("git", ["config", "user.email", "test@example.com"], { cwd: root })
+    await run("git", ["config", "user.name", "Grok Test"], { cwd: root })
+    await writeFile(`${root}/note.txt`, "initial\n")
+    await run("git", ["add", "note.txt"], { cwd: root })
+    await run("git", ["commit", "-qm", "initial"], { cwd: root })
+    const created = await createGitWorktree(root, { name: "feature-one", branch: "feature/one", baseRef: "HEAD" })
+    assert.equal(created.branch, "feature/one")
+    assert.match(created.path, /\.worktrees[\\/]feature-one$/)
+    assert.ok((await gitBranches(root)).some((branch) => branch.name === "feature/one" && !branch.remote))
+    await assert.rejects(() => createGitWorktree(root, { name: "../escape", branch: "bad" }), /short folder name/)
+    await assert.rejects(() => createGitWorktree(root, { name: "duplicate", branch: "feature/one" }), /already checked out|already exists/i)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

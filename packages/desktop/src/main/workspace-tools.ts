@@ -1,7 +1,7 @@
 import { execFile } from "child_process"
 import { promisify } from "util"
 import { readdir, readFile, realpath, mkdir, stat, writeFile } from "fs/promises"
-import { dirname, relative, resolve, sep } from "path"
+import { dirname, join, relative, resolve, sep } from "path"
 
 const execFileAsync = promisify(execFile)
 
@@ -148,6 +148,8 @@ export async function gitFileDiff(root: string, path: string): Promise<string> {
 export type GitFileAction = "stage" | "unstage" | "discard"
 
 export type GitWorktree = { path: string; branch?: string; head?: string; detached: boolean; isMain: boolean }
+export type GitBranch = { name: string; remote: boolean }
+export type CreateGitWorktreeInput = { name: string; branch: string; mode?: "new" | "existing"; baseRef?: string }
 
 export function parseGitWorktrees(output: string): GitWorktree[] {
   return output.split(/\n\s*\n/).map((block) => {
@@ -166,6 +168,62 @@ export async function gitWorktrees(root: string): Promise<GitWorktree[]> {
   } catch {
     return []
   }
+}
+
+const worktreeNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+const branchPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/
+
+function validateGitRef(value: string, label: string): string {
+  const ref = value.trim()
+  if (!ref || ref.length > 200 || ref.startsWith("-") || ref.includes("..") || /[\u0000-\u001f\u007f\s]/.test(ref) || !branchPattern.test(ref)) throw new Error(`${label} is not a valid Git ref`)
+  return ref
+}
+
+export async function gitBranches(root: string): Promise<GitBranch[]> {
+  const cwd = await realpath(root)
+  try {
+    const { stdout } = await execFileAsync("git", ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], { cwd, timeout: 10_000 })
+    return stdout.split(/\r?\n/).map((ref) => ref.trim()).filter((ref) => ref && !ref.endsWith("/HEAD")).map((ref) => ref.startsWith("refs/remotes/")
+      ? { name: ref.slice("refs/remotes/".length), remote: true }
+      : { name: ref.slice("refs/heads/".length), remote: false })
+  } catch {
+    return []
+  }
+}
+
+/** Create one explicitly named worktree under the repo's hidden .worktrees folder. */
+export async function createGitWorktree(root: string, input: CreateGitWorktreeInput): Promise<GitWorktree> {
+  const cwd = await realpath(root)
+  const { stdout: repoRootOutput } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], { cwd, timeout: 10_000 })
+  const repoRoot = await realpath(repoRootOutput.trim())
+  const name = input.name.trim()
+  if (!worktreeNamePattern.test(name)) throw new Error("Worktree name must be a short folder name without slashes")
+  const branch = validateGitRef(input.branch, "Branch")
+  const mode = input.mode || "new"
+  const parent = resolve(repoRoot, ".worktrees")
+  const destination = resolve(parent, name)
+  if (destination !== parent && !destination.startsWith(parent + sep)) throw new Error("Worktree destination escapes the repository")
+  try {
+    await stat(destination)
+    throw new Error("A worktree already exists at that name")
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+  await mkdir(parent, { recursive: true })
+  const canonicalParent = await realpath(parent)
+  if (canonicalParent !== repoRoot && !canonicalParent.startsWith(repoRoot + sep)) throw new Error("The .worktrees folder escapes the repository")
+  const args = mode === "existing"
+    ? ["worktree", "add", destination, branch]
+    : ["worktree", "add", "-b", branch, destination, validateGitRef(input.baseRef || "HEAD", "Base ref")]
+  try {
+    await execFileAsync("git", args, { cwd: repoRoot, timeout: 30_000, maxBuffer: 2_000_000 })
+  } catch (error) {
+    const detail = (error as { stderr?: string }).stderr?.trim()
+    throw new Error(detail || "Git could not create the worktree")
+  }
+  const created = (await gitWorktrees(repoRoot)).find((worktree) => resolve(worktree.path) === destination)
+  if (!created) throw new Error("Git created the worktree but it could not be re-read")
+  return created
 }
 
 export async function applyGitFileAction(root: string, path: string, action: GitFileAction): Promise<void> {

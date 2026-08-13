@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendPermissionRequest, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, GrokSubcommand, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, DuckbotMemoryHealth, OAuthStatusSnapshot, GitWorktree } from "../preload"
+import type { BackendEvent, BackendPermissionRequest, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, GrokSubcommand, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, DuckbotMemoryHealth, OAuthStatusSnapshot, GitWorktree, GitBranch } from "../preload"
 import { ensurePublicCompletion, publicChatLogs, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -182,6 +182,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [gitChanges, setGitChanges] = createSignal<{ status: string; path: string }[]>([])
   const [gitWorktrees, setGitWorktrees] = createSignal<GitWorktree[]>([])
   const [worktreeOverviewOpen, setWorktreeOverviewOpen] = createSignal(false)
+  const [worktreeCreateOpen, setWorktreeCreateOpen] = createSignal(false)
+  const [worktreeCreateMode, setWorktreeCreateMode] = createSignal<"new" | "existing">("new")
+  const [worktreeName, setWorktreeName] = createSignal("")
+  const [worktreeBranch, setWorktreeBranch] = createSignal("")
+  const [worktreeBaseRef, setWorktreeBaseRef] = createSignal("HEAD")
+  const [worktreeBranches, setWorktreeBranches] = createSignal<GitBranch[]>([])
+  const [worktreeCreateBusy, setWorktreeCreateBusy] = createSignal(false)
+  const [worktreeCreateNotice, setWorktreeCreateNotice] = createSignal("")
   const [selectedDiff, setSelectedDiff] = createSignal("")
   const [diffContent, setDiffContent] = createSignal("")
   const [previewEnabled, setPreviewEnabled] = createSignal(false)
@@ -1659,6 +1667,33 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (current) setSelectedProject(snapshots.find((project) => project.path === current.path) || current)
   }
   const refreshGitWorktrees = async (root = workspace()) => { if (root) setGitWorktrees(await window.api.workspace.gitWorktrees(root)); else setGitWorktrees([]) }
+  const openWorktreeCreator = async () => {
+    if (!workspace() || !selectedProject()?.isGit) return
+    setWorktreeCreateMode("new")
+    setWorktreeName("")
+    setWorktreeBranch("")
+    setWorktreeBaseRef(selectedProject()?.branch || "HEAD")
+    setWorktreeCreateNotice("")
+    setWorktreeCreateOpen(true)
+    try { setWorktreeBranches(await window.api.workspace.gitBranches(workspace())) }
+    catch (error) { setWorktreeCreateNotice(error instanceof Error ? error.message : String(error)) }
+  }
+  const createWorktree = async () => {
+    const root = workspace()
+    if (!root || !worktreeName().trim() || !worktreeBranch().trim()) return
+    setWorktreeCreateBusy(true); setWorktreeCreateNotice("")
+    try {
+      const created = await window.api.workspace.createGitWorktree(root, { name: worktreeName().trim(), branch: worktreeBranch().trim(), mode: worktreeCreateMode(), baseRef: worktreeBaseRef().trim() || "HEAD" })
+      const project = await window.api.projects.add(created.path)
+      await selectProject(project)
+      setWorktreeCreateOpen(false)
+      setWorktreeOverviewOpen(true)
+      await refreshGitWorktrees(project.path)
+      setSlashNotice(`Created ${created.branch || "detached"} worktree at ${created.path}`)
+    } catch (error) {
+      setWorktreeCreateNotice(error instanceof Error ? error.message : String(error))
+    } finally { setWorktreeCreateBusy(false) }
+  }
   const selectFile = async (path: string) => { setOpenFile(path); setFileContent(await window.api.workspace.read(workspace(), path)); setFileNotice(""); await saveArtifactContext({ selectedPath: path }) }
   const applyContextRail = (next: ContextRailMode | null) => {
     setContextRailMode(next)
@@ -1840,6 +1875,22 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         </section>
       </div>}
     </Show>
+    <Show when={worktreeCreateOpen()}>
+      <div class="permission-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !worktreeCreateBusy()) setWorktreeCreateOpen(false) }}>
+        <section class="permission-dialog worktree-dialog" role="dialog" aria-modal="true" aria-label="Create Git worktree">
+          <header><div><span class="permission-dialog__eyebrow">GIT WORKTREE · CONFIRMATION</span><h2>Create an isolated worktree</h2></div><span class="permission-dialog__lock">NO DELETION</span></header>
+          <p class="permission-dialog__intro">This creates a new checkout under <code>.worktrees/</code>. Existing files and worktrees are not changed or removed.</p>
+          <div class="worktree-dialog__form">
+            <label>Worktree folder name<input value={worktreeName()} onInput={(event) => setWorktreeName(event.currentTarget.value)} placeholder="feature-name" autofocus /></label>
+            <label>Mode<select value={worktreeCreateMode()} onChange={(event) => setWorktreeCreateMode(event.currentTarget.value as "new" | "existing")}><option value="new">Create a new branch</option><option value="existing">Use an existing branch</option></select></label>
+            <label>Branch{worktreeCreateMode() === "existing" ? <select value={worktreeBranch()} onChange={(event) => setWorktreeBranch(event.currentTarget.value)}><option value="">Select a branch…</option><For each={worktreeBranches().filter((branch) => !branch.remote)}>{(branch) => <option value={branch.name}>{branch.name}</option>}</For></select> : <input value={worktreeBranch()} onInput={(event) => setWorktreeBranch(event.currentTarget.value)} placeholder="feature/my-change" />}</label>
+            <Show when={worktreeCreateMode() === "new"}><label>Branch from<select value={worktreeBaseRef()} onChange={(event) => setWorktreeBaseRef(event.currentTarget.value)}><option value="HEAD">Current HEAD</option><For each={worktreeBranches()}>{(branch) => <option value={branch.name}>{branch.name}{branch.remote ? " · remote" : ""}</option>}</For></select></label></Show>
+          </div>
+          <Show when={worktreeCreateNotice()}><pre class="worktree-dialog__notice">{worktreeCreateNotice()}</pre></Show>
+          <footer><span>Git will refuse an occupied folder or branch.</span><div><button class="permission-dialog__cancel" disabled={worktreeCreateBusy()} onClick={() => setWorktreeCreateOpen(false)}>Cancel</button><button class="goal-banner__approve" disabled={worktreeCreateBusy() || !worktreeName().trim() || !worktreeBranch().trim()} onClick={() => void createWorktree()}>{worktreeCreateBusy() ? "Creating…" : "Create worktree"}</button></div></footer>
+        </section>
+      </div>
+    </Show>
     <Show when={paletteOpen()}>
       <div class="command-palette" role="dialog" aria-label="Command palette">
         <input
@@ -1932,7 +1983,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
                 <button class={`coding-status-row__action ${advanced().worktree ? "active" : ""}`} onClick={() => void updateAdvanced("worktree", !advanced().worktree)} title="Run the next task in an isolated Git worktree">{advanced().worktree ? "Isolated" : "Worktree"}</button>
                 <button class={`coding-status-row__action ${worktreeOverviewOpen() ? "active" : ""}`} onClick={() => { const next = !worktreeOverviewOpen(); setWorktreeOverviewOpen(next); if (next) void refreshGitWorktrees() }} title="Show linked Git worktrees">Worktrees {gitWorktrees().length}</button>
               </div>
-              <Show when={worktreeOverviewOpen()}><div class="worktree-overview" aria-label="Git worktrees"><For each={gitWorktrees()}>{(worktree) => <div class={worktree.isMain ? "worktree-overview__row worktree-overview__row--main" : "worktree-overview__row"}><span>{worktree.isMain ? "●" : worktree.detached ? "◇" : "⑂"}</span><strong>{worktree.branch || "detached"}</strong><code title={worktree.path}>{worktree.path}</code><small>{worktree.isMain ? "main checkout" : "linked worktree"}</small><Show when={worktree.path !== workspace()}><button class="worktree-overview__use" onClick={() => void useExistingWorktree(worktree)}>Use</button></Show></div>}</For><Show when={!gitWorktrees().length}><span class="worktree-overview__empty">No worktrees detected.</span></Show></div></Show>
+              <Show when={worktreeOverviewOpen()}><div class="worktree-overview" aria-label="Git worktrees"><header class="worktree-overview__header"><strong>Repository worktrees</strong><button class="worktree-overview__new" onClick={() => void openWorktreeCreator()}>＋ New worktree</button></header><For each={gitWorktrees()}>{(worktree) => <div class={worktree.isMain ? "worktree-overview__row worktree-overview__row--main" : "worktree-overview__row"}><span>{worktree.isMain ? "●" : worktree.detached ? "◇" : "⑂"}</span><strong>{worktree.branch || "detached"}</strong><code title={worktree.path}>{worktree.path}</code><small>{worktree.isMain ? "main checkout" : "linked worktree"}</small><Show when={worktree.path !== workspace()}><button class="worktree-overview__use" onClick={() => void useExistingWorktree(worktree)}>Use</button></Show></div>}</For><Show when={!gitWorktrees().length}><span class="worktree-overview__empty">No worktrees detected.</span></Show></div></Show>
             </Show>
             <span class="composer-hint">⌘K palette · / commands · Grok Build edits this workspace</span>
           </div>

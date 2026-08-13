@@ -17,7 +17,7 @@ import { readSessionPlan } from "./grok-session-files"
 import { BrowserManager } from "./browser-manager"
 import { addSchedule, listSchedules, onScheduleEvent, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
-import { applyGitFileAction, gitChangedFiles, gitFileDiff, gitWorktrees, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
+import { applyGitFileAction, createGitWorktree, gitBranches, gitChangedFiles, gitFileDiff, gitWorktrees, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
 import { PreviewServer } from "./preview-server"
 import { exportConversation, getConversation, listConversationSummaries, listConversations, saveConversation, searchConversations, type StoredChatThread } from "./conversation-store"
 import { DuckbotMemory } from "./duckbot-memory"
@@ -296,6 +296,15 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("workspace:git-diff", (_event, root: string, path: string) => gitFileDiff(root, path))
   ipcMain.handle("workspace:git-action", (_event, root: string, path: string, action: "stage" | "unstage" | "discard") => applyGitFileAction(root, path, action))
   ipcMain.handle("workspace:git-worktrees", (_event, root: string) => gitWorktrees(root))
+  ipcMain.handle("workspace:git-branches", (_event, root: string) => gitBranches(root))
+  ipcMain.handle("workspace:create-git-worktree", (_event, root: string, input: unknown) => {
+    if (!input || typeof input !== "object") throw new Error("Worktree details are required")
+    const candidate = input as { name?: unknown; branch?: unknown; mode?: unknown; baseRef?: unknown }
+    if (typeof candidate.name !== "string" || typeof candidate.branch !== "string") throw new Error("Worktree name and branch are required")
+    if (candidate.mode !== undefined && candidate.mode !== "new" && candidate.mode !== "existing") throw new Error("Unsupported worktree mode")
+    if (candidate.baseRef !== undefined && typeof candidate.baseRef !== "string") throw new Error("Base ref must be text")
+    return createGitWorktree(root, { name: candidate.name, branch: candidate.branch, mode: candidate.mode as "new" | "existing" | undefined, baseRef: candidate.baseRef as string | undefined })
+  })
   ipcMain.handle("preview:start", (_event, root: string) => deps.preview().start(root))
   ipcMain.handle("preview:stop", () => deps.preview().stop())
   ipcMain.handle("preview:inspect", async () => {

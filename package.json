@@ -1,6 +1,6 @@
 {
   "name": "grok-build-desktop-app",
-  "version": "0.2.29",
+  "version": "0.2.30",
   "private": true,
   "description": "Local-first AI coding desktop app powered by xAI Grok Build CLI",
   "workspaces": [
