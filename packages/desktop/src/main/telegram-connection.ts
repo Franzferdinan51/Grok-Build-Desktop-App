@@ -112,9 +112,22 @@ export function telegramPollingDecision(kind: TelegramPollErrorKind | undefined,
   return "ok"
 }
 
-/** Bootstrap (deleteWebhook) uses the same pause/backoff/retry policy as getUpdates. */
+/**
+ * Bootstrap (deleteWebhook) pauses only on a revoked token.
+ * A 409/conflict here must not block getUpdates — webhook clear is optional.
+ */
 export function telegramBootstrapDecision(status: number, ok: boolean, description?: string): TelegramPollingDecision {
-  return telegramPollingDecision(classifyTelegramHttpError(status, description)?.kind, ok)
+  const kind = classifyTelegramHttpError(status, description)?.kind
+  if (kind === "auth") return "pause"
+  if (kind === "rate") return "backoff"
+  if (kind === "conflict") return "ok"
+  if (!ok) return "retry"
+  return "ok"
+}
+
+/** A timed-out getUpdates abort must keep the poller alive. */
+export function telegramPollAbortShouldContinue(polling: boolean, sameGeneration: boolean): boolean {
+  return polling && sameGeneration
 }
 
 /**

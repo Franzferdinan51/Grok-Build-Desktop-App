@@ -13,6 +13,7 @@ import {
   denyChatState,
   telegramPollingDecision,
   telegramBootstrapDecision,
+  telegramPollAbortShouldContinue,
   telegramPublicLiveness,
   TELEGRAM_RECONNECT_SETTLE_MS,
   shouldRecordConnectAuthFailure,
@@ -484,8 +485,21 @@ export class TelegramBridge {
   }
 
   start(): void {
-    if (this.polling || !this.token()) return
+    if (!this.token()) {
+      writeLog("warn", "Telegram start skipped: no decrypted bot token")
+      return
+    }
+    if (this.pollReady && this.polling) return
+    if (this.polling && !this.pollReady) return
     void this.startUntilReady()
+  }
+
+  /** Restart a dead poller (second-instance focus, delayed keychain token). */
+  ensurePolling(): void {
+    if (this.coolOffRemaining() > 0) return
+    if (this.pollReady && this.polling) return
+    if (this.polling && !this.pollReady) return
+    this.start()
   }
 
   private async startUntilReady(): Promise<TelegramStatus> {
@@ -559,9 +573,9 @@ export class TelegramBridge {
         this.webhookCleared = true
         this.lastError = ""
         this.retryDelayMs = 1_000
-        await this.configureCommands()
-        await this.setPresence(true)
         writeLog("info", `Telegram polling started at update ${this.offset}`)
+        void this.configureCommands()
+        void this.setPresence(true)
         return true
       } catch (error) {
         if (!this.polling || generation !== this.pollGeneration) return false
@@ -701,7 +715,10 @@ export class TelegramBridge {
         if (payload.result?.length) await this.persistOffset()
       } catch (error) {
         if (!this.polling || generation !== this.pollGeneration) return
-        if (error instanceof Error && /abort/i.test(error.message)) return
+        if (error instanceof Error && /abort/i.test(error.message)) {
+          if (telegramPollAbortShouldContinue(this.polling, generation === this.pollGeneration)) continue
+          return
+        }
         writeLog("error", `Telegram polling failed: ${error instanceof Error ? error.message : String(error)}`)
         // Sleep at least the current backoff window before retrying so a
         // sustained outage backs off rather than hammering Telegram.

@@ -85,6 +85,7 @@ if (process.env.GROK_BUILD_UI_SMOKE !== "1" && !acquireSingleInstanceLock(() => 
   // skipTaskbar window, so focusing "any window" after the user closed
   // the main one made relaunch look dead.
   void revealMainWindow()
+  telegram.ensurePolling()
 })) {
   writeLog("info", "Another Grok Build Desktop instance is already running. Exiting.")
   app.quit()
@@ -234,6 +235,7 @@ app.whenReady().then(async () => {
     mainWindow.webContents.send("telegram:changed")
   })
   telegram.start()
+  setTimeout(() => telegram.ensurePolling(), 2_000).unref()
   scheduler.start()
   onScheduleEvent((event) => {
     const homeChatId = scheduledHomeTarget(getStore().get("telegram").homeChatId, telegram.allowedChats())

@@ -19,6 +19,7 @@ import {
   stillWaitingMessage,
   telegramPollingDecision,
   telegramBootstrapDecision,
+  telegramPollAbortShouldContinue,
   telegramPublicLiveness,
   upsertChatProfile,
   isTelegramControlCommand,
@@ -103,10 +104,16 @@ test("telegramPollingDecision pauses auth and getUpdates conflicts instead of ha
 
 test("bootstrap uses the same HTTP classification as getUpdates", () => {
   assert.equal(telegramBootstrapDecision(401, false, "unauthorized"), "pause")
-  assert.equal(telegramBootstrapDecision(409, false, "Conflict: terminated by other getUpdates"), "pause")
+  assert.equal(telegramBootstrapDecision(409, false, "Conflict: terminated by other getUpdates"), "ok")
   assert.equal(telegramBootstrapDecision(429, false, "too many requests"), "backoff")
   assert.equal(telegramBootstrapDecision(200, false, "Could not clear webhook"), "retry")
   assert.equal(telegramBootstrapDecision(200, true), "ok")
+})
+
+test("a getUpdates abort keeps polling when the generation is still live", () => {
+  assert.equal(telegramPollAbortShouldContinue(true, true), true)
+  assert.equal(telegramPollAbortShouldContinue(true, false), false)
+  assert.equal(telegramPollAbortShouldContinue(false, true), false)
 })
 
 test("public liveness stays dark until bootstrap marks the poller ready", () => {
