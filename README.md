@@ -30,7 +30,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Searchable Grok run history, scheduled tasks, project skills, and durable workspace goals.
 - Slash-command palette with keyboard completion and dynamically discovered Grok Build skills.
 - Global Quick Entry (`CommandOrControl+Shift+Space`) opens a secure, always-on-top composer from anywhere and routes submissions into the current or a new saved conversation.
-- Workspace file attachments let you select up to eight files from the project rail and carry their paths into the next prompt as explicit agent context.
+- Workspace file attachments let you select up to eight files from the project rail or drop known workspace files directly onto the composer; only files already returned by the safe workspace listing are accepted and their relative paths become explicit agent context.
 - Action-oriented Git Review now supports per-file stage/unstage controls, staged-diff inspection, and confirmed discard for tracked changes.
 - Background task completion and failure also surface as native desktop notifications when the workbench is unfocused; clicking one restores the existing app window.
 - The Task Inspector includes a durable, per-workspace checklist for breaking work into explicit user-controlled steps alongside the active Grok Build goal.

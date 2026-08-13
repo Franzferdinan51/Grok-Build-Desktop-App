@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { formatAttachedPrompt, MAX_ATTACHED_FILES, toggleAttachedFile } from "./attached-files.ts"
+import { droppedWorkspaceFiles, formatAttachedPrompt, MAX_ATTACHED_FILES, toggleAttachedFile } from "./attached-files.ts"
 
 const file = (path: string) => ({ path, size: 12 })
 
@@ -22,3 +22,16 @@ test("formatAttachedPrompt keeps the instruction and adds readable file context"
   assert.equal(formatAttachedPrompt("  Fix this  ", []), "Fix this")
 })
 
+test("droppedWorkspaceFiles accepts only known files inside the workspace", () => {
+  const files = [file("src/App.tsx"), file("README.md")]
+  assert.deepEqual(
+    droppedWorkspaceFiles("/workspace/project", ["/workspace/project/src/App.tsx", "/tmp/secret.txt", "/workspace/project/unknown.ts"], files),
+    [file("src/App.tsx")],
+  )
+})
+
+test("droppedWorkspaceFiles deduplicates paths and respects the attachment cap", () => {
+  const files = Array.from({ length: MAX_ATTACHED_FILES }, (_, index) => file(`src/${index}.ts`))
+  const dropped = files.flatMap((entry) => [`/workspace/project/${entry.path}`, `/workspace/project/${entry.path}`])
+  assert.deepEqual(droppedWorkspaceFiles("/workspace/project", dropped, files, MAX_ATTACHED_FILES - 2).map((entry) => entry.path), ["src/0.ts", "src/1.ts"])
+})

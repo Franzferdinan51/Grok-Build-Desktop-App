@@ -23,7 +23,7 @@ import { TaskInspector } from "./TaskInspector"
 import { NotificationStack, type DesktopNotification } from "./NotificationStack"
 import { ChatTerminalRail } from "./ChatTerminalRail"
 import { ConversationSplitPane } from "./ConversationSplitPane"
-import { formatAttachedPrompt, toggleAttachedFile } from "./attached-files"
+import { droppedWorkspaceFiles, formatAttachedPrompt, toggleAttachedFile } from "./attached-files"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
 import { WorkspacePanel } from "./views/WorkspacePanel"
 import { TerminalPanel } from "./views/TerminalPanel"
@@ -48,6 +48,7 @@ import "./branding.css"
 import "./context-rail.css"
 import "./session-review.css"
 import "./scroll-latest.css"
+import "./chat-drop.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
 import * as eventBuffer from "./event-buffer"
 import "./artifacts.css"
@@ -188,6 +189,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [contextRailMode, setContextRailMode] = createSignal<ContextRailMode | null>(null)
   const [notifications, setNotifications] = createSignal<DesktopNotification[]>([])
   const [showJumpToLatest, setShowJumpToLatest] = createSignal(false)
+  const [composerDropActive, setComposerDropActive] = createSignal(false)
   const [agentAppControls, setAgentAppControls] = createSignal(false)
   const [subagentsEnabled, setSubagentsEnabled] = createSignal(FRIENDLY_DEFAULTS.subagents)
   const [delegationMode, setDelegationMode] = createSignal<"balanced" | "aggressive">("balanced")
@@ -943,6 +945,38 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       })
   }
 
+  const composerHasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes("Files")
+  const handleComposerDragEnter = (event: DragEvent) => {
+    if (!workspace() || !composerHasFiles(event)) return
+    event.preventDefault()
+    setComposerDropActive(true)
+  }
+  const handleComposerDragOver = (event: DragEvent) => {
+    const transfer = event.dataTransfer
+    if (!workspace() || !transfer || !composerHasFiles(event)) return
+    event.preventDefault()
+    transfer.dropEffect = "copy"
+    setComposerDropActive(true)
+  }
+  const handleComposerDragLeave = (event: DragEvent) => {
+    if (event.currentTarget instanceof HTMLElement && event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setComposerDropActive(false)
+  }
+  const handleComposerDrop = (event: DragEvent) => {
+    const transfer = event.dataTransfer
+    if (!workspace() || !transfer || !composerHasFiles(event)) return
+    event.preventDefault()
+    setComposerDropActive(false)
+    const paths = Array.from(transfer.files).map((file) => (file as File & { path?: string }).path).filter((path): path is string => Boolean(path))
+    const accepted = droppedWorkspaceFiles(workspace(), paths, files(), attachedFiles().length)
+    if (!accepted.length) {
+      setSlashNotice(paths.length ? "Only known files inside the selected workspace can be attached." : "Drop a workspace file from the file system or project tree.")
+      return
+    }
+    setAttachedFiles((current) => accepted.reduce((next, file) => toggleAttachedFile(next, file), current))
+    setSlashNotice(`${accepted.length} workspace file${accepted.length === 1 ? "" : "s"} attached.`)
+  }
+
   const run = async (requested?: string, options?: { ephemeral?: boolean; modelOverride?: string }): Promise<TaskLog[]> => {
     const rawSubmitted = (requested ?? prompt()).trim()
     const ephemeral = options?.ephemeral === true
@@ -1416,7 +1450,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For></section></Show>
         <Show when={splitOpen() && splitThread()}>{(thread) => <ConversationSplitPane thread={thread()} onClose={() => void closeSplitConversation()} onFocus={() => void focusSplitConversation()} />}</Show>
-        <section class="chat-composer chat-composer--docked" aria-label="Grok Build task composer">
+        <section class={`chat-composer chat-composer--docked ${composerDropActive() ? "chat-composer--drop-active" : ""}`} aria-label="Grok Build task composer" onDragEnter={handleComposerDragEnter} onDragOver={handleComposerDragOver} onDragLeave={handleComposerDragLeave} onDrop={handleComposerDrop}>
+          <Show when={composerDropActive()}><div class="chat-drop-overlay" aria-live="polite"><span>Drop workspace files to attach</span></div></Show>
           <div class="chat-composer__context">
             <button class="context-pill" onClick={chooseWorkspace} title={workspace()}><span class="context-pill__icon">⌘</span>{selectedProject()?.name || "Scratch"}</button>
             <Show when={selectedProject()?.isGit}>
