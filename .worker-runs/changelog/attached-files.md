@@ -1,0 +1,1 @@
+- Added Duck-Agent-inspired workspace-file attachments to the chat composer, with an eight-file cap, visible context chips, and explicit prompt routing.

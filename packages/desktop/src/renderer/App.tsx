@@ -23,6 +23,7 @@ import { TaskInspector } from "./TaskInspector"
 import { NotificationStack, type DesktopNotification } from "./NotificationStack"
 import { ChatTerminalRail } from "./ChatTerminalRail"
 import { ConversationSplitPane } from "./ConversationSplitPane"
+import { formatAttachedPrompt, toggleAttachedFile } from "./attached-files"
 import { BrowserAgentTab } from "./views/BrowserAgentTab"
 import { WorkspacePanel } from "./views/WorkspacePanel"
 import { TerminalPanel } from "./views/TerminalPanel"
@@ -133,6 +134,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [customModel, setCustomModel] = createSignal("")
   const [skillSearch, setSkillSearch] = createSignal("")
   const [files, setFiles] = createSignal<WorkspaceFile[]>([])
+  const [attachedFiles, setAttachedFiles] = createSignal<WorkspaceFile[]>([])
   const [fileSearch, setFileSearch] = createSignal("")
   const [openFile, setOpenFile] = createSignal("")
   const [fileContent, setFileContent] = createSignal("")
@@ -683,6 +685,13 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
 
   onMount(async () => {
+    const onAttachFile = (event: Event) => {
+      const path = (event as CustomEvent<string>).detail
+      const file = files().find((entry) => entry.path === path)
+      if (file) setAttachedFiles((current) => toggleAttachedFile(current, file))
+    }
+    window.addEventListener("grok-attach-file", onAttachFile)
+    onCleanup(() => window.removeEventListener("grok-attach-file", onAttachFile))
     onCleanup(window.api.telegram.onChange(() => { void refreshTelegram(false) }))
     const savedWorkspace = await window.api.store.get<string>(STORE_KEYS.workspaceLast)
     let savedProjects = await window.api.projects.list()
@@ -903,10 +912,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
 
   const run = async (requested?: string, options?: { ephemeral?: boolean; modelOverride?: string }): Promise<TaskLog[]> => {
-    const submitted = (requested ?? prompt()).trim()
+    const rawSubmitted = (requested ?? prompt()).trim()
     const ephemeral = options?.ephemeral === true
-    if (!submitted) return []
-    if (!ephemeral && await executeSlashCommand(submitted)) return []
+    if (!rawSubmitted) return []
+    if (!ephemeral && await executeSlashCommand(rawSubmitted)) return []
+    const submitted = formatAttachedPrompt(rawSubmitted, attachedFiles())
+    setAttachedFiles([])
     if (running()) {
       if (ephemeral) return [{ kind: "error", content: "Grok is already running another task." }]
       await replaceQueue(enqueuePrompt(queuedPrompts(), submitted, crypto.randomUUID()))
@@ -1353,9 +1364,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           </div>
           <Show when={slashMatches().length}><div class="slash-palette"><For each={slashMatches()}>{(command, index) => <button class={index() === slashSelection() ? "active" : ""} onMouseDown={(event) => { event.preventDefault(); setPrompt(`/${command.name}${command.usage?.includes("<") ? " " : ""}`); setSlashSelection(0) }}><code>/{command.name}</code><span>{command.description}</span><Show when={command.usage}><small>{command.usage}</small></Show></button>}</For></div></Show>
           <Show when={slashNotice()}><pre class="slash-notice">{slashNotice()}</pre></Show>
+          <Show when={attachedFiles().length}><div class="composer-attachments" aria-label="Attached workspace files"><For each={attachedFiles()}>{(file) => <button onClick={() => setAttachedFiles((current) => toggleAttachedFile(current, file))} title="Remove attachment"><span>◇</span>{file.path}<b>×</b></button>}</For><small>{attachedFiles().length}/8 attached</small></div></Show>
           <textarea value={prompt()} onInput={(event) => { setPrompt(event.currentTarget.value); setHistoryIndex(-1); setSlashSelection(0); if (event.currentTarget.value) setSlashNotice("") }} onKeyDown={(event) => { const matches = slashMatches(); if (matches.length && event.key === "ArrowDown") { event.preventDefault(); setSlashSelection((value) => (value + 1) % matches.length) } else if (matches.length && event.key === "ArrowUp") { event.preventDefault(); setSlashSelection((value) => (value - 1 + matches.length) % matches.length) } else if (matches.length && (event.key === "Tab" || event.key === "Enter") && !event.shiftKey) { event.preventDefault(); const command = matches[slashSelection()]; if (command) { const requiresArgs = command.usage?.includes("<"); setPrompt(`/${command.name}${requiresArgs ? " " : ""}`); setSlashSelection(0); if (!requiresArgs && event.key === "Enter") void run(`/${command.name}`) } } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void run() } else if (event.key === "ArrowUp" && (event.currentTarget.selectionStart === 0 || !prompt())) { event.preventDefault(); browsePromptHistory(-1) } else if (event.key === "ArrowDown" && event.currentTarget.selectionStart === prompt().length) { event.preventDefault(); browsePromptHistory(1) } }} placeholder={running() ? "Send another instruction — it will be queued…" : "Ask Grok Build to code, debug, or type / for commands…"} rows={3} />
           <div class="chat-composer__footer">
-            <button class="composer-icon" onClick={chooseWorkspace} title="Attach or open a workspace">＋</button>
+            <button class="composer-icon" onClick={() => { setFilesOpen(true); setFilesRailCollapsed(false); void refreshFiles() }} title="Attach workspace files">＋</button>
             <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsThinking, event.currentTarget.checked) }} />◇ Think</label>
             <label class={`composer-toggle ${autoApprove() ? "composer-toggle--warning" : ""}`} title="Allow Grok Build to execute tools without asking"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, event.currentTarget.checked) }} />⚡ Auto</label>
             <label class={`composer-toggle ${moaEnabled() ? "composer-toggle--moa" : ""}`} title={`Run ${moaCandidates()} candidates in parallel and synthesize the best result`}><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} />⌘ MoA ×{moaCandidates()}</label>
