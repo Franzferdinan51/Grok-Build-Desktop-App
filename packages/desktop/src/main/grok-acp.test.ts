@@ -39,6 +39,6 @@ test("ACP waits for a renderer permission choice and resumes the prompt", async 
     assert.equal(result.text, "resumed")
     assert.equal(result.sessionId, "fixture-session")
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   }
 })
