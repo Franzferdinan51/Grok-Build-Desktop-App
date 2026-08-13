@@ -165,11 +165,11 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("providers:add", async (_event, label: string, baseUrl: string, modelId: string) => { await addCustomProvider(label, baseUrl, modelId) })
   ipcMain.handle("providers:remove", async (_event, id: string) => { await removeCustomProvider(id) })
 
-  ipcMain.handle("telegram:status", () => deps.telegram().status())
+  ipcMain.handle("telegram:status", (_event, probe?: boolean) => deps.telegram().status({ probe: probe === true }))
   ipcMain.handle("telegram:connect", async (_event, token: string) => deps.telegram().connect(token))
   ipcMain.handle("telegram:reconnect", () => deps.telegram().reconnect())
   ipcMain.handle("telegram:disconnect", () => deps.telegram().disconnect())
-  ipcMain.handle("telegram:forget-token", () => { deps.telegram().forgetToken(); return { ok: true } })
+  ipcMain.handle("telegram:forget-token", async () => { await deps.telegram().forgetToken(); return { ok: true } })
   ipcMain.handle("telegram:send", async (_event, chatId: string, text: string) => deps.telegram().send(chatId, text))
   ipcMain.handle("telegram:allowed-chats", () => deps.telegram().allowedChats())
   ipcMain.handle("telegram:pending-chats", () => deps.telegram().pendingChats())

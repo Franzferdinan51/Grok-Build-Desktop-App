@@ -192,7 +192,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [backendToolOutput, setBackendToolOutput] = createSignal("")
   const [backendToolRunning, setBackendToolRunning] = createSignal(false)
   const [settingsTab, setSettingsTab] = createSignal<"backend" | "providers" | "models" | "advanced" | "preview">("backend")
-  const [agentTab, setAgentTab] = createSignal<"overview" | "runtime" | "sessions" | "memory" | "telegram" | "commands">("overview")
+  const [agentTab, setAgentTab] = createSignal<"overview" | "runtime" | "sessions" | "memory" | "telegram" | "commands">("telegram")
   let messagesElement: HTMLDivElement | undefined
   let scrollFrame = 0
   let eventFrame = 0
@@ -659,6 +659,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
 
   onMount(async () => {
+    onCleanup(window.api.telegram.onChange(() => { void refreshTelegram(false) }))
     const savedWorkspace = await window.api.store.get<string>(STORE_KEYS.workspaceLast)
     let savedProjects = await window.api.projects.list()
     if (savedProjects.length === 0) {
@@ -1035,8 +1036,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     }
   }
 
-  const refreshTelegram = async () => {
-    const status = await window.api.telegram.status()
+  const refreshTelegram = async (probe = false) => {
+    const status = await window.api.telegram.status(probe)
     setTelegram(status)
     setTelegramInbox(await window.api.telegram.chats())
     setTelegramPendingChats(await window.api.telegram.pendingChats())
@@ -1055,7 +1056,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
   createEffect(() => {
     if (active() !== "telegram") return
-    const timer = window.setInterval(() => { void refreshTelegram() }, 4000)
+    const timer = window.setInterval(() => { void refreshTelegram(false) }, 8000)
     onCleanup(() => clearInterval(timer))
   })
 
@@ -1192,7 +1193,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setCatalog(await window.api.backend.models())
       setRuns(await window.api.grokRuns.list())
       setSchedules(await window.api.schedules.list())
-      await refreshTelegram()
+      setAgentTab("telegram")
+      await refreshTelegram(false)
     }
     if (view === "settings") {
       setCatalog(await window.api.backend.models())
@@ -1243,7 +1245,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     </Show>
     <aside class={`sidebar ${sidebarCollapsed() ? "sidebar--collapsed" : ""}`}>
       <div class="brand"><img class="brand__logo" src={grokBuildLogo} alt="" /><span>Grok Build</span><button class="sidebar-collapse" onClick={async () => { const next = !sidebarCollapsed(); setSidebarCollapsed(next); await window.api.store.set(STORE_KEYS.layoutSidebarCollapsed, next) }} title={sidebarCollapsed() ? "Expand sidebar" : "Collapse sidebar"}>{sidebarCollapsed() ? "›" : "‹"}</button></div>
-      <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => void navigate(item.id)}><span>{item.icon}</span>{item.label}</button>}</For></nav>
+      <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => void navigate(item.id)}><span>{item.icon}</span>{item.label}<Show when={item.id === "telegram" && telegramInbox().pending.length}><span class="project-changes">{telegramInbox().pending.length}</span></Show></button>}</For></nav>
       <div class="sidebar__section">
         <div class="section-heading"><span class="sidebar__section-title">Projects</span><button class="project-add" onClick={chooseWorkspace} title="Add project">+</button></div>
         <Show when={projects().length > 0} fallback={<><button class="sidebar__project" onClick={useScratchWorkspace}>Start agent scratch</button><button class="sidebar__project" onClick={chooseWorkspace}>Add a codebase</button></>}>
@@ -1345,6 +1347,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <button class={agentTab() === "commands" ? "active" : ""} onClick={() => setAgentTab("commands")}>Commands</button>
           </nav>
           <Show when={agentTab() === "overview"}>
+          <Show when={telegramInbox().pending.length}>
+            <div class="runtime-banner">
+              {telegramInbox().pending.length} pairing request{telegramInbox().pending.length === 1 ? "" : "s"} waiting.
+              <button class="primary" style={{ "margin-left": "12px" }} onClick={() => setAgentTab("telegram")}>Review chats</button>
+            </div>
+          </Show>
           <p class="page-lede">One persistent agent across desktop and Telegram, using Grok Build as the execution harness with OpenClaw/Hermes-style sessions, queues, delegation, recovery, and safe app actions.</p>
           <div class="agent-status-grid"><article><span>Harness</span><strong>{props.backendStatus().version || "Grok Build CLI"}</strong></article><article><span>Active model</span><strong>{model() || catalog().defaultModel || "Default"}</strong></article><article><span>Current work</span><strong>{runs().some((run) => run.status === "running") ? "Task running" : "Idle"}</strong></article><article><span>Remote channel</span><strong>{telegram().connected ? `@${telegram().username ?? "bot"}${telegram().polling ? " · live" : " · paused"}` : "Not connected"}</strong></article><article><span>Authorized chats</span><strong>{telegramAllowedChats().split(/[\s,]+/).filter(Boolean).length}</strong></article><article><span>Pairing requests</span><strong>{telegramPendingChats().length || "None"}</strong></article></div>
           <div class="agent-quick-actions"><button onClick={async () => { setRuns(await window.api.grokRuns.list()); await refreshTelegram(); setTelegramNotice("Agent health refreshed") }}>Refresh health</button><button class="settings-switch--warning" onClick={() => void window.api.app.restart()}>Restart desktop agent</button></div>
@@ -1386,7 +1394,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             onAutoApproveFirst={async (enabled) => { await window.api.telegram.setAutoApproveFirst(enabled); await refreshTelegram() }}
             onOpenBot={() => { const name = telegram().username; if (name) void window.api.app.openExternal(`https://t.me/${name}`) }}
             onOpenBotFather={() => void window.api.app.openExternal("https://t.me/BotFather")}
-            onRefresh={() => void refreshTelegram()}
+            onRefresh={() => void refreshTelegram(true)}
             onCopy={(value) => void navigator.clipboard.writeText(value)}
           />
           </Show>

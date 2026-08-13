@@ -2,12 +2,14 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   approveChatState,
+  classifyTelegramHttpError,
   connectionPhase,
   denyChatState,
   hydrateChats,
   isPublicPairingCommand,
   labelChat,
   pairingMessage,
+  pairingPublicReply,
   parseChatIds,
   profileFromTelegramChat,
   shouldAutoApproveFirst,
@@ -23,6 +25,14 @@ test("pairing commands stay available before approval", () => {
   assert.equal(isPublicPairingCommand("/whoami"), true)
   assert.equal(isPublicPairingCommand("/run fix tests"), false)
   assert.equal(isPublicPairingCommand("hello"), false)
+})
+
+test("classifyTelegramHttpError separates conflict and rate limits from auth", () => {
+  assert.equal(classifyTelegramHttpError(409, "Conflict: terminated by other getUpdates")?.kind, "conflict")
+  assert.equal(classifyTelegramHttpError(429, "too many requests")?.kind, "rate")
+  assert.equal(classifyTelegramHttpError(401, "unauthorized")?.kind, "auth")
+  assert.match(classifyTelegramHttpError(401, "nope")?.message || "", /Agent → Telegram/)
+  assert.match(pairingPublicReply({ chatId: "42", command: "whoami" }), /chat id: 42/)
 })
 
 test("labelChat prefers username then person then title", () => {

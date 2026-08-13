@@ -174,6 +174,10 @@ app.whenReady().then(async () => {
   // safeStorage may trigger a macOS Keychain approval dialog when an ad-hoc
   // development build gets a new signature. Start Telegram only after the
   // main window is visible so that prompt can never make the app appear dead.
+  telegram.onChange(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send("telegram:changed")
+  })
   telegram.start()
   scheduler.start()
   // Auto-update is now single-flight: a 6h `setInterval` and the 30s

@@ -53,10 +53,11 @@ export function TelegramConnectionPanel(props: {
       <span class={props.allowed.length ? "is-done" : live() ? "is-current" : ""}>3. Approve a chat</span>
     </div>
 
-    <article class={`runtime-banner ${live() ? "runtime-banner--ready" : props.status.error ? "runtime-banner--error" : ""}`}>
+    <article class={`runtime-banner ${live() && !props.status.lastError ? "runtime-banner--ready" : (props.status.error || props.status.lastError) ? "runtime-banner--error" : ""}`}>
       {phaseLabel(props.status)}
       {props.status.username ? ` · @${props.status.username}` : ""}
       {props.status.firstName ? ` · ${props.status.firstName}` : ""}
+      <Show when={props.status.lastError && live()}><span> · {props.status.lastError}</span></Show>
     </article>
 
     <Show when={!hasToken()}>

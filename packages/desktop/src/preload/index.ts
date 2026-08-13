@@ -61,7 +61,7 @@ export type ElectronAPI = {
     onEvent: (handler: (event: BackendEvent) => void) => () => void
   }
   telegram: {
-    status: () => Promise<TelegramStatus>
+    status: (probe?: boolean) => Promise<TelegramStatus>
     connect: (token: string) => Promise<TelegramStatus>
     reconnect: () => Promise<TelegramStatus>
     disconnect: () => Promise<void>
@@ -75,6 +75,7 @@ export type ElectronAPI = {
     denyChat: (chatId: string) => Promise<string[]>
     revokeChat: (chatId: string) => Promise<string[]>
     setAutoApproveFirst: (enabled: boolean) => Promise<boolean>
+    onChange: (handler: () => void) => () => void
   }
   memory: { status: () => Promise<DuckbotMemoryStatus>; recall: (query: string) => Promise<string> }
   projects: { list: () => Promise<ProjectSnapshot[]>; add: (path: string) => Promise<ProjectSnapshot>; scratch: () => Promise<ProjectSnapshot>; remove: (id: string) => Promise<void> }
@@ -114,7 +115,7 @@ const api: ElectronAPI = {
     },
   },
   telegram: {
-    status: () => ipcRenderer.invoke("telegram:status"),
+    status: (probe) => ipcRenderer.invoke("telegram:status", probe),
     connect: (token) => ipcRenderer.invoke("telegram:connect", token),
     reconnect: () => ipcRenderer.invoke("telegram:reconnect"),
     disconnect: () => ipcRenderer.invoke("telegram:disconnect"),
@@ -128,6 +129,11 @@ const api: ElectronAPI = {
     denyChat: (chatId) => ipcRenderer.invoke("telegram:deny-chat", chatId),
     revokeChat: (chatId) => ipcRenderer.invoke("telegram:revoke-chat", chatId),
     setAutoApproveFirst: (enabled) => ipcRenderer.invoke("telegram:set-auto-approve-first", enabled),
+    onChange: (handler) => {
+      const listener = () => handler()
+      ipcRenderer.on("telegram:changed", listener)
+      return () => ipcRenderer.removeListener("telegram:changed", listener)
+    },
   },
   memory: { status: () => ipcRenderer.invoke("memory:status"), recall: (query) => ipcRenderer.invoke("memory:recall", query) },
   projects: { list: () => ipcRenderer.invoke("projects:list"), add: (path) => ipcRenderer.invoke("projects:add", path), scratch: () => ipcRenderer.invoke("projects:scratch"), remove: (id) => ipcRenderer.invoke("projects:remove", id) },

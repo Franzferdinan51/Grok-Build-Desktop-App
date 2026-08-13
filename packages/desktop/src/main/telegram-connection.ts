@@ -47,9 +47,46 @@ export function parseChatIds(input: string): string[] {
   return [...new Set(input.split(/[\s,]+/).map((id) => id.trim()).filter((id) => /^-?\d+$/.test(id)))]
 }
 
-export function isPublicPairingCommand(text: string): boolean {
+export function publicPairingCommandName(text: string): string | undefined {
   const match = text.trim().match(/^\/(\w+)(?:@\w+)?(?:\s|$)/)
-  return Boolean(match && PUBLIC_PAIRING_COMMANDS.has(match[1]!.toLowerCase()))
+  const name = match?.[1]?.toLowerCase()
+  if (name && PUBLIC_PAIRING_COMMANDS.has(name)) return name
+  return undefined
+}
+
+export function isPublicPairingCommand(text: string): boolean {
+  return Boolean(publicPairingCommandName(text))
+}
+
+export type TelegramPollErrorKind = "auth" | "rate" | "conflict" | "other"
+
+export function classifyTelegramHttpError(status: number, description?: string): { kind: TelegramPollErrorKind; message: string } | undefined {
+  const desc = (description || "").trim()
+  if (status === 409 || /terminated by other getUpdates|Conflict/i.test(desc)) {
+    return {
+      kind: "conflict",
+      message: "Another process is already polling this bot. Stop the other desktop app, OpenClaw, or webhook, then tap Reconnect.",
+    }
+  }
+  if (status === 401 || status === 403) {
+    return {
+      kind: "auth",
+      message: `Telegram rejected the bot token (HTTP ${status}): ${desc || "unauthorized"}. Polling paused — reconnect in Agent → Telegram.`,
+    }
+  }
+  if (status === 429) {
+    return {
+      kind: "rate",
+      message: `Telegram rate-limited polling (HTTP 429): ${desc || "too many requests"}. Backing off — the bot is still connected.`,
+    }
+  }
+  return undefined
+}
+
+export function pairingPublicReply(input: { chatId: string; botUsername?: string; label?: string; command: string }): string {
+  const base = pairingMessage({ chatId: input.chatId, botUsername: input.botUsername, label: input.label })
+  if (input.command === "whoami" || input.command === "id") return `Telegram chat id: ${input.chatId}\n\n${base}`
+  return base
 }
 
 export function labelChat(profile: Pick<TelegramChatProfile, "id" | "username" | "firstName" | "lastName" | "title">): string {
