@@ -19,6 +19,8 @@ import {
   stillWaitingMessage,
   telegramPollingDecision,
   telegramConflictRetryDelayMs,
+  telegramDeleteWebhookBody,
+  telegramGetUpdatesBody,
   telegramBootstrapDecision,
   telegramPollAbortShouldContinue,
   telegramPublicLiveness,
@@ -104,9 +106,15 @@ test("telegramPollingDecision pauses auth and recovers from getUpdates conflicts
 })
 
 test("Hermes-style conflict backoff grows then caps", () => {
-  assert.equal(telegramConflictRetryDelayMs(1), 20_000)
+  assert.equal(telegramConflictRetryDelayMs(1), 1_000)
   assert.equal(telegramConflictRetryDelayMs(2), 30_000)
   assert.equal(telegramConflictRetryDelayMs(8), 60_000)
+})
+
+test("auto-takeover webhook and getUpdates bodies are the shipped poller payloads", () => {
+  assert.deepEqual(telegramDeleteWebhookBody(true), { drop_pending_updates: true })
+  assert.deepEqual(telegramGetUpdatesBody(12), { timeout: 25, offset: 12, allowed_updates: ["message", "edited_message", "callback_query"] })
+  assert.equal(telegramGetUpdatesBody(-3).offset, 0)
 })
 
 test("bootstrap uses the same HTTP classification as getUpdates", () => {

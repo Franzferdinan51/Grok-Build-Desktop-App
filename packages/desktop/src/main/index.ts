@@ -205,6 +205,8 @@ app.whenReady().then(async () => {
     }
   }
   telegram.setMessageHandler(agentHandler.handleMessage)
+  telegram.start()
+  setInterval(() => telegram.ensurePolling(), 15_000).unref()
 
   // Register all IPC handlers before window creation
   registerIpcHandlers({

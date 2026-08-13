@@ -113,13 +113,26 @@ export function telegramPollingDecision(kind: TelegramPollErrorKind | undefined,
   return "ok"
 }
 
-/** Hermes waits 15s, 25s, 35s… for the other getUpdates session to expire. */
+/**
+ * First conflict steals immediately (1s). Later attempts follow Hermes
+ * 30s / 40s / … so a leftover Hermes getUpdates session can expire.
+ */
 export function telegramConflictRetryDelayMs(attempt: number): number {
-  const n = Math.max(1, Math.min(8, Math.floor(attempt)))
+  if (attempt <= 1) return 1_000
+  const n = Math.max(2, Math.min(8, Math.floor(attempt)))
   return Math.min(60_000, (10 + n * 10) * 1_000)
 }
 
 export const TELEGRAM_ALLOWED_UPDATES = ["message", "edited_message", "callback_query"] as const
+
+/** Always drop the other poller so takeover does not need a human. */
+export function telegramDeleteWebhookBody(takeOver = true): { drop_pending_updates: boolean } {
+  return { drop_pending_updates: takeOver }
+}
+
+export function telegramGetUpdatesBody(offset: number): { timeout: number; offset: number; allowed_updates: string[] } {
+  return { timeout: 25, offset: Math.max(0, offset), allowed_updates: [...TELEGRAM_ALLOWED_UPDATES] }
+}
 
 /**
  * Bootstrap (deleteWebhook) pauses only on a revoked token.

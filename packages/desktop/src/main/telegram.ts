@@ -16,7 +16,8 @@ import {
   telegramConflictRetryDelayMs,
   telegramPollAbortShouldContinue,
   telegramPublicLiveness,
-  TELEGRAM_ALLOWED_UPDATES,
+  telegramDeleteWebhookBody,
+  telegramGetUpdatesBody,
   TELEGRAM_RECONNECT_SETTLE_MS,
   shouldRecordConnectAuthFailure,
   deniedMessage,
@@ -545,7 +546,7 @@ export class TelegramBridge {
       }
       try {
         const response = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/deleteWebhook`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drop_pending_updates: false }),
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(telegramDeleteWebhookBody(true)),
         })
         const payload = response.payload
         const decision = telegramBootstrapDecision(response.status, Boolean(payload.ok), payload.description)
@@ -610,7 +611,7 @@ export class TelegramBridge {
           response = await telegramRequest(`https://api.telegram.org/bot${token}/getUpdates`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ timeout: 25, offset: this.offset, allowed_updates: [...TELEGRAM_ALLOWED_UPDATES] }),
+            body: JSON.stringify(telegramGetUpdatesBody(this.offset)),
             signal: pollAbort.signal,
           })
         } finally {
@@ -643,7 +644,7 @@ export class TelegramBridge {
           if (!this.polling || generation !== this.pollGeneration) return
           try {
             await telegramRequest(`https://api.telegram.org/bot${token}/deleteWebhook`, {
-              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drop_pending_updates: true }),
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(telegramDeleteWebhookBody(true)),
             })
           } catch { /* best-effort session steal, same as Hermes start_polling(drop_pending_updates=True) */ }
           continue
