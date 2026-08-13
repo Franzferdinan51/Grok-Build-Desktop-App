@@ -41,7 +41,7 @@ try {
   assert.match(stdout, /\.worktrees[\\/]qa-ui-flow/)
   assert.equal(await page.getByRole("dialog", { name: "Create Git worktree" }).count(), 0)
 
-  const [project] = await page.evaluate(() => window.api.projects.list())
+  const project = await page.evaluate((path) => window.api.projects.add(path), repo)
   assert.ok(project?.path, "the fixture project should be registered")
   const thread = {
     id: "qa-transcript-window",
@@ -60,6 +60,7 @@ try {
   }
   await page.evaluate(async ({ root, fixture }) => {
     await window.api.conversations.save(fixture)
+    await window.api.store.set("workspace.last", root)
     await window.api.store.set(`chat.active.${encodeURIComponent(root)}`, fixture.id)
     await window.api.store.set(`terminal.state.${encodeURIComponent(root)}`, { output: "Persisted terminal fixture\n", history: ["pnpm test", "git status"] })
   }, { root: project.path, fixture: thread })

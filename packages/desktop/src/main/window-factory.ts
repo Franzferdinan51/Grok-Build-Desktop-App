@@ -10,8 +10,12 @@
 
 import { BrowserWindow, app } from "electron"
 import { join } from "path"
+import { dirname } from "path"
+import { fileURLToPath } from "url"
 import windowStateKeeper from "electron-window-state"
 import { write as writeLog } from "./logging"
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export const APP_NAME = "Grok Build Desktop"
 

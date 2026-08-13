@@ -2,13 +2,13 @@ import type { TaskLog } from "./chat-utils"
 
 export type ActivityEntry = {
   id: string
-  kind: "response" | "reasoning" | "error"
+  kind: "response" | "reasoning" | "activity" | "error"
   label: string
   detail: string
   count: number
 }
 
-const labels = { text: "Response", thought: "Reasoning", error: "Error" } as const
+const labels = { text: "Response", thought: "Reasoning", activity: "Activity", error: "Error" } as const
 const MAX_REASONING_DETAIL_CHARS = 12_000
 
 /** Convert the bounded stream shown by the inspector into stable, grouped rows. */
@@ -21,7 +21,7 @@ export function buildActivityTimeline(logs: TaskLog[], maxEntries = 12): Activit
     const detail = log.content.trim()
     if (!detail) continue
     const previous = entries.at(-1)
-    const kind = log.kind === "text" ? "response" : log.kind === "thought" ? "reasoning" : "error"
+    const kind = log.kind === "text" ? "response" : log.kind === "thought" ? "reasoning" : log.kind === "activity" ? "activity" : "error"
     if (kind === "reasoning") {
       if (!reasoning) {
         reasoning = { id: "reasoning:consolidated", kind, label: "Reasoning", detail: "", count: 0 }

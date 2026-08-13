@@ -30,3 +30,7 @@ test("classifyBackendError names the NVIDIA NIM usage:null failure", () => {
 test("normalizeBackendStderr still extracts the human message from Internal error dumps", () => {
   assert.equal(normalizeBackendStderr('Internal error: {"message":"serialization error: null"}'), "serialization error: null")
 })
+
+test("normalizeBackendStderr removes terminal color escapes before delivery", () => {
+  assert.equal(normalizeBackendStderr("\u001b[2m2026-08-13\u001b[0m \u001b[31mERROR\u001b[0m provider failed"), "2026-08-13 ERROR provider failed")
+})

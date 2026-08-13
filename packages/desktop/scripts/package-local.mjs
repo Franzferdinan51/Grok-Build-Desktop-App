@@ -7,11 +7,12 @@ import { build as viteBuild } from "vite"
 import solid from "vite-plugin-solid"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
-import { dirname, join, resolve } from "node:path"
-import { mkdirSync, rmSync, existsSync, cpSync, readFileSync, writeFileSync, renameSync } from "node:fs"
+import { dirname, join, resolve, relative } from "node:path"
+import { mkdirSync, rmSync, existsSync, cpSync, readFileSync, writeFileSync, readdirSync, readlinkSync, realpathSync, renameSync, symlinkSync } from "node:fs"
 
 const require = createRequire(join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), "package.json"))
 const { build: esbuild } = require(require.resolve("esbuild", { paths: [dirname(require.resolve("vite"))] }))
+const { createPackage } = require(require.resolve("@electron/asar", { paths: [dirname(require.resolve("electron-builder"))] }))
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = resolve(root, "../..")
@@ -30,9 +31,10 @@ await esbuild({
   platform: "node",
   format: "esm",
   target: "node20",
+  banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
+  alias: { "electron-store": require.resolve("electron-store") },
   sourcemap: false,
-  packages: "external",
-  external: ["electron", "playwright", "playwright-core", "chromium-bidi"],
+  external: ["electron", "playwright", "playwright-core", "chromium-bidi", "fsevents"],
   logLevel: "info",
 })
 
@@ -54,6 +56,7 @@ await esbuild({
 console.log("Compiling renderer…")
 await viteBuild({
   root: join(root, "src/renderer"),
+  base: "./",
   configFile: false,
   logLevel: "info",
   plugins: [solid()],
@@ -80,10 +83,33 @@ if (!electronApp) {
 }
 
 const builtApp = join(installDir, appName)
+const electronRoot = realpathSync(electronApp)
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
 console.log(`Assembling unsigned ${appName} from Electron ${pkg.version}…`)
-cpSync(electronApp, builtApp, { recursive: true })
+cpSync(electronApp, builtApp, { recursive: true, dereference: true })
 renameSync(join(builtApp, "Contents/MacOS/Electron"), join(builtApp, "Contents/MacOS/Grok Build Desktop"))
+
+// Electron's framework bundle contains symlinks. cpSync can preserve those
+// links as absolute paths into node_modules, which breaks after installation.
+// Rebase copied Electron-internal links so the app is self-contained.
+const repairLinks = (directory, sourceRoot, targetRoot) => {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const targetPath = join(directory, entry.name)
+    if (entry.isSymbolicLink()) {
+      const target = readFileLink(targetPath)
+      if (target.startsWith(sourceRoot)) {
+        const mapped = join(targetRoot, relative(sourceRoot, target))
+        rmSync(targetPath, { force: true })
+        symlinkSync(relative(dirname(targetPath), mapped), targetPath)
+      }
+    } else if (entry.isDirectory()) {
+      repairLinks(targetPath, sourceRoot, targetRoot)
+    }
+  }
+}
+const readFileLink = (path) => readlinkSync(path)
+repairLinks(builtApp, electronRoot, builtApp)
+rmSync(join(builtApp, "Contents/Resources/default_app.asar"), { force: true })
 
 const appDir = join(builtApp, "Contents/Resources/app")
 mkdirSync(appDir, { recursive: true })
@@ -94,6 +120,8 @@ writeFileSync(join(appDir, "package.json"), `${JSON.stringify({
   main: "out/main/index.js",
 }, null, 2)}\n`)
 cpSync(join(root, "out"), join(appDir, "out"), { recursive: true })
+await createPackage(appDir, join(builtApp, "Contents/Resources/app.asar"))
+rmSync(appDir, { recursive: true, force: true })
 
 const resources = join(builtApp, "Contents/Resources")
 if (existsSync(join(root, "resources/icon.icns"))) cpSync(join(root, "resources/icon.icns"), join(resources, "icon.icns"))
@@ -113,11 +141,13 @@ buddy("Set :CFBundleIconFile icon.icns")
 buddy(`Set :CFBundleShortVersionString ${pkg.version}`)
 buddy(`Set :CFBundleVersion ${pkg.version}`)
 buddy("Set :LSApplicationCategoryType public.app-category.developer-tools")
+spawnSync("/usr/libexec/PlistBuddy", ["-c", "Delete :ElectronAsarIntegrity", plist], { stdio: "ignore" })
 
 const applications = "/Applications/Grok Build Desktop.app"
 console.log(`Installing to ${applications}`)
 rmSync(applications, { recursive: true, force: true })
 cpSync(builtApp, applications, { recursive: true })
+repairLinks(applications, builtApp, applications)
 spawnSync("xattr", ["-cr", applications], { stdio: "inherit" })
 
 const distApp = join(root, "dist/mac-arm64", appName)
@@ -125,6 +155,7 @@ if (existsSync(dirname(distApp))) {
   console.log(`Replacing ${distApp}`)
   rmSync(distApp, { recursive: true, force: true })
   cpSync(builtApp, distApp, { recursive: true })
+  repairLinks(distApp, builtApp, distApp)
   spawnSync("xattr", ["-cr", distApp], { stdio: "inherit" })
 }
 

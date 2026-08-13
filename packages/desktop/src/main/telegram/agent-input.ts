@@ -43,6 +43,10 @@ export async function buildAgentInput(chatId: string, taskText: string, agent: T
     resume: agent.sessionId || undefined,
     resumeFallbackPrompt: fallbackContext ? `Continue this Telegram agent conversation using the context below. Preserve prior decisions and unfinished work.\n\n${fallbackContext}\n\nCurrent instruction:\n${agentPrompt}` : undefined,
     permissionMode: "auto" as const,
+    // Telegram runs are headless, so there is no renderer permission dialog
+    // to answer Grok Build's tool prompt. The authorized-chat/NemoClaw gate
+    // runs before this builder and holds sensitive tasks separately.
+    autoApprove: true,
     noPlan: true,
     thinking: agent.thinking ?? ((getStore().get("defaults.thinking") as boolean | undefined) ?? true),
     selfVerify: Boolean(getStore().get("defaults.selfVerify")),
