@@ -6,6 +6,7 @@ import { getStore } from "./store"
 import { write as writeLog } from "./logging"
 import { providerSecretEnvironment } from "./model-secrets"
 import { normalizeMemoryStats, type DuckbotMemoryStats } from "./duckbot-memory-utils"
+import { memoryPythonPath } from "./duckbot-memory-paths"
 
 export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; embeddingProvider: string; embeddingModel?: string; error?: string }
 export type DuckbotMemoryHealth = DuckbotMemoryStatus & { checkedAt: number; stats?: DuckbotMemoryStats }
@@ -22,7 +23,7 @@ const MAX_RECALL_CHARS = 3_500
 
 function repository(): string | undefined {
   const configured = String(getStore().get("memory.duckbotPath") || "").trim()
-  return [configured, ...REPO_CANDIDATES].filter(Boolean).map((candidate) => resolve(candidate)).find((candidate) => existsSync(join(candidate, "src", "extensions", "duckbot_brain", "adapter.py")) && existsSync(join(candidate, ".venv", "bin", "python")))
+  return [configured, ...REPO_CANDIDATES].filter(Boolean).map((candidate) => resolve(candidate)).find((candidate) => existsSync(join(candidate, "src", "extensions", "duckbot_brain", "adapter.py")) && Boolean(memoryPythonPath(candidate)))
 }
 
 function soulDirectory(): string {
@@ -78,7 +79,9 @@ function ensureMemoryProcess(): ChildProcessWithoutNullStreams {
   if (configuredProvider) memoryEnv.DUCKBOT_EMBEDDING = configuredProvider
   else if (memoryEnv.NVIDIA_API_KEY) memoryEnv.DUCKBOT_EMBEDDING = "nvidia"
   if (configuredModel) memoryEnv.NVIDIA_EMBED_MODEL = configuredModel
-  const child = spawn(join(repo, ".venv", "bin", "python"), ["-m", "src.mcp_server"], { cwd: repo, stdio: ["pipe", "pipe", "pipe"], env: memoryEnv })
+  const python = memoryPythonPath(repo)
+  if (!python) throw new Error("DuckBot RAG Python environment was not found")
+  const child = spawn(python, ["-m", "src.mcp_server"], { cwd: repo, stdio: ["pipe", "pipe", "pipe"], env: memoryEnv })
   memoryProcess = child
   let stderr = ""
   child.stdout.on("data", (chunk) => {
