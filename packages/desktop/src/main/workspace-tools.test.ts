@@ -38,6 +38,6 @@ test("Git review actions stage, unstage, discard, and read staged diffs", async 
   await applyGitFileAction(root, "note.txt", "unstage")
   assert.equal((await gitChangedFiles(root)).find((entry) => entry.path === "note.txt")?.staged, false)
   await applyGitFileAction(root, "note.txt", "discard")
-  assert.equal(await readFile(`${root}/note.txt`, "utf8"), "before\n")
+  assert.equal((await readFile(`${root}/note.txt`, "utf8")).replaceAll("\r\n", "\n"), "before\n")
   assert.deepEqual(await gitChangedFiles(root), [])
 })

@@ -84,6 +84,7 @@ test("describeOAuthProvider never claims signed in when the helper is missing", 
 
 test("helper search prefers user-local bins over PATH names", () => {
   const paths = helperSearchPaths("mmx", "/Users/demo")
-  assert.ok(paths[0]?.endsWith("/.npm-global/bin/mmx"))
-  assert.equal(firstExistingHelper("mmx", "/Users/demo", (path) => path.endsWith("/.local/bin/mmx")), "/Users/demo/.local/bin/mmx")
+  const normalized = (path: string | undefined) => path?.replaceAll("\\", "/")
+  assert.ok(normalized(paths[0])?.endsWith("/.npm-global/bin/mmx"))
+  assert.equal(normalized(firstExistingHelper("mmx", "/Users/demo", (path) => Boolean(normalized(path)?.endsWith("/.local/bin/mmx")))), "/Users/demo/.local/bin/mmx")
 })
