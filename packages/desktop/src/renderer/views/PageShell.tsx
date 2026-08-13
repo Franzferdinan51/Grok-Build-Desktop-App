@@ -2,9 +2,11 @@ import { For, Show, type JSX } from "solid-js"
 
 export type PageTab = { id: string; label: string; meta?: string | number }
 
-export function PageEmpty(props: { mark: string; title: string; body: string; children?: JSX.Element }) {
+export function PageEmpty(props: { mark: string; icon?: string; title: string; body: string; children?: JSX.Element }) {
   return <div class="page-empty">
-    <span class="page-empty__mark">{props.mark}</span>
+    <Show when={props.icon} fallback={<span class="page-empty__mark">{props.mark}</span>}>
+      <img class="page-empty__icon" src={props.icon} alt="" />
+    </Show>
     <h2>{props.title}</h2>
     <p>{props.body}</p>
     <Show when={props.children}><div class="page-empty__actions">{props.children}</div></Show>

@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createSignal } from "solid-js"
 import { PageEmpty, PageShell } from "./PageShell"
+import { UI_ICONS } from "../assets/ui-icons"
 
 const PRESETS = ["pnpm test", "pnpm typecheck", "git status", "git diff"]
 
@@ -62,7 +63,7 @@ export function TerminalPanel(props: {
     </>}
   >
     <Show when={props.workspace} fallback={
-      <PageEmpty mark=">_" title="Choose a project first" body="The terminal never leaves the selected workspace. Open a codebase to run tests, builds, and git commands.">
+      <PageEmpty mark=">_" icon={UI_ICONS.terminal} title="Choose a project first" body="The terminal never leaves the selected workspace. Open a codebase to run tests, builds, and git commands.">
         <button class="primary" onClick={() => props.onOpenProject()}>Open project</button>
       </PageEmpty>
     }>
@@ -73,7 +74,7 @@ export function TerminalPanel(props: {
           }</For>
         </div>
         <Show when={props.output} fallback={
-          <PageEmpty mark="$" title="Ready for a command" body="Run project commands here. Output stays in this tab, and printed localhost URLs can open Preview when it is enabled." />
+          <PageEmpty mark="$" icon={UI_ICONS.terminal} title="Ready for a command" body="Run project commands here. Output stays in this tab, and printed localhost URLs can open Preview when it is enabled." />
         }>
           <pre class="terminal-log" ref={outputEl}>{props.output}</pre>
         </Show>

@@ -2,6 +2,7 @@ import { For, Show, createMemo, createSignal } from "solid-js"
 import type { GrokSkill } from "../../preload"
 import { filterSkills, groupSkills, skillScopeCounts, type SkillFilter } from "../page-lists"
 import { PageEmpty, PageShell } from "./PageShell"
+import { UI_ICONS } from "../assets/ui-icons"
 
 export function SkillsPanel(props: {
   skills: GrokSkill[]
@@ -35,11 +36,11 @@ export function SkillsPanel(props: {
     actions={<button onClick={() => props.onRefresh()}>Refresh</button>}
   >
     <Show when={props.skills.length} fallback={
-      <PageEmpty mark="◇" title="No skills discovered" body={`Grok Build looks in this project (${props.workspaceName || "Scratch"}) and your user skill directories. Refresh after adding a SKILL.md.`}>
+      <PageEmpty mark="◇" icon={UI_ICONS.skills} title="No skills discovered" body={`Grok Build looks in this project (${props.workspaceName || "Scratch"}) and your user skill directories. Refresh after adding a SKILL.md.`}>
         <button onClick={() => props.onRefresh()}>Refresh skills</button>
       </PageEmpty>
     }>
-      <Show when={visible().length} fallback={<PageEmpty mark="◇" title="No matching skills" body="Try another search or switch scope." />}>
+      <Show when={visible().length} fallback={<PageEmpty mark="◇" icon={UI_ICONS.skills} title="No matching skills" body="Try another search or switch scope." />}>
         <div class="master-detail">
           <aside class="list-column">
             <For each={groups()}>{(group) =>

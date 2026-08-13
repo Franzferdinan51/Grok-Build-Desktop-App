@@ -2,6 +2,7 @@ import { For, Show, createMemo } from "solid-js"
 import type { LocalStudioSnapshot } from "../../preload"
 import { objectRows } from "../page-lists"
 import { PageEmpty, PageShell } from "./PageShell"
+import { UI_ICONS } from "../assets/ui-icons"
 
 export function RuntimePanel(props: {
   url: string
@@ -24,7 +25,7 @@ export function RuntimePanel(props: {
       <input value={props.url} onInput={(event) => props.onUrl(event.currentTarget.value)} placeholder="http://127.0.0.1:8080" />
     </div>
     <Show when={props.studio.configured} fallback={
-      <PageEmpty mark="▣" title="No controller URL" body="Add a Local Studio URL to monitor health and GPUs. Model lifecycle stays user-controlled." />
+      <PageEmpty mark="▣" icon={UI_ICONS.runtime} title="No controller URL" body="Add a Local Studio URL to monitor health and GPUs. Model lifecycle stays user-controlled." />
     }>
       <div class={`runtime-banner ${props.studio.reachable ? "runtime-banner--ready" : "runtime-banner--error"}`}>
         {props.studio.reachable ? `Connected to ${props.studio.baseUrl}` : props.studio.error || "Unreachable"}

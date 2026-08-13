@@ -9,6 +9,7 @@
 import { For, Show, createMemo, createSignal } from "solid-js"
 import type { GrokRunRecord } from "../../preload/index"
 import { PageEmpty, PageShell } from "./PageShell"
+import { UI_ICONS } from "../assets/ui-icons"
 
 export type RunsPanelProps = {
   runs: () => GrokRunRecord[]
@@ -52,9 +53,9 @@ export function RunsPanel(props: RunsPanelProps) {
     actions={<button onClick={() => void props.onRefresh()}>Refresh</button>}
   >
     <Show when={props.runs().length} fallback={
-      <PageEmpty mark="◴" title="No runs yet" body="Pick a project and start a Grok Build task. Completed work shows up here with session and usage details." />
+      <PageEmpty mark="◴" icon={UI_ICONS.runs} title="No runs yet" body="Pick a project and start a Grok Build task. Completed work shows up here with session and usage details." />
     }>
-      <Show when={visible().length} fallback={<PageEmpty mark="◴" title="No matching runs" body="Try another search or status filter." />}>
+      <Show when={visible().length} fallback={<PageEmpty mark="◴" icon={UI_ICONS.runs} title="No matching runs" body="Try another search or status filter." />}>
         <div class="list-stack">
           <For each={visible()}>{(run) =>
             <article class="list-row list-row--static">

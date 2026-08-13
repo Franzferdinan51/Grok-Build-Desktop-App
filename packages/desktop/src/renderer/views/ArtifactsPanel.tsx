@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show } from "solid-js"
 import type { ArtifactFilter, ArtifactRecord } from "../artifact-utils"
 import { filterArtifacts } from "../artifact-utils"
 import { PageEmpty, PageShell } from "./PageShell"
+import { UI_ICONS } from "../assets/ui-icons"
 
 export function ArtifactsPanel(props: { artifacts: () => ArtifactRecord[]; onRefresh: () => void; onOpenThread: (id: string) => void }) {
   const [query, setQuery] = createSignal("")
@@ -28,8 +29,8 @@ export function ArtifactsPanel(props: { artifacts: () => ArtifactRecord[]; onRef
     onTab={(id) => setFilter(id as ArtifactFilter)}
     actions={<button onClick={() => props.onRefresh()}>Refresh</button>}
   >
-    <Show when={props.artifacts().length} fallback={<PageEmpty mark="◇" title="No artifacts yet" body="Links, files, and images mentioned in completed conversations will appear here." />}>
-      <Show when={visible().length} fallback={<PageEmpty mark="◇" title="No matching artifacts" body="Try a different search or artifact type." />}>
+    <Show when={props.artifacts().length} fallback={<PageEmpty mark="◇" icon={UI_ICONS.artifacts} title="No artifacts yet" body="Links, files, and images mentioned in completed conversations will appear here." />}>
+      <Show when={visible().length} fallback={<PageEmpty mark="◇" icon={UI_ICONS.artifacts} title="No matching artifacts" body="Try a different search or artifact type." />}>
         <div class="artifact-grid"><For each={visible()}>{(record) => <article class={`artifact-card artifact-card--${record.kind}`}>
           <div class="artifact-card__icon">{record.kind === "image" ? "▧" : record.kind === "file" ? "□" : "↗"}</div>
           <div class="artifact-card__body"><strong title={record.value}>{record.label}</strong><span>{record.value}</span><small>{record.threadTitle} · {record.workspace.split(/[\\/]/).filter(Boolean).at(-1) || "Scratch"}</small></div>

@@ -22,3 +22,31 @@
 
 .settings-brand h1 { margin: 6px 0; }
 .settings-brand p { margin: 0; }
+
+.sidebar__icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 5px;
+  object-fit: contain;
+  opacity: .8;
+}
+.sidebar__item--active .sidebar__icon,
+.sidebar__item:hover .sidebar__icon { opacity: 1; }
+.sidebar--collapsed .sidebar__label { display: none; }
+.sidebar--collapsed .sidebar__icon { width: 20px; height: 20px; flex-basis: 20px; }
+.page-empty__icon,
+.chat-empty__icon {
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  object-fit: contain;
+  border-radius: 14px;
+  filter: drop-shadow(0 0 16px rgba(126, 200, 255, .28));
+}
+.chat-avatar img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}

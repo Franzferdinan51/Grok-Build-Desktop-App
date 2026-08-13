@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js"
 import type { WorkspaceFile } from "../../preload"
 import { defaultFileExpanded, expandToFile, fileBasename, fileGlyph, formatFileSize, visibleFileRows } from "../file-tree"
 import { PageEmpty, PageShell } from "./PageShell"
+import { UI_ICONS } from "../assets/ui-icons"
 
 export function WorkspacePanel(props: {
   workspace: string
@@ -72,7 +73,7 @@ export function WorkspacePanel(props: {
     </>}
   >
     <Show when={props.workspace} fallback={
-      <PageEmpty mark="▤" title="Open a project" body="Workspace files stay attached to the selected project. Pick a folder to inspect and edit source without leaving Grok Build.">
+      <PageEmpty mark="▤" icon={UI_ICONS.workspace} title="Open a project" body="Workspace files stay attached to the selected project. Pick a folder to inspect and edit source without leaving Grok Build.">
         <button class="primary" onClick={() => props.onOpenProject()}>Open project</button>
       </PageEmpty>
     }>
@@ -80,7 +81,7 @@ export function WorkspacePanel(props: {
         <aside class="tree-pane">
           <div class="tree-pane__meta">{props.files.length} file{props.files.length === 1 ? "" : "s"}</div>
           <Show when={props.files.length} fallback={
-            <PageEmpty mark="▤" title="No files loaded" body="Refresh to walk the selected workspace. Heavy folders like node_modules stay hidden.">
+            <PageEmpty mark="▤" icon={UI_ICONS.workspace} title="No files loaded" body="Refresh to walk the selected workspace. Heavy folders like node_modules stay hidden.">
               <button onClick={() => props.onRefresh()}>Load files</button>
             </PageEmpty>
           }>
@@ -101,7 +102,7 @@ export function WorkspacePanel(props: {
         </aside>
         <div class="code-editor">
           <Show when={props.openFile} fallback={
-            <PageEmpty mark="✎" title="Select a file" body="Choose a project file to inspect and edit. Changes save only inside this workspace. ⌘S writes the current buffer." />
+            <PageEmpty mark="✎" icon={UI_ICONS.workspace} title="Select a file" body="Choose a project file to inspect and edit. Changes save only inside this workspace. ⌘S writes the current buffer." />
           }>
             <textarea
               spellcheck={false}

@@ -2,6 +2,7 @@ import { For, Show, createMemo, createSignal } from "solid-js"
 import type { ScheduledGrokTask } from "../../preload"
 import { filterSchedules, formatRepeat, scheduleState } from "../page-lists"
 import { PageEmpty, PageShell } from "./PageShell"
+import { UI_ICONS } from "../assets/ui-icons"
 
 export function ScheduledPanel(props: {
   schedules: ScheduledGrokTask[]
@@ -35,7 +36,7 @@ export function ScheduledPanel(props: {
     actions={<button class="primary" onClick={() => setComposing(true)}>New schedule</button>}
   >
     <Show when={props.schedules.length || composing()} fallback={
-      <PageEmpty mark="◷" title="No scheduled work" body="Create a one-shot or repeating Grok Build task. The selected workspace is the working directory.">
+      <PageEmpty mark="◷" icon={UI_ICONS.scheduled} title="No scheduled work" body="Create a one-shot or repeating Grok Build task. The selected workspace is the working directory.">
         <button class="primary" onClick={() => setComposing(true)}>New schedule</button>
       </PageEmpty>
     }>

@@ -50,6 +50,9 @@ pnpm-debug.log*
 .tmp/
 tmp/
 
+# Local feature-source clones — never ship another agent runtime
+upstream/duck-agent/
+
 # grok CLI binary (downloaded at runtime)
 .grok-cli/
 bin/

@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js"
 import { countDiffLines, defaultReviewExpanded, diffLineKind, reviewKind, reviewStatusLabel, summarizeReview, visibleReviewRows } from "../review-tree"
 import { PageEmpty, PageShell } from "./PageShell"
+import { UI_ICONS } from "../assets/ui-icons"
 
 export function ReviewPanel(props: {
   workspace: string
@@ -51,7 +52,7 @@ export function ReviewPanel(props: {
     </>}
   >
     <Show when={props.workspace} fallback={
-      <PageEmpty mark="⌘" title="No project selected" body="Review shows porcelain Git status and per-file diffs for the selected workspace.">
+      <PageEmpty mark="⌘" icon={UI_ICONS.review} title="No project selected" body="Review shows porcelain Git status and per-file diffs for the selected workspace.">
         <button class="primary" onClick={() => props.onOpenProject()}>Open project</button>
       </PageEmpty>
     }>
@@ -68,6 +69,7 @@ export function ReviewPanel(props: {
           <Show when={props.changes.length} fallback={
             <PageEmpty
               mark="⌘"
+              icon={UI_ICONS.review}
               title={props.isGit === false ? "Not a Git repository" : "Working tree clean"}
               body={props.isGit === false ? "Open a Git project to review diffs here." : "No uncommitted changes. Refresh after Grok Build edits files."}
             >
@@ -95,7 +97,7 @@ export function ReviewPanel(props: {
         </aside>
         <div class="code-editor">
           <Show when={props.selectedPath} fallback={
-            <PageEmpty mark="±" title="Select a changed file" body="Pick a path to read its diff. Ask Grok to review the current working tree from this tab." />
+            <PageEmpty mark="±" icon={UI_ICONS.review} title="Select a changed file" body="Pick a path to read its diff. Ask Grok to review the current working tree from this tab." />
           }>
             <div class="diff-meta">
               <strong>{props.selectedPath}</strong>
