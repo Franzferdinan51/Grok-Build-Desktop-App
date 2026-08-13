@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url"
 import { dirname } from "node:path"
 import { withRunNowPatch } from "../src/main/scheduled-tasks-utils.ts"
 import { telegramStatusForRenderer, withDisconnectedState, withForgottenTokenState } from "../src/main/telegram-state.ts"
-import { classifyTelegramHttpError, isTelegramControlCommand, telegramPollingDecision } from "../src/main/telegram-connection.ts"
+import { classifyTelegramHttpError, isTelegramControlCommand, telegramBootstrapDecision, telegramPollingDecision, telegramPublicLiveness } from "../src/main/telegram-connection.ts"
 import { tokenizeCommandLine, ShellQuoteError } from "../src/main/shell-quote.ts"
 import { mergeLogs, LiveEventBuffer, MAX_LIVE_LOG_CHARS, MAX_LIVE_LOG_ENTRIES } from "../src/renderer/event-buffer.ts"
 import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, buildTelegramMoaMenu, buildTelegramMoaReferencePicker, buildTelegramMoaAggregatorPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "../src/main/telegram/commands.ts"
@@ -359,6 +359,8 @@ assert.equal(afterForgetHome.requireMention, true)
 assert.equal("token" in telegramStatusForRenderer({ connected: true, token: "secret" }), false)
 assert.equal(telegramPollingDecision(classifyTelegramHttpError(409, "Conflict")?.kind, false), "pause")
 assert.equal(telegramPollingDecision(classifyTelegramHttpError(429, "too many")?.kind, false), "backoff")
+assert.equal(telegramBootstrapDecision(401, false, "unauthorized"), "pause")
+assert.deepEqual(telegramPublicLiveness({ hasToken: true, polling: true, pollReady: false }), { connected: false, polling: false })
 assert.equal(isTelegramControlCommand("/cancel"), true)
 assert.equal(isTelegramControlCommand("/run x"), false)
 

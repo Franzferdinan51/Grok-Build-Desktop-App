@@ -18,6 +18,8 @@ import {
   shouldRecordConnectAuthFailure,
   stillWaitingMessage,
   telegramPollingDecision,
+  telegramBootstrapDecision,
+  telegramPublicLiveness,
   upsertChatProfile,
   isTelegramControlCommand,
 } from "./telegram-connection.ts"
@@ -97,6 +99,21 @@ test("telegramPollingDecision pauses auth and getUpdates conflicts instead of ha
   assert.equal(telegramPollingDecision("other", false), "retry")
   assert.equal(telegramPollingDecision(undefined, false), "retry")
   assert.equal(telegramPollingDecision(undefined, true), "ok")
+})
+
+test("bootstrap uses the same HTTP classification as getUpdates", () => {
+  assert.equal(telegramBootstrapDecision(401, false, "unauthorized"), "pause")
+  assert.equal(telegramBootstrapDecision(409, false, "Conflict: terminated by other getUpdates"), "pause")
+  assert.equal(telegramBootstrapDecision(429, false, "too many requests"), "backoff")
+  assert.equal(telegramBootstrapDecision(200, false, "Could not clear webhook"), "retry")
+  assert.equal(telegramBootstrapDecision(200, true), "ok")
+})
+
+test("public liveness stays dark until bootstrap marks the poller ready", () => {
+  assert.deepEqual(telegramPublicLiveness({ hasToken: true, polling: true, pollReady: false }), { connected: false, polling: false })
+  assert.deepEqual(telegramPublicLiveness({ hasToken: true, polling: false, pollReady: false }), { connected: false, polling: false })
+  assert.deepEqual(telegramPublicLiveness({ hasToken: false, polling: true, pollReady: true }), { connected: false, polling: false })
+  assert.deepEqual(telegramPublicLiveness({ hasToken: true, polling: true, pollReady: true }), { connected: true, polling: true })
 })
 
 test("connect does not treat 429 or 409 as a revoked token", () => {

@@ -112,6 +112,20 @@ export function telegramPollingDecision(kind: TelegramPollErrorKind | undefined,
   return "ok"
 }
 
+/** Bootstrap (deleteWebhook) uses the same pause/backoff/retry policy as getUpdates. */
+export function telegramBootstrapDecision(status: number, ok: boolean, description?: string): TelegramPollingDecision {
+  return telegramPollingDecision(classifyTelegramHttpError(status, description)?.kind, ok)
+}
+
+/**
+ * The UI may only show live/connected polling after bootstrap succeeded.
+ * Intent-to-poll (`polling`) without `pollReady` is still starting.
+ */
+export function telegramPublicLiveness(input: { hasToken: boolean; polling: boolean; pollReady: boolean }): { connected: boolean; polling: boolean } {
+  const live = Boolean(input.hasToken && input.polling && input.pollReady)
+  return { connected: live, polling: live }
+}
+
 /** Connect must not treat 429 / 409 as a revoked token. */
 export function shouldRecordConnectAuthFailure(kind: TelegramPollErrorKind | undefined, ok: boolean): boolean {
   if (kind === "rate" || kind === "conflict") return false

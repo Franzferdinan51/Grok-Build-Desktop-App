@@ -12,6 +12,8 @@ import {
   classifyTelegramHttpError,
   denyChatState,
   telegramPollingDecision,
+  telegramBootstrapDecision,
+  telegramPublicLiveness,
   TELEGRAM_RECONNECT_SETTLE_MS,
   shouldRecordConnectAuthFailure,
   deniedMessage,
@@ -114,6 +116,7 @@ function enqueueTelegramMutation<T>(task: () => T | Promise<T>): Promise<T> {
 
 export class TelegramBridge {
   private polling = false
+  private pollReady = false
   private pollGeneration = 0
   private offset = 0
   private handler?: (chatId: string, text: string, meta?: TelegramInboundMeta) => Promise<string | TelegramReply>
@@ -234,8 +237,7 @@ export class TelegramBridge {
     if (!this.token()) return this.snapshot({ connected: false, hasToken: false, error: "No saved bot token. Paste a BotFather token to connect." })
     this.stop()
     await new Promise((resolve) => setTimeout(resolve, TELEGRAM_RECONNECT_SETTLE_MS))
-    this.start()
-    return this.status({ probe: false })
+    return this.startUntilReady()
   }
 
   async approveChat(chatId: string): Promise<string[]> {
@@ -283,10 +285,11 @@ export class TelegramBridge {
   }
 
   private snapshot(partial: Partial<TelegramStatus> = {}): TelegramStatus {
+    const live = telegramPublicLiveness({ hasToken: Boolean(this.token()), polling: this.polling, pollReady: this.pollReady })
     return telegramStatusForRenderer({
-      connected: false,
+      connected: live.connected,
       hasToken: Boolean(this.token()),
-      polling: this.polling,
+      polling: live.polling,
       firstName: this.botFirstName || undefined,
       lastPollAt: this.lastPollAt || undefined,
       lastError: this.lastError || undefined,
@@ -303,16 +306,16 @@ export class TelegramBridge {
 
   async status(options: { probe?: boolean } = {}): Promise<TelegramStatus> {
     const token = this.token()
-    if (!token) return this.snapshot({ connected: false, hasToken: false, coolOffMs: 0 })
+    if (!token) return this.snapshot({ connected: false, hasToken: false, polling: false, coolOffMs: 0 })
     const coolOffRemaining = this.coolOffRemaining()
-    // Live long-poll is the source of truth. Do not call getMe on the UI
-    // refresh timer — that 4s hammer is what 429s the bot and then the
-    // old probe reported "disconnected" while getUpdates was still running.
-    if (this.polling && !options.probe) {
+    const live = telegramPublicLiveness({ hasToken: true, polling: this.polling, pollReady: this.pollReady })
+    // Live long-poll is the source of truth only after bootstrap succeeded.
+    // Intent-to-poll without pollReady must not look connected/live.
+    if (this.polling && this.pollReady && !options.probe) {
       return this.snapshot({
-        connected: true,
+        connected: live.connected,
         hasToken: true,
-        polling: true,
+        polling: live.polling,
         botId: this.lastBotId || undefined,
         username: this.lastUsername || undefined,
         firstName: this.botFirstName || undefined,
@@ -322,9 +325,9 @@ export class TelegramBridge {
     }
     if (!options.probe && this.lastProbeAt && Date.now() - this.lastProbeAt < 60_000) {
       return this.snapshot({
-        connected: this.polling || Boolean(this.lastUsername),
+        connected: live.connected,
         hasToken: true,
-        polling: this.polling,
+        polling: live.polling,
         botId: this.lastBotId || undefined,
         username: this.lastUsername || undefined,
         firstName: this.botFirstName || undefined,
@@ -343,7 +346,7 @@ export class TelegramBridge {
       if (classified?.kind === "rate" || classified?.kind === "conflict") {
         this.lastError = classified.message
         return this.snapshot({
-          connected: this.polling || Boolean(this.lastUsername),
+          ...telegramPublicLiveness({ hasToken: true, polling: this.polling, pollReady: this.pollReady }),
           error: classified.message,
           username: this.lastUsername || undefined,
           firstName: this.botFirstName || undefined,
@@ -355,7 +358,7 @@ export class TelegramBridge {
         const error = classified?.message || payload.description || "Telegram rejected the token"
         this.lastError = error
         return this.snapshot({
-          connected: this.polling,
+          ...telegramPublicLiveness({ hasToken: true, polling: this.polling, pollReady: this.pollReady }),
           error,
           username: this.lastUsername || undefined,
           firstName: this.botFirstName || undefined,
@@ -370,8 +373,7 @@ export class TelegramBridge {
       this.lastProbeAt = Date.now()
       this.lastError = ""
       return this.snapshot({
-        connected: true,
-        polling: this.polling,
+        ...telegramPublicLiveness({ hasToken: true, polling: this.polling, pollReady: this.pollReady }),
         botId: payload.result.id,
         username: payload.result.username,
         firstName: payload.result.first_name,
@@ -383,8 +385,8 @@ export class TelegramBridge {
       const message = (error as Error).message
       if (!this.polling) this.lastError = message
       return this.snapshot({
-        connected: this.polling || Boolean(this.lastUsername),
-        error: this.polling ? this.lastError || message : message,
+        ...telegramPublicLiveness({ hasToken: true, polling: this.polling, pollReady: this.pollReady }),
+        error: this.polling && this.pollReady ? this.lastError || message : message,
         username: this.lastUsername || undefined,
         firstName: this.botFirstName || undefined,
         coolOffMs: coolOffRemaining,
@@ -430,9 +432,8 @@ export class TelegramBridge {
       this.lastBotId = result.id
       this.lastProbeAt = Date.now()
       this.lastError = ""
-      this.start()
       this.notifyChange()
-      return this.snapshot({ connected: true, polling: this.polling, botId: result.id, username: result.username, firstName: result.first_name, coolOffMs: 0 })
+      return this.startUntilReady()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.lastError = message
@@ -484,45 +485,93 @@ export class TelegramBridge {
 
   start(): void {
     if (this.polling || !this.token()) return
+    void this.startUntilReady()
+  }
+
+  private async startUntilReady(): Promise<TelegramStatus> {
+    if (!this.token()) return this.snapshot({ connected: false, hasToken: false, polling: false, error: "No saved bot token. Paste a BotFather token to connect." })
+    if (this.polling && this.pollReady) return this.status({ probe: false })
     this.offset = Number(getStore().get("telegram").updateOffset) || 0
+    this.pollReady = false
     this.polling = true
     const generation = ++this.pollGeneration
-    void this.bootstrap(generation)
+    const ready = await this.preparePolling(generation)
+    if (ready && this.polling && generation === this.pollGeneration) {
+      this.pollReady = true
+      this.notifyChange()
+      void this.poll(generation)
+    }
+    return this.status({ probe: false })
   }
+
   stop(): void {
-    const goingOffline = this.polling && Boolean(this.token())
+    const goingOffline = this.pollReady && Boolean(this.token())
     this.polling = false
+    this.pollReady = false
     this.pollGeneration++
     this.pollAbort?.abort()
     this.pollAbort = undefined
     if (goingOffline) void this.setPresence(false)
   }
 
-  private async bootstrap(generation: number): Promise<void> {
-    const token = this.token()
-    if (!token || !this.polling || generation !== this.pollGeneration) return
-    try {
-      // Telegram rejects getUpdates while a webhook is configured. A token
-      // connected to this desktop app explicitly opts into local long polling,
-      // so remove stale webhook configuration without dropping queued updates.
-      const payload = await telegramPayload<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/deleteWebhook`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drop_pending_updates: false }),
-      })
-      if (!payload.ok) throw new Error(payload.description || "Could not clear Telegram webhook")
-      this.webhookCleared = true
-      this.lastError = ""
-      await this.configureCommands()
-      await this.setPresence(true)
-      writeLog("info", `Telegram polling started at update ${this.offset}`)
-      await this.poll(generation)
-    } catch (error) {
-      if (!this.polling || generation !== this.pollGeneration) return
-      this.lastError = error instanceof Error ? error.message : String(error)
-      writeLog("error", `Telegram bootstrap failed: ${this.lastError}`)
-      this.retryDelayMs = Math.min(this.retryDelayMs * 2 + Math.floor(Math.random() * 1_000), TelegramBridge.MAX_RETRY_DELAY_MS)
-      await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs))
-      if (this.polling && generation === this.pollGeneration) await this.bootstrap(generation)
+  /**
+   * Clear webhook and apply the same HTTP classification as getUpdates.
+   * Returns true only when bootstrap succeeded; auth/conflict pause the poller.
+   */
+  private async preparePolling(generation: number): Promise<boolean> {
+    while (this.polling && generation === this.pollGeneration) {
+      const token = this.token()
+      if (!token) {
+        this.polling = false
+        this.pollReady = false
+        return false
+      }
+      try {
+        const response = await telegramRequest<{ ok: boolean; description?: string }>(`https://api.telegram.org/bot${token}/deleteWebhook`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drop_pending_updates: false }),
+        })
+        const payload = response.payload
+        const decision = telegramBootstrapDecision(response.status, Boolean(payload.ok), payload.description)
+        if (decision === "pause") {
+          const classified = classifyTelegramHttpError(response.status, payload.description)
+          if (classified?.kind === "auth") this.recordAuthFailure()
+          this.lastError = classified?.message || payload.description || "Telegram bootstrap paused"
+          writeLog("error", `Telegram bootstrap paused: ${this.lastError}`)
+          this.polling = false
+          this.pollReady = false
+          this.notifyChange()
+          return false
+        }
+        if (decision === "backoff") {
+          this.lastError = classifyTelegramHttpError(response.status, payload.description)?.message || payload.description || "Telegram rate-limited"
+          this.retryDelayMs = parseTelegramRetryAfterMs(payload, Math.min(this.retryDelayMs * 2, TelegramBridge.MAX_RETRY_DELAY_MS))
+          writeLog("error", `Telegram bootstrap rate-limited; waiting ${this.retryDelayMs / 1000}s`)
+          await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs))
+          continue
+        }
+        if (decision === "retry") {
+          this.lastError = payload.description || "Could not clear Telegram webhook"
+          this.retryDelayMs = Math.min(this.retryDelayMs * 2 + Math.floor(Math.random() * 1_000), TelegramBridge.MAX_RETRY_DELAY_MS)
+          writeLog("error", `Telegram bootstrap failed: ${this.lastError}`)
+          await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs))
+          continue
+        }
+        this.webhookCleared = true
+        this.lastError = ""
+        this.retryDelayMs = 1_000
+        await this.configureCommands()
+        await this.setPresence(true)
+        writeLog("info", `Telegram polling started at update ${this.offset}`)
+        return true
+      } catch (error) {
+        if (!this.polling || generation !== this.pollGeneration) return false
+        this.lastError = error instanceof Error ? error.message : String(error)
+        writeLog("error", `Telegram bootstrap failed: ${this.lastError}`)
+        this.retryDelayMs = Math.min(this.retryDelayMs * 2 + Math.floor(Math.random() * 1_000), TelegramBridge.MAX_RETRY_DELAY_MS)
+        await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs))
+      }
     }
+    return false
   }
 
   private async poll(generation: number): Promise<void> {
@@ -557,6 +606,7 @@ export class TelegramBridge {
           this.lastError = classified?.message || payload.description || "Telegram polling paused"
           writeLog("error", `Telegram polling paused: ${this.lastError}${classified?.kind === "auth" ? `; bridge cool-off ${this.coolOffMs / 1000}s` : ""}`)
           this.polling = false
+          this.pollReady = false
           this.notifyChange()
           return
         }
