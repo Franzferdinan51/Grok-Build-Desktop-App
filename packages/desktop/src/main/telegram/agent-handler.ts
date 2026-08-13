@@ -15,7 +15,7 @@
 import { mkdirSync } from "fs"
 import { join } from "path"
 import { app } from "electron"
-import { publicTelegramResponse } from "../telegram-output"
+import { publicTelegramResponse, telegramEventText } from "../telegram-output"
 import { parseTelegramCommand, parseTelegramCallback, buildTelegramMenuReply, buildTelegramModelPicker, buildTelegramMoaMenu, buildTelegramMoaReferencePicker, buildTelegramMoaAggregatorPicker, mapMenuCallback, TELEGRAM_HELP_TEXT } from "./commands"
 import { addSchedule, listSchedules } from "../scheduled-tasks"
 import { finishGrokRun, listGrokRuns, startGrokRun } from "../grok-runs"
@@ -82,13 +82,13 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       }
       if (callback.kind === "pick_project_index") {
         const index = Number(callback.payload)
-        const projects = getStore().get("projects") as Array<{ id: string; name: string; path: string }>
+        const projects = (getStore().get("projects") || []) as Array<{ id: string; name: string; path: string }>
         const selected = projects[index]
         if (!selected) return "That project is no longer available. Open /projects again."
         deps.saveSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
       }
       if (callback.kind === "pick_project_id") {
-        const projects = getStore().get("projects") as Array<{ id: string; name: string; path: string }>
+        const projects = (getStore().get("projects") || []) as Array<{ id: string; name: string; path: string }>
         const selected = projects.find((project) => project.id === callback.payload)
         if (!selected) return "That project is no longer available. Open /project again."
         deps.saveSession(chatId, { workspace: selected.path, sessionId: "", transcript: [], compressedSummary: "", lastTask: undefined }); return `✓ Project set to ${selected.name}\n${selected.path}\nStarted a fresh project session.`
@@ -426,7 +426,7 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       const agent = deps.session(chatId)
       const model = agent.model || (getStore().get("defaults.model") as string | undefined) || catalog.defaultModel || "Grok Build default"
       const workspacePath = agent.workspace || (getStore().get("workspace.last") as string | undefined) || join(app.getPath("userData"), "Scratch")
-      const projects = getStore().get("projects") as Array<{ id: string; name: string; path: string }>
+      const projects = (getStore().get("projects") || []) as Array<{ id: string; name: string; path: string }>
       const workspace = workspacePath === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : projects.find((project) => project.path === workspacePath)?.name || "Scratch"
       const moaOn = Boolean(getStore().get("moa.enabled"))
       const moaAggregator = (getStore().get("moa.aggregatorModel") as string | undefined) || model
@@ -449,7 +449,7 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       return `Default model set to ${argument}.`
     }
     if (name === "projects" || name === "project") {
-      const projects = getStore().get("projects") as Array<{ id: string; name: string; path: string }>
+      const projects = (getStore().get("projects") || []) as Array<{ id: string; name: string; path: string }>
       const current = deps.session(chatId).workspace || getStore().get("workspace.last") as string | undefined
       const scratch = join(app.getPath("userData"), "Scratch")
       const agentWorkspace = join(app.getPath("userData"), "Agent Workspace")
@@ -514,7 +514,7 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
   const run = startGrokRun(input)
   const startedAt = Date.now()
   const cwd = input.cwd || agent.workspace || join(app.getPath("userData"), "Scratch")
-  const workspaceName = cwd === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : getStore().get("projects").find((project) => project.path === cwd)?.name || "Scratch"
+  const workspaceName = cwd === join(app.getPath("userData"), "Agent Workspace") ? "Agent (no project)" : (getStore().get("projects") || []).find((project) => project.path === cwd)?.name || "Scratch"
   const modelName = input.model || "Grok Build default"
   const options = normalizeTelegramAgentOptions(getStore().get("telegram"))
   const inboundId = meta?.messageId
@@ -545,10 +545,16 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
   activityTimer.unref()
   try {
     await backend.run(input, (event: GrokBuildEvent) => {
-      if (event.type === "text" && typeof event.data === "string") { response += event.data; updateProgress("✍️ Grok Build is preparing the response") }
+      const streamedText = telegramEventText(event as Record<string, unknown>)
+      if (streamedText) { response += streamedText; updateProgress("✍️ Grok Build is preparing the response") }
       else if (event.type === "end" && typeof event.sessionId === "string") deps.saveSession(chatId, { sessionId: event.sessionId })
       else if (event.type === "thought") updateProgress("🧠 Grok Build is reasoning")
-      else if (event.type.toLowerCase().includes("tool")) updateProgress("🔧 Grok Build is using workspace tools")
+      else if (Boolean(/tool|function|command|file_change/i.test(event.type))) {
+        const payload = event as Record<string, unknown>
+        const tool = [payload.toolName, payload.tool_name, payload.name, payload.title, payload.command]
+          .find((value): value is string => typeof value === "string" && Boolean(value.trim()))
+        updateProgress(`🔧 Grok Build is using ${tool || "workspace tools"}`)
+      } else if (event.type === "phase" && typeof event.data === "string") updateProgress(`⏳ ${event.data}`)
     })
     if (deps.getCancelled()) {
       turnPhase = "cancelled"

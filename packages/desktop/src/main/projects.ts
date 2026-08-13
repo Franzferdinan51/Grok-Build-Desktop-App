@@ -1,12 +1,15 @@
 import { existsSync } from "fs"
 import { basename } from "path"
 import { getStore } from "./store"
+import { storeArray } from "./store-defaults"
 import { inspectProject, type ProjectRecord, type ProjectSnapshot } from "./project-inspection"
 
 export { inspectProject }
 export type { ProjectRecord, ProjectSnapshot }
 
-export function listProjects(): ProjectRecord[] { return getStore().get("projects") }
+export function listProjects(): ProjectRecord[] {
+  return storeArray(getStore().get("projects"))
+}
 
 export async function addProject(path: string): Promise<ProjectSnapshot> {
   const normalized = path.replace(/\/$/, "")

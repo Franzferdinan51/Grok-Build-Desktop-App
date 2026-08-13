@@ -1,6 +1,7 @@
 /** Local Telegram Bot API bridge. Tokens are encrypted with Electron safeStorage. */
 import { safeStorage } from "electron"
-import { getStore } from "./store"
+import { getStore, type StoreSchema } from "./store"
+import { encryptedTelegramTokenPresent, telegramTokenFailureMessage } from "./store-defaults"
 import { telegramInlineKeyboard, type TelegramReply } from "./telegram-format"
 import { write as writeLog } from "./logging"
 import { telegramHtml, telegramTextChunks } from "./telegram-text"
@@ -92,6 +93,10 @@ async function telegramPayload<T>(url: string, init?: RequestInit): Promise<T> {
   return (await telegramRequest<T>(url, init)).payload
 }
 
+function telegramConfig(): StoreSchema["telegram"] {
+  return getStore().get("telegram") || { allowedChatIds: [], pendingChatIds: [] }
+}
+
 // Apply a partial `telegram` store patch under a serialised mutation queue.
 // Every persistence-touching call site in TelegramBridge funnels through
 // here so two concurrent reads-modify-writes can never overwrite each
@@ -156,7 +161,7 @@ export class TelegramBridge {
   setMessageHandler(handler: (chatId: string, text: string, meta?: TelegramInboundMeta) => Promise<string | TelegramReply>): void { this.handler = handler }
 
   agentOptions(): TelegramAgentOptions {
-    return normalizeTelegramAgentOptions(getStore().get("telegram"))
+    return normalizeTelegramAgentOptions(telegramConfig())
   }
 
   async setAgentOptions(patch: Partial<TelegramAgentOptions>): Promise<TelegramAgentOptions> {
@@ -179,8 +184,8 @@ export class TelegramBridge {
     }
   }
 
-  allowedChats(): string[] { return getStore().get("telegram").allowedChatIds || [] }
-  pendingChats(): string[] { return getStore().get("telegram").pendingChatIds || [] }
+  allowedChats(): string[] { return telegramConfig().allowedChatIds || [] }
+  pendingChats(): string[] { return telegramConfig().pendingChatIds || [] }
 
   /**
    * The portion of `coolOffMs` still in effect, used by `status()` so the
@@ -282,27 +287,39 @@ export class TelegramBridge {
     })
   }
 
+  private tokenUnlockError(): string {
+    const hasEncrypted = encryptedTelegramTokenPresent(telegramConfig())
+    const decrypted = Boolean(this.token())
+    return telegramTokenFailureMessage({
+      hasEncrypted,
+      encryptionAvailable: safeStorage.isEncryptionAvailable(),
+      decrypted,
+    })
+  }
+
   private token(): string | undefined {
-    const encrypted = getStore().get("telegram").token
-    if (!encrypted || !safeStorage.isEncryptionAvailable()) return undefined
+    const encrypted = telegramConfig().token
+    if (!encrypted) return undefined
+    if (!safeStorage.isEncryptionAvailable()) return undefined
     try { return safeStorage.decryptString(Buffer.from(encrypted, "base64")) }
     catch { return undefined }
   }
 
   private snapshot(partial: Partial<TelegramStatus> = {}): TelegramStatus {
+    const hasToken = encryptedTelegramTokenPresent(telegramConfig())
     const live = telegramPublicLiveness({ hasToken: Boolean(this.token()), polling: this.polling, pollReady: this.pollReady })
     return telegramStatusForRenderer({
       connected: live.connected,
-      hasToken: Boolean(this.token()),
+      hasToken,
       polling: live.polling,
       firstName: this.botFirstName || undefined,
       lastPollAt: this.lastPollAt || undefined,
-      lastError: this.lastError || undefined,
+      lastError: this.lastError || this.tokenUnlockError() || undefined,
       webhookCleared: this.webhookCleared,
       commandMenuOk: this.commandMenuOk,
       allowedCount: this.allowedChats().length,
       pendingCount: this.pendingChats().length,
-      autoApproveFirst: Boolean(getStore().get("telegram").autoApproveFirst),
+      autoApproveFirst: Boolean(telegramConfig().autoApproveFirst),
       coolOffMs: this.coolOffRemaining(),
       ...this.agentOptions(),
       ...partial,
@@ -311,7 +328,7 @@ export class TelegramBridge {
 
   async status(options: { probe?: boolean } = {}): Promise<TelegramStatus> {
     const token = this.token()
-    if (!token) return this.snapshot({ connected: false, hasToken: false, polling: false, coolOffMs: 0 })
+    if (!token) return this.snapshot({ connected: false, polling: false, coolOffMs: 0, error: this.tokenUnlockError() || undefined })
     const coolOffRemaining = this.coolOffRemaining()
     const live = telegramPublicLiveness({ hasToken: true, polling: this.polling, pollReady: this.pollReady })
     // Live long-poll is the source of truth only after bootstrap succeeded.
@@ -490,7 +507,8 @@ export class TelegramBridge {
 
   start(): void {
     if (!this.token()) {
-      writeLog("warn", "Telegram start skipped: no decrypted bot token")
+      const unlock = this.tokenUnlockError()
+      writeLog("warn", unlock || "Telegram start skipped: no bot token saved")
       return
     }
     if (this.pollReady && this.polling) return
@@ -500,6 +518,7 @@ export class TelegramBridge {
 
   /** Restart a dead poller (second-instance focus, delayed keychain token). */
   ensurePolling(): void {
+    if (!encryptedTelegramTokenPresent(telegramConfig())) return
     if (this.coolOffRemaining() > 0) return
     if (this.pollReady && this.polling) return
     if (this.polling && !this.pollReady) return

@@ -67,7 +67,7 @@ export type TelegramGoal = {
   updatedAt: number
 }
 
-type StoreSchema = {
+export type StoreSchema = {
   runs: GrokRunRecord[]
   activeRunJournal?: GrokRunJournal
   ui: {
@@ -127,6 +127,9 @@ export function getStore(): Store<StoreSchema> {
       defaults: { runs: [], ui: { sidebarPinned: true, theme: "dark" }, grok: {}, lmstudio: { baseUrl: "http://localhost:1234" }, localStudio: { baseUrl: "" }, telegram: { allowedChatIds: [], pendingChatIds: [] }, nemoclaw: { enabled: true, requireApproval: true, audit: [] }, projects: [], schedules: [], quickEntry: { accelerator: "CommandOrControl+Shift+Space", enabled: true } },
       clearInvalidConfig: true,
     })
+    if (!_store.get("telegram")) _store.set("telegram", { allowedChatIds: [], pendingChatIds: [] })
+    if (!Array.isArray(_store.get("projects"))) _store.set("projects", [])
+    if (!Array.isArray(_store.get("schedules"))) _store.set("schedules", [])
   }
   return _store
 }
