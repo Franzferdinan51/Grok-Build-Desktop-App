@@ -52,6 +52,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Existing linked worktrees can be adopted with **Use**, registering that path as a project and switching the workbench without changing Git state.
 - The coding chat now coordinates Files, Terminal, Activity, and Preview through one session context rail, so switching tools keeps the conversation mounted and makes the active context obvious.
 - The Activity inspector presents a bounded, expandable timeline of response, reasoning, and error updates instead of an unstructured log tail; all reasoning phases from one run are consolidated into one expandable row with an update count.
+- A persistent Duck-Agent-inspired workbench status bar keeps Grok availability, workspace/branch, active work, queue depth, changed files, approval mode, model, and DuckBot memory state visible across the app; each actionable item opens the existing relevant surface.
 - If the renderer reloads while Grok Build is still running, the workbench reattaches to the active task, restores its bounded visible output and session ID, and keeps new instructions queued until it finishes.
 - Git Review can now open from that same session context rail, keeping the active conversation visible while inspecting and staging workspace changes; the dedicated Review page remains available for full-screen work.
 - Long streamed conversations now expose a sticky **Jump to latest** control when you scroll upward, so you can inspect earlier output without losing the live tail.

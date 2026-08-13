@@ -23,6 +23,7 @@ import { summarizeHarnessDoctor } from "./harness-doctor"
 import { RunsPanel } from "./views/RunsPanel"
 import { ProjectFileTree } from "./ProjectFileTree"
 import { TaskInspector } from "./TaskInspector"
+import { WorkbenchStatusBar } from "./workbench-statusbar"
 import { NotificationStack, type DesktopNotification } from "./NotificationStack"
 import { ChatTerminalRail } from "./ChatTerminalRail"
 import { ConversationSplitPane } from "./ConversationSplitPane"
@@ -64,6 +65,7 @@ import { UI_ICONS } from "./assets/ui-icons"
 import { SIDEBAR_NAV } from "./sidebar-nav"
 import * as eventBuffer from "./event-buffer"
 import "./artifacts.css"
+import "./workbench-statusbar.css"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
 type ChatThread = StoredChatThread & { messages: ChatMessage[] }
@@ -2194,6 +2196,22 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <ArtifactsPanel artifacts={artifacts} onRefresh={() => void refreshArtifacts()} onOpenThread={(id) => void openArtifactThread(id)} />
       </Show>
     </main>
+    <WorkbenchStatusBar
+      backendReady={props.backendStatus().available}
+      backendLabel={props.backendStatus().version || props.backendStatus().command}
+      workspace={workspace()}
+      branch={selectedProject()?.branch}
+      changedFiles={selectedProject()?.changedFiles || 0}
+      running={running()}
+      queuedCount={queuedPrompts().length}
+      model={model() || catalog().defaultModel || ""}
+      approval={autoApprove() && !planMode() ? "Auto" : planMode() || advanced().permissionMode === "plan" ? "Plan" : "Ask"}
+      memory={memoryStatus()}
+      onWorkspace={() => void navigate("workspace")}
+      onReview={() => void navigate("review")}
+      onActivity={toggleActivityRail}
+      onSettings={() => void navigate("settings")}
+    />
     <footer class="app-status">
       <b>{props.backendStatus().available ? `Grok Build ${props.backendStatus().version || "ready"}` : "Grok Build offline"}</b>
       <span>{model() || catalog().defaultModel || "default model"}</span>
