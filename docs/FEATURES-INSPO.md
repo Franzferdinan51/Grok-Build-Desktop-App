@@ -38,6 +38,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 - **Artifact continuity:** Duck-Agent's session artifact index is adapted into a local Artifacts page over Grok Build's persisted conversations. It extracts bounded links, files, and images without adding a gateway or remote media store.
 - **Session context rail:** Duck-Agent's right-sidebar workbench pattern is adapted into a single typed coordinator for Files, Terminal, Activity, and Preview. Existing scoped bridges and sandboxed preview behavior remain the source of truth.
 - **Session-attached review:** Git Review is available as a context overlay over the active chat, reusing the existing workspace-scoped diff and stage/unstage/discard actions instead of creating a second Git authority.
+- **Transcript navigation:** Duck-Agent's jump-to-bottom affordance is adapted to the Grok Build transcript with bounded scroll detection and no change to the streaming backend.
 - **Task-loss protection:** the Electron lifecycle now confirms before quitting an active Grok Build run, adapting Duck-Agent's pure quit-prompt decision pattern while keeping Grok Build as the sole execution runtime.
 - **Approval visibility:** the Task Inspector also reports the effective approval mode (automatic, interactive, plan-only, or no-prompts) from the existing Grok Build settings.
 - **Terminal continuity:** the chat terminal rail reuses the existing workspace-only command bridge and output cap; it does not add a second shell or broaden command authority.

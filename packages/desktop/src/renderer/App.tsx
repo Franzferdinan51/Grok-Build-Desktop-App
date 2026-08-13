@@ -36,6 +36,7 @@ import { SettingsPanel } from "./views/SettingsPanel"
 import { ArtifactsPanel } from "./views/ArtifactsPanel"
 import { collectArtifacts, type ArtifactRecord } from "./artifact-utils"
 import { nextSessionRail, type SessionRailMode } from "./session-context-rail"
+import { isNearBottom } from "./scroll-position"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
@@ -46,6 +47,7 @@ import "./chat-terminal.css"
 import "./branding.css"
 import "./context-rail.css"
 import "./session-review.css"
+import "./scroll-latest.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
 import * as eventBuffer from "./event-buffer"
 import "./artifacts.css"
@@ -185,6 +187,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [terminalRailOpen, setTerminalRailOpen] = createSignal(false)
   const [contextRailMode, setContextRailMode] = createSignal<ContextRailMode | null>(null)
   const [notifications, setNotifications] = createSignal<DesktopNotification[]>([])
+  const [showJumpToLatest, setShowJumpToLatest] = createSignal(false)
   const [agentAppControls, setAgentAppControls] = createSignal(false)
   const [subagentsEnabled, setSubagentsEnabled] = createSignal(FRIENDLY_DEFAULTS.subagents)
   const [delegationMode, setDelegationMode] = createSignal<"balanced" | "aggressive">("balanced")
@@ -236,6 +239,12 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const conversationWriter = createConversationWriter((thread) => window.api.conversations.save(thread))
 
   const mergeLogs = (target: TaskLog[], incoming: TaskLog[]): TaskLog[] => eventBuffer.mergeLogs(target, incoming)
+  const jumpToLatest = () => {
+    if (!messagesElement) return
+    messagesElement.scrollTo({ top: messagesElement.scrollHeight, behavior: "smooth" })
+    userNearBottom = true
+    setShowJumpToLatest(false)
+  }
 
   const flushBackendEvents = () => {
     if (eventFrame) cancelAnimationFrame(eventFrame)
@@ -1395,7 +1404,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         <div class={`chat-workbench ${contextRailMode() ? "chat-workbench--session-rail" : ""} ${splitOpen() ? "chat-workbench--split" : ""} ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""} ${filesOpen() ? "chat-workbench--files" : ""} ${filesRailCollapsed() ? "chat-workbench--files-collapsed" : ""} ${inspectorOpen() ? "chat-workbench--inspector" : ""} ${terminalRailOpen() ? "chat-workbench--terminal" : ""}`}><div class="chat-column"><section class="chat-thread">
           <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={workspace()}><button class={contextRailMode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()} title="Browse project files">▤ Files</button></Show><button class={contextRailMode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail} title="Open workspace terminal">{">_ Terminal"}</button><button class={contextRailMode() === "activity" ? "active" : ""} onClick={toggleActivityRail} title="Inspect current task">◌ Activity</button><Show when={previewEnabled()}><button class={contextRailMode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>◫ Preview</button></Show><button class={splitOpen() ? "active" : ""} onClick={() => void (splitOpen() ? closeSplitConversation() : openLatestSplitConversation())} title="Keep another conversation visible">▥ Split</button><button class={historyOpen() ? "active" : ""} onClick={async () => { const next = !historyOpen(); setHistoryOpen(next); if (next) await refreshHistory() }}>History {chatThreads().filter((thread) => thread.messages.length).length || ""}</button><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
           <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Chat history</strong><span>{historyAllWorkspaces() ? "All workspaces" : selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div class="chat-history__tools"><input value={historySearch()} onInput={async (event) => { setHistorySearch(event.currentTarget.value); await refreshHistory() }} placeholder="Search conversations…"/><label><input type="checkbox" checked={historyAllWorkspaces()} onChange={async (event) => { setHistoryAllWorkspaces(event.currentTarget.checked); await refreshHistory() }}/> All workspaces</label></div><div><For each={historyResults().filter((thread) => thread.messages.length && !thread.archived)} fallback={<p>No matching chats.</p>}>{(thread) => <article class={thread.id === activeThreadId() ? "active" : ""}><button disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.pinned ? "📌 " : ""}{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages · {thread.model || "default"} · {thread.sessionStatus || (thread.sessionId ? "resumable" : "new")}</span></button><div><button onClick={() => void openSplitConversation(thread)} disabled={thread.id === activeThreadId()}>Split</button><button onClick={() => { const title = window.prompt("Conversation name", thread.title); if (title?.trim()) void updateThreadMeta(thread, { title: title.trim() }) }}>Rename</button><button onClick={() => void updateThreadMeta(thread, { pinned: !thread.pinned })}>{thread.pinned ? "Unpin" : "Pin"}</button><button onClick={() => void window.api.conversations.export(thread.id)}>Export</button><button onClick={() => void _forkConversation(thread)}>Fork</button><button onClick={() => void updateThreadMeta(thread, { archived: true })}>Archive</button></div></article>}</For></div></section></Show>
-          <div class="chat-messages" ref={messagesElement} onScroll={(event) => { const element = event.currentTarget; userNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 100 }}>
+          <div class="chat-messages" ref={messagesElement} onScroll={(event) => { const element = event.currentTarget; userNearBottom = isNearBottom(element.scrollHeight, element.scrollTop, element.clientHeight); setShowJumpToLatest(!userNearBottom) }}>
+            <Show when={showJumpToLatest()}><button class="chat-jump-latest" onClick={jumpToLatest}>↓ Jump to latest</button></Show>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
               <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(splitThinking(message.logs).filter((log) => log.kind !== "thought").map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) void run(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
               <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={splitThinking(events())}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thinking…</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For></Show></div></article></Show>
