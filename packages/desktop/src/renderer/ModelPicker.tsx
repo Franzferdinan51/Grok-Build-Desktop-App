@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, Show, onCleanup } from "solid-js"
 import { providerFamilyLabel, type ModelOption } from "./provider-availability"
-import { filterModelGroups, flattenModelOptions, hiddenModelCount, modelDisplayName, modelDisplayParts, modelPickerLabel } from "./model-picker"
+import { filterModelGroups, flattenModelOptions, hiddenModelCount, modelDisplayParts, modelPickerLabel } from "./model-picker"
 import "./model-picker.css"
 
 export function ModelPicker(props: {

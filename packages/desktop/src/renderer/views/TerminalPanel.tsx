@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createSignal } from "solid-js"
 import { PageEmpty, PageShell } from "./PageShell"
 import { UI_ICONS } from "../assets/ui-icons"
+import { browseTerminalHistory } from "../terminal-state"
 
 const PRESETS = ["pnpm test", "pnpm typecheck", "git status", "git diff"]
 
@@ -9,13 +10,13 @@ export function TerminalPanel(props: {
   projectName: string
   command: string
   output: string
+  history: string[]
   running: boolean
   onCommand: (value: string) => void
   onRun: (command?: string) => void
   onClear: () => void
   onOpenProject: () => void
 }) {
-  const [history, setHistory] = createSignal<string[]>([])
   const [historyIndex, setHistoryIndex] = createSignal(-1)
   const [copied, setCopied] = createSignal(false)
   let outputEl: HTMLPreElement | undefined
@@ -29,20 +30,14 @@ export function TerminalPanel(props: {
     const next = command.trim()
     if (!next || props.running) return
     if (next !== props.command) props.onCommand(next)
-    setHistory((current) => [next, ...current.filter((entry) => entry !== next)].slice(0, 50))
     setHistoryIndex(-1)
     props.onRun(next)
   }
 
   const browseHistory = (direction: -1 | 1) => {
-    const entries = history()
-    if (!entries.length) return
-    const index = historyIndex()
-    const next = direction < 0
-      ? Math.min(entries.length - 1, index + 1)
-      : index <= 0 ? -1 : index - 1
-    setHistoryIndex(next)
-    props.onCommand(next < 0 ? "" : entries[next] || "")
+    const next = browseTerminalHistory(props.history, historyIndex(), direction)
+    setHistoryIndex(next.index)
+    props.onCommand(next.command)
   }
 
   const copyOutput = async () => {

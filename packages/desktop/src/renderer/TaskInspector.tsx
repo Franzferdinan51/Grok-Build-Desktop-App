@@ -39,7 +39,6 @@ export function TaskInspector(props: { running: boolean; events: TaskLog[]; goal
     })
     onCleanup(unsubscribe)
   })
-  const visibleEvents = () => props.events.filter((event) => event.kind !== "thought").slice(-6).reverse()
   const timeline = () => buildActivityTimeline(props.events)
   const metrics = () => summarizeRunMetrics(props.runs)
   const contextPercent = () => Math.min(100, Math.round((props.contextChars / Math.max(1, props.contextBudgetChars)) * 100))

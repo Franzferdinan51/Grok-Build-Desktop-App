@@ -44,6 +44,7 @@ import { ArtifactsPanel } from "./views/ArtifactsPanel"
 import { collectArtifacts, type ArtifactRecord } from "./artifact-utils"
 import { nextSessionRail, type SessionRailMode } from "./session-context-rail"
 import { sessionSidebarEntries } from "./session-sidebar"
+import { addTerminalHistory, cacheTerminalHistory, parseTerminalSnapshot, terminalStateKey } from "./terminal-state"
 import { isNearBottom } from "./scroll-position"
 import { preservedReviewPath } from "./review-sync"
 import { addDockedSessionId, parseDockedSessionIds, removeDockedSessionId } from "./session-dock"
@@ -167,6 +168,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [fileNotice, setFileNotice] = createSignal("")
   const [terminalCommand, setTerminalCommand] = createSignal("")
   const [terminalOutput, setTerminalOutput] = createSignal("")
+  const [terminalHistory, setTerminalHistory] = createSignal<string[]>([])
   const [terminalRunning, setTerminalRunning] = createSignal(false)
   const [cliPath, setCliPath] = createSignal("")
   const [cliNotice, setCliNotice] = createSignal("")
@@ -333,6 +335,21 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const sessionKey = (root = workspace()) => `chat.session.${encodeURIComponent(root)}`
   const threadsKey = (root = workspace()) => `chat.threads.${encodeURIComponent(root)}`
   const activeThreadKey = (root = workspace()) => `chat.active.${encodeURIComponent(root)}`
+  const persistTerminalState = async (root = workspace(), output = terminalOutput(), history = terminalHistory()) => {
+    if (!root) return
+    await window.api.store.set(terminalStateKey(root), { output, history })
+  }
+  const restoreTerminalState = async (root: string) => {
+    const snapshot = parseTerminalSnapshot(await window.api.store.get<unknown>(terminalStateKey(root)))
+    setTerminalOutput(snapshot.output)
+    setTerminalHistory(snapshot.history)
+    cacheTerminalHistory(snapshot.history)
+    setTerminalCommand("")
+  }
+  const clearTerminal = () => {
+    setTerminalOutput("")
+    void persistTerminalState(workspace(), "", terminalHistory())
+  }
   const splitThreadKey = (root = workspace()) => `chat.split.${encodeURIComponent(root)}`
   const saveArtifactContext = async (patch: Partial<ArtifactContext>, root = workspace(), threadId = activeThreadId()) => {
     if (!root || !threadId) return
@@ -560,6 +577,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await window.api.store.set(conversationKey(root), thread.messages)
       if (thread.sessionId) await window.api.store.set(sessionKey(root), thread.sessionId); else await window.api.store.delete(sessionKey(root))
       await restoreArtifactContext(root, thread.id)
+      await restoreTerminalState(root)
       await refreshSessionPlan(root, thread.sessionId)
       await refreshSessionIndex()
     }
@@ -1013,6 +1031,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setWorkspace(current.path)
       await window.api.store.set(STORE_KEYS.workspaceLast, current.path)
       await loadConversation(current.path)
+      await restoreTerminalState(current.path)
       await loadGoal(current.path)
       await refreshGitWorktrees(current.isGit ? current.path : "")
     }
@@ -1757,26 +1776,38 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const saveFile = async () => { if (!openFile()) return; await window.api.workspace.write(workspace(), openFile(), fileContent()); setFileNotice("Saved") }
   const runCommand = async (commandOverride?: string) => {
     const command = (commandOverride ?? terminalCommand()).trim()
-    if (!workspace() || !command || terminalRunning()) return
+    const root = workspace()
+    if (!root || !command || terminalRunning()) return
     if (command !== terminalCommand()) setTerminalCommand(command)
-    setTerminalRunning(true); setTerminalOutput((old) => `${old}${old ? "\n" : ""}$ ${command}\n`)
+    const nextHistory = addTerminalHistory(terminalHistory(), command)
+    const nextOutput = `${terminalOutput()}${terminalOutput() ? "\n" : ""}$ ${command}\n`
+    setTerminalHistory(nextHistory)
+    cacheTerminalHistory(nextHistory)
+    setTerminalRunning(true); setTerminalOutput(nextOutput)
+    void persistTerminalState(root, nextOutput, nextHistory)
     try {
-      const result = await window.api.workspace.command(workspace(), command); const output = result.stdout + result.stderr
+      const result = await window.api.workspace.command(root, command); const output = result.stdout + result.stderr
       setTerminalOutput((old) => {
         const next = `${old}${output}\n[exit ${result.code}]\n`
         // Keep the most recent 200k chars so a long-running dev session does
         // not let the terminal signal grow unbounded and stall the renderer.
-        return next.length > 200_000 ? `…[output truncated]\n${next.slice(-200_000)}` : next
+        const bounded = next.length > 200_000 ? `…[output truncated]\n${next.slice(-200_000)}` : next
+        void persistTerminalState(root, bounded, nextHistory)
+        return bounded
       })
       const detected = output.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(?:\/[^\s]*)?/i)?.[0]
       if (detected && previewEnabled()) {
         const url = detected.replace("0.0.0.0", "127.0.0.1")
         setPreviewURL(url); setPreviewDraft(url); setPreviewOpen(true); setPreviewStatus("Detected dev server")
         await window.api.store.set(STORE_KEYS.previewUrl, url)
-        await saveArtifactContext({ previewUrl: url })
+        await saveArtifactContext({ previewUrl: url }, root)
       }
     } catch (error) {
-      setTerminalOutput((old) => `${old}${error instanceof Error ? error.message : String(error)}\n[command failed]\n`)
+      setTerminalOutput((old) => {
+        const next = `${old}${error instanceof Error ? error.message : String(error)}\n[command failed]\n`
+        void persistTerminalState(root, next, nextHistory)
+        return next
+      })
     } finally { setTerminalRunning(false) }
   }
   let gitRefreshGeneration = 0
@@ -1834,6 +1865,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (active() === "workflows") setWorkflows(await window.api.backend.workflows(project.path))
     setSessionPlan(null)
     await loadConversation(project.path)
+    await restoreTerminalState(project.path)
     await loadGoal(project.path)
     await refreshSessionPlan(project.path, sessionId())
   }
@@ -2280,10 +2312,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           projectName={selectedProject()?.name || ""}
           command={terminalCommand()}
           output={terminalOutput()}
+          history={terminalHistory()}
           running={terminalRunning()}
           onCommand={setTerminalCommand}
           onRun={(command) => void runCommand(command)}
-          onClear={() => setTerminalOutput("")}
+          onClear={clearTerminal}
           onOpenProject={chooseWorkspace}
         />
       </Show>

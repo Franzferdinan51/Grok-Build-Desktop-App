@@ -1,7 +1,7 @@
 import { execFile } from "child_process"
 import { promisify } from "util"
 import { readdir, readFile, realpath, mkdir, stat, writeFile } from "fs/promises"
-import { dirname, join, relative, resolve, sep } from "path"
+import { dirname, relative, resolve, sep } from "path"
 
 const execFileAsync = promisify(execFile)
 
