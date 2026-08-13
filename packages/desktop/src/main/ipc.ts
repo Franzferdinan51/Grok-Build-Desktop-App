@@ -12,7 +12,7 @@ import { GrokBuildBackend, type GrokBuildEvent, type RunTaskInput } from "./grok
 import { classifyRunError, finishGrokRun, listGrokRuns, startGrokRun, usageMetrics } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
 import { BrowserManager } from "./browser-manager"
-import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
+import { addSchedule, listSchedules, onScheduleEvent, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
 import { applyGitFileAction, gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
 import { PreviewServer } from "./preview-server"
@@ -39,6 +39,7 @@ let previousBrowserAgentScreenshot: string | undefined
 
 export function registerIpcHandlers(deps: Deps): void {
   const memory = new DuckbotMemory()
+  onScheduleEvent((event) => deps.getMainWindow()?.webContents.send("schedules:event", event))
   ipcMain.handle("quick-entry:submit", (_event, text: string, target: "current" | "new") => {
     const trimmed = typeof text === "string" ? text.trim() : ""
     if (!trimmed || trimmed.length > 20_000 || !["current", "new"].includes(target)) throw new Error("Invalid Quick Entry submission")

@@ -42,3 +42,7 @@ export function withScheduleFinishPatch(
     nextRunAt: repeat ? at + (task.repeatMinutes as number) * 60_000 : task.nextRunAt,
   }
 }
+
+export function withScheduleRunningPatch(task: ScheduledGrokTask, running: boolean, detail?: string): ScheduledGrokTask {
+  return { ...task, running, lastError: running ? undefined : detail }
+}

@@ -37,6 +37,8 @@ export type ScheduleEntry = {
   prompt: string
   cwd: string
   enabled: boolean
+  running?: boolean
+  lastError?: string
   nextRunAt: number
   lastStatus?: "completed" | "failed"
   lastRunAt?: number
@@ -44,9 +46,10 @@ export type ScheduleEntry = {
   model?: string
 }
 
-export type ScheduleState = "active" | "paused" | "failed"
+export type ScheduleState = "active" | "paused" | "running" | "failed"
 
 export function scheduleState(task: ScheduleEntry): ScheduleState {
+  if (task.running) return "running"
   if (task.lastStatus === "failed") return "failed"
   return task.enabled ? "active" : "paused"
 }

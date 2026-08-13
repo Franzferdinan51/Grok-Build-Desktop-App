@@ -62,7 +62,7 @@ export function ScheduledPanel(props: {
                 <div><dt>Repeat</dt><dd>{formatRepeat(task().repeatMinutes)}</dd></div>
                 <div><dt>Workspace</dt><dd>{task().cwd}</dd></div>
                 <Show when={task().model}><div><dt>Model</dt><dd>{task().model}</dd></div></Show>
-                <Show when={task().lastStatus}><div><dt>Last run</dt><dd>{task().lastStatus}{task().lastRunAt ? ` · ${new Date(task().lastRunAt!).toLocaleString()}` : ""}</dd></div></Show>
+                <Show when={task().lastStatus || task().lastError}><div><dt>Last run</dt><dd>{task().lastStatus || "failed"}{task().lastRunAt ? ` · ${new Date(task().lastRunAt!).toLocaleString()}` : ""}{task().lastError ? ` · ${task().lastError}` : ""}</dd></div></Show>
               </dl>
               <div class="detail-actions">
                 <button class="primary" onClick={() => props.onRun(task().id)}>Run now</button>

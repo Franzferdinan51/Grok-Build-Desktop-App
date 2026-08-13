@@ -31,6 +31,7 @@ export type GrokRunRecord = {
 export type ScheduledGrokTask = {
   id: string; name: string; prompt: string; cwd: string; model?: string
   runAt: number; repeatMinutes?: number; enabled: boolean
+  running?: boolean; lastError?: string
   lastRunAt?: number; nextRunAt: number; lastStatus?: "completed" | "failed"
 }
 

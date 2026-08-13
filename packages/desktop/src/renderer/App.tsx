@@ -694,6 +694,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     window.addEventListener("grok-attach-file", onAttachFile)
     onCleanup(() => window.removeEventListener("grok-attach-file", onAttachFile))
     onCleanup(window.api.telegram.onChange(() => { void refreshTelegram(false) }))
+    onCleanup(window.api.schedules.onEvent((event) => {
+      setSchedules((current) => current.map((task) => task.id === event.taskId ? { ...task, running: event.status === "running", lastError: event.status === "failed" ? event.detail : undefined, lastStatus: event.status === "completed" ? "completed" : event.status === "failed" ? "failed" : task.lastStatus } : task))
+      if (event.status === "completed") announce("success", `Scheduled task finished · ${event.name}`, event.detail || "Grok Build completed the scheduled task.")
+      if (event.status === "failed") announce("error", `Scheduled task failed · ${event.name}`, event.detail || "Review the scheduled task and try again.")
+    }))
     const savedWorkspace = await window.api.store.get<string>(STORE_KEYS.workspaceLast)
     let savedProjects = await window.api.projects.list()
     if (savedProjects.length === 0) {

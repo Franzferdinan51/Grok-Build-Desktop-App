@@ -23,6 +23,7 @@ test("schedule helpers", () => {
   ]
   assert.equal(scheduleState(tasks[0]!), "active")
   assert.equal(scheduleState(tasks[1]!), "failed")
+  assert.equal(scheduleState({ ...tasks[0]!, running: true }), "running")
   assert.equal(filterSchedules(tasks, "night")[0]?.id, "1")
   assert.equal(formatRepeat(undefined), "Once")
   assert.equal(formatRepeat(60), "Hourly")

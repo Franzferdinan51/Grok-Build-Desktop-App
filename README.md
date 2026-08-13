@@ -35,6 +35,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Background task completion and failure also surface as native desktop notifications when the workbench is unfocused; clicking one restores the existing app window.
 - The Task Inspector includes a durable, per-workspace checklist for breaking work into explicit user-controlled steps alongside the active Grok Build goal.
 - The Task Inspector also shows verified backend phases for startup, advisor consultation, execution, recovery, completion, cancellation, and failure; phase labels come from the Grok Build bridge rather than UI guesses.
+- Scheduled Grok Build work now reports live running phases and final failures back to the Scheduled page, with background completion/failure notifications and the last error retained for recovery.
 - Configurable reasoning, turn limits, self-verification, web search, subagents, and visible automatic-approval controls.
 
 ### Models and authentication
