@@ -28,6 +28,7 @@ import { acquireSingleInstanceLock, appIconPath, createMainWindow, createQuickEn
 import { installBundledSkills } from "./bundled-skills"
 import { DEFAULT_QUICK_ENTRY_ACCELERATOR, validateQuickEntryAccelerator } from "./quick-entry"
 import { quitPromptFor } from "./quit-guard"
+import { classifyWindow } from "./window-reopen"
 
 let mainWindow: BrowserWindow | null = null
 let quickEntryWindow: BrowserWindow | null = null
@@ -79,14 +80,10 @@ function configureBrowserAgentSession(): void {
 // loop on the same bot token (Telegram allows only one getUpdates owner) and
 // race on the same settings file. Focus the existing window instead.
 if (process.env.GROK_BUILD_UI_SMOKE !== "1" && !acquireSingleInstanceLock(() => {
-  // Focus the existing window on the second launch.
-  const windows = BrowserWindow.getAllWindows()
-  if (windows.length) {
-    const [win] = windows
-    if (win.isMinimized()) win.restore()
-    win.show()
-    win.focus()
-  }
+  // A second launch must reopen the workbench. Quick Entry is a hidden
+  // skipTaskbar window, so focusing "any window" after the user closed
+  // the main one made relaunch look dead.
+  void revealMainWindow()
 })) {
   writeLog("info", "Another Grok Build Desktop instance is already running. Exiting.")
   app.quit()
@@ -116,6 +113,27 @@ async function createAndLoadMainWindow(): Promise<BrowserWindow> {
   mainWindow = win
   await loadRenderer(win)
   return win
+}
+
+function revealMainWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    return
+  }
+  const existing = BrowserWindow.getAllWindows().find((win) => classifyWindow({
+    destroyed: win.isDestroyed(),
+    title: win.getTitle(),
+  })?.kind === "workbench")
+  if (existing && !existing.isDestroyed()) {
+    mainWindow = existing
+    if (existing.isMinimized()) existing.restore()
+    existing.show()
+    existing.focus()
+    return
+  }
+  void createAndLoadMainWindow().catch((error) => writeLog("error", `Could not reopen window: ${String(error)}`))
 }
 
 async function showQuickEntry(): Promise<void> {
@@ -254,10 +272,9 @@ app.whenReady().then(async () => {
   setTimeout(() => void autoUpdate(), 30_000)
 
   app.on("activate", () => {
-    // macOS: re-create window when dock icon is clicked and no windows exist
-    if (BrowserWindow.getAllWindows().length === 0) {
-      void createAndLoadMainWindow().catch((error) => writeLog("error", `Could not reopen window: ${String(error)}`))
-    }
+    // macOS dock click. Quick Entry stays alive after the workbench is
+    // closed, so "any window exists" is the wrong test.
+    revealMainWindow()
   })
 })
 
