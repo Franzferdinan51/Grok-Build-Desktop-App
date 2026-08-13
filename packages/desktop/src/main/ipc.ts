@@ -87,6 +87,7 @@ export function registerIpcHandlers(deps: Deps): void {
     return result
   })
   ipcMain.handle("backend:tool", (_event, command: string, cwd?: string) => deps.backend().runTool(command, cwd))
+  ipcMain.handle("backend:commands", () => deps.backend().commands())
   ipcMain.handle("app:restart", () => {
     // Stop the entire Grok child process group before relaunching so Restart
     // cannot leave MCP/tool children behind consuming CPU or memory.

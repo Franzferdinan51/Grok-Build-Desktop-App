@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "ele
 export type BackendStatus = { available: boolean; command: string; version?: string; error?: string }
 export type GrokBuildModelCatalog = { defaultModel?: string; models: string[] }
 export type GrokBuildUpdateStatus = { currentVersion: string; latestVersion: string; updateAvailable: boolean; channel: "stable" | "alpha"; error?: string | null }
+export type GrokSubcommand = { name: string; description: string }
 export type OAuthProviderStatus = {
   id: "xai" | "openai" | "minimax"
   label: string
@@ -76,6 +77,7 @@ export type ElectronAPI = {
     checkUpdate: () => Promise<GrokBuildUpdateStatus>
     installUpdate: (channel: "stable" | "alpha") => Promise<GrokBuildUpdateStatus>
     tool: (command: string, cwd?: string) => Promise<{ stdout: string; stderr: string }>
+    commands: () => Promise<GrokSubcommand[]>
     workflows: (workspace?: string) => Promise<GrokWorkflow[]>
     sessionPlan: (cwd: string, sessionId?: string) => Promise<SessionPlan | null>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
@@ -131,7 +133,7 @@ const api: ElectronAPI = {
     setPath: (path) => ipcRenderer.invoke("backend:set-path", path),
     oauthLogin: (provider) => ipcRenderer.invoke("backend:oauth-login", provider),
     oauthStatus: () => ipcRenderer.invoke("backend:oauth-status"),
-    checkUpdate: () => ipcRenderer.invoke("backend:update-check"), installUpdate: (channel) => ipcRenderer.invoke("backend:update-install", channel), tool: (command, cwd) => ipcRenderer.invoke("backend:tool", command, cwd),
+    checkUpdate: () => ipcRenderer.invoke("backend:update-check"), installUpdate: (channel) => ipcRenderer.invoke("backend:update-install", channel), tool: (command, cwd) => ipcRenderer.invoke("backend:tool", command, cwd), commands: () => ipcRenderer.invoke("backend:commands"),
     workflows: (workspace) => ipcRenderer.invoke("backend:workflows", workspace),
     sessionPlan: (cwd, sessionId) => ipcRenderer.invoke("backend:session-plan", cwd, sessionId),
     onEvent: (handler) => {

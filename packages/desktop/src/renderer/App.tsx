@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, OAuthStatusSnapshot, GitWorktree } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, GrokWorkflow, GrokSubcommand, SessionPlan, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, OAuthStatusSnapshot, GitWorktree } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -235,6 +235,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [backendToolCommand, setBackendToolCommand] = createSignal("inspect --json")
   const [backendToolOutput, setBackendToolOutput] = createSignal("")
   const [backendToolRunning, setBackendToolRunning] = createSignal(false)
+  const [backendCommands, setBackendCommands] = createSignal<GrokSubcommand[]>([])
   const [settingsTab, setSettingsTab] = createSignal<SettingsTab>("essentials")
   const [agentTab, setAgentTab] = createSignal<"overview" | "runtime" | "sessions" | "memory" | "telegram" | "commands">("telegram")
   let messagesElement: HTMLDivElement | undefined
@@ -974,6 +975,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     const runtime = await window.api.localStudio.status()
     setLocalStudio(runtime); setLocalStudioURL(runtime.baseUrl)
     setCatalog(await window.api.backend.models())
+    await refreshBackendCommands()
     setSkills(await window.api.skills.list(current?.path))
     setSchedules(await window.api.schedules.list())
     const providers = await window.api.providerSecrets.list()
@@ -1502,6 +1504,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     } catch (error) { setBackendToolOutput(`$ grok ${command}\n${error instanceof Error ? error.message : String(error)}`) }
     finally { setBackendToolRunning(false) }
   }
+  const refreshBackendCommands = async () => {
+    try { setBackendCommands(await window.api.backend.commands()) }
+    catch { setBackendCommands([]) }
+  }
   const saveLocalStudioURL = async () => {
     const baseUrl = await window.api.localStudio.setURL(localStudioURL())
     setLocalStudioURL(baseUrl)
@@ -2003,6 +2009,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           onBackendToolCommand={setBackendToolCommand}
           backendToolOutput={backendToolOutput()}
           backendToolRunning={backendToolRunning()}
+          backendCommands={backendCommands()}
           onRunBackendTool={(command) => void runBackendTool(command)}
           providerSecrets={providerSecrets()}
           endpointDrafts={endpointDrafts()}

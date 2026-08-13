@@ -1,5 +1,5 @@
 import { For, Show } from "solid-js"
-import type { BackendStatus, GrokBuildModelCatalog, GrokBuildUpdateStatus, OAuthProviderStatus, OAuthStatusSnapshot, ProviderSecret } from "../../preload"
+import type { BackendStatus, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSubcommand, OAuthProviderStatus, OAuthStatusSnapshot, ProviderSecret } from "../../preload"
 import { groupedModelOptions, type ModelOption } from "../provider-availability"
 import { SETTINGS_TABS, type AdvancedSettings, type SettingsTab } from "../settings-defaults"
 import { PageShell } from "./PageShell"
@@ -21,6 +21,13 @@ function GroupedModelSelect(props: {
       </optgroup>
     }</For>
   </select>
+}
+
+const safeToolCommand = (name: string) => {
+  if (["inspect", "doctor", "du"].includes(name)) return `${name} --json`
+  if (["mcp", "plugin", "sessions", "worktree"].includes(name)) return `${name} list`
+  if (["models", "version", "dashboard"].includes(name)) return name
+  return `${name} --help`
 }
 
 function oauthTone(row?: OAuthProviderStatus): "ok" | "warn" | "missing" {
@@ -105,6 +112,7 @@ export function SettingsPanel(props: {
   onBackendToolCommand: (value: string) => void
   backendToolOutput: string
   backendToolRunning: boolean
+  backendCommands: GrokSubcommand[]
   onRunBackendTool: (command?: string) => void
   providerSecrets: ProviderSecret[]
   endpointDrafts: Record<string, string>
@@ -398,12 +406,13 @@ export function SettingsPanel(props: {
 
       <Show when={showCard("Grok backend toolbox", "mcp plugin sessions dashboard doctor du models version")}>
         <div class="settings-card">
-          <div><strong>Grok backend toolbox</strong><span>Native Grok Build subcommands: MCP, plugins, sessions, worktrees, doctor, disk usage, models, and the Agent Dashboard.</span></div>
+          <div><strong>Grok backend toolbox</strong><span>Live command catalog from the installed Grok Build CLI; safe presets remain available when the CLI is offline.</span></div>
           <div class="backend-tool-presets">
-            <For each={["inspect --json", "doctor --json", "du --json", "models", "version", "mcp list", "mcp doctor", "plugin list", "plugin marketplace list", "sessions list", "sessions search", "worktree list", "memory --help", "trace --help", "export --help", "completions --help", "setup --json", "dashboard"]}>{(command) =>
-              <button onClick={() => props.onRunBackendTool(command)}>{command}</button>
+            <For each={props.backendCommands.length ? props.backendCommands.map((entry) => entry.name) : ["inspect --json", "doctor --json", "du --json", "models", "version", "mcp list", "sessions list", "worktree list", "memory --help", "trace --help", "export --help", "completions --help", "setup --json", "dashboard"]}>{(command) =>
+              <button onClick={() => props.onRunBackendTool(props.backendCommands.length ? safeToolCommand(command) : command)}>{command}</button>
             }</For>
           </div>
+          <Show when={props.backendCommands.length}><div class="provider-notice">Detected: {props.backendCommands.map((entry) => `${entry.name} — ${entry.description}`).join(" · ")}</div></Show>
           <div class="token-row">
             <input value={props.backendToolCommand} onInput={(event) => props.onBackendToolCommand(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") props.onRunBackendTool() }} placeholder="mcp list, plugin install URL, sessions search term…" />
             <button class="primary" disabled={props.backendToolRunning || !props.backendToolCommand.trim()} onClick={() => props.onRunBackendTool()}>{props.backendToolRunning ? "Running…" : "Run Grok tool"}</button>

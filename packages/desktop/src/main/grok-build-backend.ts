@@ -18,7 +18,7 @@ import { resolveGrokBuild } from "./grok-build-resolver"
 import { normalizeBackendStderr } from "./backend-error"
 import { tokenizeCommandLine, ShellQuoteError } from "./shell-quote"
 import { parseGrokModels } from "./grok-models"
-import { parseGrokSubcommandNames } from "./grok-subcommands"
+import { parseGrokSubcommands, parseGrokSubcommandNames, type GrokSubcommand } from "./grok-subcommands"
 import { configureCodexOAuthModels, providerSecretEnvironment } from "./model-secrets"
 import { getStore } from "./store"
 import { CodexOAuthBridge } from "./codex-oauth-bridge"
@@ -221,6 +221,18 @@ export class GrokBuildBackend {
       return
     }
     this.allowedSubcommands = new Set(parsed)
+  }
+
+  /** Return the installed CLI's documented command catalog for the toolbox. */
+  async commands(): Promise<GrokSubcommand[]> {
+    const status = await this.status()
+    if (!status.available) return []
+    const now = Date.now()
+    if (this.cliFlagsCache?.command === status.command && this.cliFlagsCache.expiresAt > now && this.cliFlagsCache.helpText) {
+      return parseGrokSubcommands(this.cliFlagsCache.helpText)
+    }
+    await this.supportedCliFlags(status.command)
+    return this.cliFlagsCache?.helpText ? parseGrokSubcommands(this.cliFlagsCache.helpText) : []
   }
 
   private compatibleCliArgs(args: string[], flags: Set<string>, onOmit: (flag: string) => void): string[] {

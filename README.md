@@ -120,6 +120,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - New Git worktrees with optional names/base refs, explicit session UUIDs, resumed-session forks, and original-code restoration.
 - JSON Schema-constrained structured output rendered directly in chat.
 - A shell-free backend toolbox for MCP servers, plugins and marketplaces, memory, session search/export, worktrees, traces, setup/inspection, completions, authentication, and the Agent Dashboard.
+- The backend toolbox discovers the installed Grok Build command catalog at runtime, keeps one-click presets read-only or help-oriented, and falls back safely when the CLI is unavailable.
 
 ## Install
 
