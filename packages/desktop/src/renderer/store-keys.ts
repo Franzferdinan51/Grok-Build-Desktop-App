@@ -18,6 +18,7 @@ export const STORE_KEYS = {
   defaultsModel: "defaults.model",
   defaultsThinking: "defaults.thinking",
   defaultsAutoApprove: "defaults.autoApprove",
+  defaultsPlanMode: "defaults.planMode",
   defaultsSelfVerify: "defaults.selfVerify",
   defaultsMaxTurns: "defaults.maxTurns",
   defaultsWebSearch: "defaults.webSearch",
@@ -51,13 +52,14 @@ export const STORE_KEYS = {
 } as const
 
 export const queueStoreKey = (threadId: string) => `chat.queue.${threadId}`
+export const draftStoreKey = (threadId: string) => `chat.draft.${threadId}`
 export const artifactContextKey = (workspace: string, threadId: string) => `artifact.context.${encodeURIComponent(workspace)}.${threadId}`
 
 export type StoreKey = (typeof STORE_KEYS)[keyof typeof STORE_KEYS]
 
 // Value-type map for the well-known top-level keys. Custom per-workspace
 // keys (`chat.*`, `goal.*`, `chat.session.*`, `chat.active.*`,
-// `chat.threads.*`, `autoLearn.turns.*`) are foreign-string addresses
+// `chat.threads.*`, `chat.draft.*`, `autoLearn.turns.*`) are foreign-string addresses
 // produced by local helpers and don't need static checking.
 export interface StoreShape {
   [STORE_KEYS.workspaceLast]: string
@@ -69,6 +71,7 @@ export interface StoreShape {
   [STORE_KEYS.defaultsModel]: string
   [STORE_KEYS.defaultsThinking]: boolean
   [STORE_KEYS.defaultsAutoApprove]: boolean
+  [STORE_KEYS.defaultsPlanMode]: boolean
   [STORE_KEYS.defaultsSelfVerify]: boolean
   [STORE_KEYS.defaultsMaxTurns]: number
   [STORE_KEYS.defaultsWebSearch]: boolean

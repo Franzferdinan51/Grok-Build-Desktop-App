@@ -11,6 +11,8 @@ import { addProject, inspectProject, listProjects, removeProject } from "./proje
 import { GrokBuildBackend, type GrokBuildEvent, type RunTaskInput } from "./grok-build-backend"
 import { classifyRunError, finishGrokRun, listGrokRuns, startGrokRun, usageMetrics } from "./grok-runs"
 import { listGrokSkills } from "./grok-skills"
+import { listGrokWorkflows } from "./grok-workflows"
+import { readSessionPlan } from "./grok-session-files"
 import { BrowserManager } from "./browser-manager"
 import { addSchedule, listSchedules, onScheduleEvent, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
@@ -171,6 +173,8 @@ export function registerIpcHandlers(deps: Deps): void {
     return { saved: true, path: result.filePath }
   })
   ipcMain.handle("grok-skills:list", (_event, workspace?: string) => listGrokSkills(workspace))
+  ipcMain.handle("backend:workflows", (_event, workspace?: string) => listGrokWorkflows(workspace))
+  ipcMain.handle("backend:session-plan", (_event, cwd: string, sessionId?: string) => readSessionPlan(cwd, sessionId))
   ipcMain.handle("schedules:list", () => listSchedules())
   ipcMain.handle("schedules:add", (_event, input: NewSchedule) => addSchedule(input))
   ipcMain.handle("schedules:remove", (_event, id: string) => removeSchedule(id))

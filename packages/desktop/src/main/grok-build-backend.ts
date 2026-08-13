@@ -139,14 +139,14 @@ export class GrokBuildBackend {
   // fallback for actual subprocess failures.
   private modelsCache: { data: GrokBuildModelCatalog; expiresAt: number } | null = null
   private cliFlagsCache: { command: string; flags: Set<string>; expiresAt: number; helpText?: string } | null = null
-  private allowedSubcommands: Set<string> = new Set(["mcp", "plugin", "memory", "sessions", "worktree", "export", "inspect", "setup", "trace", "completions", "login", "logout", "dashboard"])
+  private allowedSubcommands: Set<string> = new Set(["mcp", "plugin", "memory", "sessions", "worktree", "export", "inspect", "setup", "trace", "completions", "login", "logout", "dashboard", "doctor", "du", "models", "version", "agent", "wrap", "leader", "update", "help"])
   private static readonly MODELS_CACHE_TTL_MS = 30_000
   private static readonly CLI_FLAGS_CACHE_TTL_MS = 60_000
   // Safe fallback when the CLI is unavailable (probe failed): every
   // subcommand the previous desktop release knew about. Combined with
   // the live CLI refresh above, this keeps the panel usable offline.
   private static readonly FALLBACK_SUBCOMMANDS = new Set([
-    "agent", "completions", "dashboard", "export", "help", "inspect", "leader",
+    "agent", "completions", "dashboard", "doctor", "du", "export", "help", "inspect", "leader",
     "login", "logout", "mcp", "memory", "models", "plugin", "sessions", "setup",
     "trace", "update", "version", "worktree", "wrap",
   ])

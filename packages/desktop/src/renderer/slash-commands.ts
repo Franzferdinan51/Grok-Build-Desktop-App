@@ -19,6 +19,7 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommand[] = [
   { name: "terminal", description: "Open the project terminal" },
   { name: "review", description: "Open Git review" },
   { name: "skills", description: "Browse Grok Build skills" },
+  { name: "workflows", description: "Browse official Grok Build Rhai workflows" },
   { name: "runs", description: "Open Grok run history" },
   { name: "scheduled", description: "Open scheduled tasks" },
   { name: "settings", description: "Open settings" },
@@ -29,8 +30,12 @@ export const DESKTOP_SLASH_COMMANDS: SlashCommand[] = [
   { name: "copy", description: "Copy the last assistant reply" },
   { name: "queue", description: "Inspect or clear queued prompts", usage: "/queue [clear]" },
   { name: "compress", description: "Checkpoint older conversation context" },
-  { name: "workflow", description: "Run a Duck-Agent plan/research/code/operate workflow through Grok Build", usage: "/workflow <plan|research|code|operate> [goal]" },
-  { name: "doctor", description: "Check the Grok Build harness" },
+  { name: "plan", description: "Enter official Grok Build plan mode", usage: "/plan [description|off]" },
+  { name: "view-plan", aliases: ["show-plan", "plan-view"], description: "Show the saved Grok Build plan.md", usage: "/view-plan" },
+  { name: "workflow", description: "Launch a Grok Build workflow or Duck-Agent preset", usage: "/workflow <name|pause|resume|stop> [args]" },
+  { name: "deep-research", description: "Start official Grok Build deep research", usage: "/deep-research <query>" },
+  { name: "dashboard", description: "Open the Grok Agent Dashboard" },
+  { name: "doctor", description: "Check the desktop harness and grok doctor", usage: "/doctor [cli]" },
   { name: "restart", description: "Restart Grok Build Desktop" },
 ]
 

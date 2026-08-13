@@ -22,10 +22,13 @@ export function WorkspacePanel(props: {
   const [mode, setMode] = createSignal<"tree" | "list">("tree")
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set())
 
-  createEffect(() => {
-    const files = props.files
+  createEffect((previous?: { query: string; workspace: string }) => {
     const query = props.fileSearch
-    setExpanded(new Set(defaultFileExpanded(files, query)))
+    const root = props.workspace
+    if (!previous || previous.query !== query || previous.workspace !== root) {
+      setExpanded(new Set(defaultFileExpanded(props.files, query)))
+    }
+    return { query, workspace: root }
   })
 
   createEffect(() => {

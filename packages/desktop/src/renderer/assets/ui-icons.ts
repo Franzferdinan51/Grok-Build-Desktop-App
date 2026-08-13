@@ -10,6 +10,7 @@ import agent from "./icons/agent.png"
 import browser from "./icons/browser.png"
 import settings from "./icons/settings.png"
 import artifacts from "./icons/artifacts.png"
+import workflows from "./icons/workflows.png"
 
 export const UI_ICONS = {
   "new-task": newTask,
@@ -19,6 +20,7 @@ export const UI_ICONS = {
   artifacts,
   review,
   skills,
+  workflows,
   scheduled,
   runtime,
   telegram: agent,

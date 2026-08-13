@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron"
 
 export type BackendStatus = { available: boolean; command: string; version?: string; error?: string }
 export type GrokBuildModelCatalog = { defaultModel?: string; models: string[] }
@@ -49,11 +49,13 @@ export type GrokRunRecord = { id: string; threadId?: string; cwd: string; prompt
 export type LocalStudioSnapshot = { configured: boolean; reachable: boolean; baseUrl: string; health?: unknown; status?: unknown; gpus?: unknown; error?: string }
 export type HostControlResult = { ok: boolean; backend: string; action: string; observed?: unknown; error?: string | null; permission_required?: boolean; missing_permissions?: unknown[] }
 export type GrokSkill = { name: string; description: string; path: string; scope: "project" | "user" | "compatible" }
+export type GrokWorkflow = { name: string; description: string; path: string; scope: "project" | "user" }
+export type SessionPlan = { sessionId: string; cwd: string; path: string; markdown: string; todos?: unknown; updatedAt: number }
+export type GitWorktree = { path: string; branch?: string; head?: string; detached: boolean; isMain: boolean }
 export type ScheduledGrokTask = { id: string; name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number; enabled: boolean; running?: boolean; lastError?: string; lastRunAt?: number; nextRunAt: number; lastStatus?: "completed" | "failed" }
 export type ScheduledTaskEvent = { taskId: string; name: string; status: "running" | "completed" | "failed"; detail?: string; at: number; runId?: string }
 export type ProviderSecret = { id: string; label: string; envKey: string; baseUrl: string; modelId: string; configured: boolean }
 export type WorkspaceFile = { path: string; size: number }
-export type GitWorktree = { path: string; branch?: string; head?: string; detached: boolean; isMain: boolean }
 export type StoredChatThread = { id: string; workspace: string; title: string; createdAt: number; updatedAt: number; messages: { id: string; role: "user" | "assistant"; logs: { kind: "text" | "thought" | "error"; content: string }[]; createdAt: number }[]; sessionId: string; model?: string; summary?: string; pinned?: boolean; archived?: boolean; sessionStatus?: "new" | "resumable" | "recovered" | "broken" }
 export type StoredChatSummary = Omit<StoredChatThread, "messages"> & { messageCount: number }
 export type DuckbotMemoryStatus = { enabled: boolean; available: boolean; repository?: string; soulDirectory: string; embeddingProvider: string; embeddingModel?: string; error?: string }
@@ -74,6 +76,8 @@ export type ElectronAPI = {
     checkUpdate: () => Promise<GrokBuildUpdateStatus>
     installUpdate: (channel: "stable" | "alpha") => Promise<GrokBuildUpdateStatus>
     tool: (command: string, cwd?: string) => Promise<{ stdout: string; stderr: string }>
+    workflows: (workspace?: string) => Promise<GrokWorkflow[]>
+    sessionPlan: (cwd: string, sessionId?: string) => Promise<SessionPlan | null>
     onEvent: (handler: (event: BackendEvent) => void) => () => void
   }
   telegram: {
@@ -101,7 +105,7 @@ export type ElectronAPI = {
   schedules: { list: () => Promise<ScheduledGrokTask[]>; add: (input: { name: string; prompt: string; cwd: string; model?: string; runAt: number; repeatMinutes?: number }) => Promise<ScheduledGrokTask>; remove: (id: string) => Promise<void>; toggle: (id: string, enabled: boolean) => Promise<void>; runNow: (id: string) => Promise<void>; onEvent: (handler: (event: ScheduledTaskEvent) => void) => () => void }
   providerSecrets: { list: () => Promise<ProviderSecret[]>; save: (id: string, value: string) => Promise<void>; saveSettings: (id: string, baseUrl: string, modelId: string) => Promise<void>; remove: (id: string) => Promise<void>; test: (id: string) => Promise<{ ok: boolean; models?: number; message: string }> }
   providers: { add: (label: string, baseUrl: string, modelId: string) => Promise<void>; remove: (id: string) => Promise<void> }
-  workspace: { files: (root: string) => Promise<WorkspaceFile[]>; read: (root: string, path: string) => Promise<string>; write: (root: string, path: string, content: string) => Promise<void>; command: (root: string, command: string) => Promise<{ stdout: string; stderr: string; code: number }>; gitChanges: (root: string) => Promise<{ status: string; path: string; staged?: boolean }[]>; gitDiff: (root: string, path: string) => Promise<string>; gitAction: (root: string, path: string, action: "stage" | "unstage" | "discard") => Promise<void>; gitWorktrees: (root: string) => Promise<GitWorktree[]> }
+  workspace: { files: (root: string) => Promise<WorkspaceFile[]>; read: (root: string, path: string) => Promise<string>; write: (root: string, path: string, content: string) => Promise<void>; command: (root: string, command: string) => Promise<{ stdout: string; stderr: string; code: number }>; gitChanges: (root: string) => Promise<{ status: string; path: string; staged?: boolean }[]>; gitDiff: (root: string, path: string) => Promise<string>; gitAction: (root: string, path: string, action: "stage" | "unstage" | "discard") => Promise<void>; gitWorktrees: (root: string) => Promise<GitWorktree[]>; pathForFile: (file: { path?: string }) => string }
   preview: { start: (root: string) => Promise<{ url: string }>; stop: () => Promise<void>; inspect: () => Promise<{ url: string; title: string; text: string; html: string; viewport: { width: number; height: number }; links: { text: string; href: string }[]; controls: { tag: string; type: string | null; label: string; disabled: boolean }[]; screenshotPath: string }> }
   localStudio: { status: () => Promise<LocalStudioSnapshot>; setURL: (baseUrl: string) => Promise<string> }
   hostControls: { browserStatus: () => Promise<HostControlResult>; browserOpen: (url: string) => Promise<HostControlResult>; desktopStatus: () => Promise<HostControlResult> }
@@ -128,6 +132,8 @@ const api: ElectronAPI = {
     oauthLogin: (provider) => ipcRenderer.invoke("backend:oauth-login", provider),
     oauthStatus: () => ipcRenderer.invoke("backend:oauth-status"),
     checkUpdate: () => ipcRenderer.invoke("backend:update-check"), installUpdate: (channel) => ipcRenderer.invoke("backend:update-install", channel), tool: (command, cwd) => ipcRenderer.invoke("backend:tool", command, cwd),
+    workflows: (workspace) => ipcRenderer.invoke("backend:workflows", workspace),
+    sessionPlan: (cwd, sessionId) => ipcRenderer.invoke("backend:session-plan", cwd, sessionId),
     onEvent: (handler) => {
       const listener = (_event: IpcRendererEvent, update: BackendEvent) => handler(update)
       ipcRenderer.on("backend:event", listener)
@@ -163,7 +169,10 @@ const api: ElectronAPI = {
   schedules: { list: () => ipcRenderer.invoke("schedules:list"), add: (input) => ipcRenderer.invoke("schedules:add", input), remove: (id) => ipcRenderer.invoke("schedules:remove", id), toggle: (id, enabled) => ipcRenderer.invoke("schedules:toggle", id, enabled), runNow: (id) => ipcRenderer.invoke("schedules:run-now", id), onEvent: (handler) => { const listener = (_event: IpcRendererEvent, update: ScheduledTaskEvent) => handler(update); ipcRenderer.on("schedules:event", listener); return () => ipcRenderer.removeListener("schedules:event", listener) } },
   providerSecrets: { list: () => ipcRenderer.invoke("provider-secrets:list"), save: (id, value) => ipcRenderer.invoke("provider-secrets:save", id, value), saveSettings: (id, baseUrl, modelId) => ipcRenderer.invoke("provider-secrets:save-settings", id, baseUrl, modelId), remove: (id) => ipcRenderer.invoke("provider-secrets:remove", id), test: (id) => ipcRenderer.invoke("provider-secrets:test", id) },
   providers: { add: (label, baseUrl, modelId) => ipcRenderer.invoke("providers:add", label, baseUrl, modelId), remove: (id) => ipcRenderer.invoke("providers:remove", id) },
-  workspace: { files: (root) => ipcRenderer.invoke("workspace:files", root), read: (root, path) => ipcRenderer.invoke("workspace:read", root, path), write: (root, path, content) => ipcRenderer.invoke("workspace:write", root, path, content), command: (root, command) => ipcRenderer.invoke("workspace:command", root, command), gitChanges: (root) => ipcRenderer.invoke("workspace:git-changes", root), gitDiff: (root, path) => ipcRenderer.invoke("workspace:git-diff", root, path), gitAction: (root, path, action) => ipcRenderer.invoke("workspace:git-action", root, path, action), gitWorktrees: (root) => ipcRenderer.invoke("workspace:git-worktrees", root) },
+  workspace: { files: (root) => ipcRenderer.invoke("workspace:files", root), read: (root, path) => ipcRenderer.invoke("workspace:read", root, path), write: (root, path, content) => ipcRenderer.invoke("workspace:write", root, path, content), command: (root, command) => ipcRenderer.invoke("workspace:command", root, command), gitChanges: (root) => ipcRenderer.invoke("workspace:git-changes", root), gitDiff: (root, path) => ipcRenderer.invoke("workspace:git-diff", root, path), gitAction: (root, path, action) => ipcRenderer.invoke("workspace:git-action", root, path, action), gitWorktrees: (root) => ipcRenderer.invoke("workspace:git-worktrees", root), pathForFile: (file) => {
+      try { return webUtils.getPathForFile(file as Parameters<typeof webUtils.getPathForFile>[0]) }
+      catch { return typeof file.path === "string" ? file.path : "" }
+    } },
   preview: { start: (root) => ipcRenderer.invoke("preview:start", root), stop: () => ipcRenderer.invoke("preview:stop"), inspect: () => ipcRenderer.invoke("preview:inspect") },
   localStudio: { status: () => ipcRenderer.invoke("local-studio:status"), setURL: (baseUrl) => ipcRenderer.invoke("local-studio:set-url", baseUrl) },
   hostControls: { browserStatus: () => ipcRenderer.invoke("host-controls:browser-status"), browserOpen: (url) => ipcRenderer.invoke("host-controls:browser-open", url), desktopStatus: () => ipcRenderer.invoke("host-controls:desktop-status") },
