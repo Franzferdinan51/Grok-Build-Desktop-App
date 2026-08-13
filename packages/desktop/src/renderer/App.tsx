@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, OAuthStatusSnapshot } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, OAuthStatusSnapshot, GitWorktree } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -174,6 +174,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [grokUpdateChannel, setGrokUpdateChannel] = createSignal<"stable" | "alpha">("stable")
   const [grokUpdateNotice, setGrokUpdateNotice] = createSignal("")
   const [gitChanges, setGitChanges] = createSignal<{ status: string; path: string }[]>([])
+  const [gitWorktrees, setGitWorktrees] = createSignal<GitWorktree[]>([])
+  const [worktreeOverviewOpen, setWorktreeOverviewOpen] = createSignal(false)
   const [selectedDiff, setSelectedDiff] = createSignal("")
   const [diffContent, setDiffContent] = createSignal("")
   const [previewEnabled, setPreviewEnabled] = createSignal(false)
@@ -763,6 +765,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       await window.api.store.set(STORE_KEYS.workspaceLast, current.path)
       await loadConversation(current.path)
       await loadGoal(current.path)
+      await refreshGitWorktrees(current.isGit ? current.path : "")
     }
     await refreshSessionIndex()
     await refreshTelegram()
@@ -1262,6 +1265,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setCustomName(""); setCustomURL(""); setCustomModel("")
   }
   const refreshFiles = async (root = workspace()) => { if (root) setFiles(await window.api.workspace.files(root)) }
+  const refreshGitWorktrees = async (root = workspace()) => { if (root) setGitWorktrees(await window.api.workspace.gitWorktrees(root)); else setGitWorktrees([]) }
   const selectFile = async (path: string) => { setOpenFile(path); setFileContent(await window.api.workspace.read(workspace(), path)); setFileNotice(""); await saveArtifactContext({ selectedPath: path }) }
   const applyContextRail = (next: ContextRailMode | null) => {
     setContextRailMode(next)
@@ -1377,6 +1381,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (project.path !== workspace()) { setEvents([]); await replaceQueue([]) }
     if (active() === "workspace") await refreshFiles(project.path)
     if (active() === "review" || (contextRailMode() === "review" && project.isGit)) await refreshDiff(project.path)
+    await refreshGitWorktrees(project.isGit ? project.path : "")
     if (active() === "skills") setSkills(await window.api.skills.list(project.path))
     await loadConversation(project.path)
     await loadGoal(project.path)
@@ -1504,7 +1509,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
                 <button class="coding-status-row__action" onClick={() => void navigate("review")} title="Review changed files">Review</button>
                 <button class="coding-status-row__action" onClick={() => void toggleFilesRail()} title="Browse project files">Files</button>
                 <button class={`coding-status-row__action ${advanced().worktree ? "active" : ""}`} onClick={() => void updateAdvanced("worktree", !advanced().worktree)} title="Run the next task in an isolated Git worktree">{advanced().worktree ? "Isolated" : "Worktree"}</button>
+                <button class={`coding-status-row__action ${worktreeOverviewOpen() ? "active" : ""}`} onClick={() => { const next = !worktreeOverviewOpen(); setWorktreeOverviewOpen(next); if (next) void refreshGitWorktrees() }} title="Show linked Git worktrees">Worktrees {gitWorktrees().length}</button>
               </div>
+              <Show when={worktreeOverviewOpen()}><div class="worktree-overview" aria-label="Git worktrees"><For each={gitWorktrees()}>{(worktree) => <div class={worktree.isMain ? "worktree-overview__row worktree-overview__row--main" : "worktree-overview__row"}><span>{worktree.isMain ? "●" : worktree.detached ? "◇" : "⑂"}</span><strong>{worktree.branch || "detached"}</strong><code title={worktree.path}>{worktree.path}</code><small>{worktree.isMain ? "main checkout" : "linked worktree"}</small></div>}</For><Show when={!gitWorktrees().length}><span class="worktree-overview__empty">No worktrees detected.</span></Show></div></Show>
             </Show>
             <span class="composer-hint">⌘K palette · / commands · Grok Build edits this workspace</span>
           </div>

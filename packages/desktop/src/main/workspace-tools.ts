@@ -146,6 +146,28 @@ export async function gitFileDiff(root: string, path: string): Promise<string> {
 }
 
 export type GitFileAction = "stage" | "unstage" | "discard"
+
+export type GitWorktree = { path: string; branch?: string; head?: string; detached: boolean; isMain: boolean }
+
+export function parseGitWorktrees(output: string): GitWorktree[] {
+  return output.split(/\n\s*\n/).map((block) => {
+    const path = block.match(/^worktree (.+)$/m)?.[1]?.trim() || ""
+    const head = block.match(/^HEAD ([0-9a-f]+)$/m)?.[1]
+    const branch = block.match(/^branch refs\/heads\/(.+)$/m)?.[1]?.trim()
+    return { path, branch, head, detached: !branch, isMain: false }
+  }).filter((entry) => entry.path).map((entry, index, entries) => ({ ...entry, isMain: index === 0 || entry.path === entries[0]?.path }))
+}
+
+export async function gitWorktrees(root: string): Promise<GitWorktree[]> {
+  const cwd = await realpath(root)
+  try {
+    const { stdout } = await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd, timeout: 10_000 })
+    return parseGitWorktrees(stdout)
+  } catch {
+    return []
+  }
+}
+
 export async function applyGitFileAction(root: string, path: string, action: GitFileAction): Promise<void> {
   const cwd = await realpath(root)
   await safePath(cwd, path)

@@ -4,7 +4,20 @@ import { execFile } from "node:child_process"
 import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { promisify } from "node:util"
-import { applyGitFileAction, gitChangedFiles, gitFileDiff } from "./workspace-tools.ts"
+import { applyGitFileAction, gitChangedFiles, gitFileDiff, parseGitWorktrees } from "./workspace-tools.ts"
+
+test("parseGitWorktrees reads main, linked, and detached worktrees", () => {
+  const output = [
+    "worktree /repo\nHEAD abc123\nbranch refs/heads/main",
+    "worktree /repo/.worktrees/feature\nHEAD def456\nbranch refs/heads/feature",
+    "worktree /tmp/detached\nHEAD 789abc\ndetached",
+  ].join("\n\n")
+  assert.deepEqual(parseGitWorktrees(output), [
+    { path: "/repo", head: "abc123", branch: "main", detached: false, isMain: true },
+    { path: "/repo/.worktrees/feature", head: "def456", branch: "feature", detached: false, isMain: false },
+    { path: "/tmp/detached", head: "789abc", branch: undefined, detached: true, isMain: false },
+  ])
+})
 
 const run = promisify(execFile)
 
@@ -28,4 +41,3 @@ test("Git review actions stage, unstage, discard, and read staged diffs", async 
   assert.equal(await readFile(`${root}/note.txt`, "utf8"), "before\n")
   assert.deepEqual(await gitChangedFiles(root), [])
 })
-

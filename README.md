@@ -40,6 +40,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - The Artifacts page indexes links, files, and images mentioned in persisted conversations, with search, type filters, and direct links back to the originating chat.
 - The session dock keeps up to four saved conversations visible as read-only tabs; focus one to continue working in it without introducing a second agent runtime.
 - Git projects expose a quick Worktree toggle beside branch status; it applies the existing verified Grok Build worktree flags to the next task and remains configurable in Advanced Settings.
+- The expandable Worktrees overview reports the repository's main, linked, and detached worktrees with read-only paths and branch labels.
 - The coding chat now coordinates Files, Terminal, Activity, and Preview through one session context rail, so switching tools keeps the conversation mounted and makes the active context obvious.
 - Git Review can now open from that same session context rail, keeping the active conversation visible while inspecting and staging workspace changes; the dedicated Review page remains available for full-screen work.
 - Long streamed conversations now expose a sticky **Jump to latest** control when you scroll upward, so you can inspect earlier output without losing the live tail.
