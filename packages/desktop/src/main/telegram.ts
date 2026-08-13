@@ -13,8 +13,10 @@ import {
   denyChatState,
   telegramPollingDecision,
   telegramBootstrapDecision,
+  telegramConflictRetryDelayMs,
   telegramPollAbortShouldContinue,
   telegramPublicLiveness,
+  TELEGRAM_ALLOWED_UPDATES,
   TELEGRAM_RECONNECT_SETTLE_MS,
   shouldRecordConnectAuthFailure,
   deniedMessage,
@@ -146,6 +148,7 @@ export class TelegramBridge {
   private lastUsername = ""
   private lastBotId = 0
   private lastProbeAt = 0
+  private conflictAttempts = 0
   private pollAbort?: AbortController
   private changeListeners = new Set<() => void>()
 
@@ -600,10 +603,16 @@ export class TelegramBridge {
         this.pollAbort?.abort()
         const pollAbort = new AbortController()
         this.pollAbort = pollAbort
-        const timeout = setTimeout(() => pollAbort.abort(), 30_000)
+        const timeout = setTimeout(() => pollAbort.abort(), 35_000)
         let response: TelegramResponse<{ ok: boolean; result?: { update_id: number; message?: { message_id?: number; text?: string; entities?: { type: string; offset: number; length: number }[]; reply_to_message?: { from?: { id?: number; is_bot?: boolean } }; chat: { id: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } }; callback_query?: { id: string; data?: string; message?: { message_id?: number; chat: { id: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } } } }[]; description?: string }>
         try {
-          response = await telegramRequest(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${this.offset}`, { signal: pollAbort.signal })
+          // Hermes uses POST getUpdates so allowed_updates and offset are reliable.
+          response = await telegramRequest(`https://api.telegram.org/bot${token}/getUpdates`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ timeout: 25, offset: this.offset, allowed_updates: [...TELEGRAM_ALLOWED_UPDATES] }),
+            signal: pollAbort.signal,
+          })
         } finally {
           clearTimeout(timeout)
         }
@@ -624,6 +633,21 @@ export class TelegramBridge {
           this.notifyChange()
           return
         }
+        if (decision === "conflict") {
+          this.conflictAttempts += 1
+          const waitMs = telegramConflictRetryDelayMs(this.conflictAttempts)
+          this.lastError = classified?.message || payload.description || "Telegram getUpdates conflict"
+          writeLog("error", `Telegram polling conflict ${this.conflictAttempts} — waiting ${waitMs / 1000}s then dropping the other getUpdates session (Hermes/OpenClaw/desktop)`)
+          this.notifyChange()
+          await new Promise((resolve) => setTimeout(resolve, waitMs))
+          if (!this.polling || generation !== this.pollGeneration) return
+          try {
+            await telegramRequest(`https://api.telegram.org/bot${token}/deleteWebhook`, {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drop_pending_updates: true }),
+            })
+          } catch { /* best-effort session steal, same as Hermes start_polling(drop_pending_updates=True) */ }
+          continue
+        }
         if (decision === "backoff") {
           this.lastError = classified?.message || payload.description || "Telegram rate-limited"
           this.retryDelayMs = parseTelegramRetryAfterMs(payload, Math.min(this.retryDelayMs * 2, TelegramBridge.MAX_RETRY_DELAY_MS))
@@ -637,6 +661,7 @@ export class TelegramBridge {
           throw new Error(this.lastError)
         }
         this.retryDelayMs = 1_000
+        this.conflictAttempts = 0
         this.consecutiveAuthFailures = 0
         this.coolOffUntil = 0
         this.lastPollAt = Date.now()

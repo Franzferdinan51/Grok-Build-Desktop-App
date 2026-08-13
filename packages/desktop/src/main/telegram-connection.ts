@@ -88,7 +88,7 @@ export function parseTelegramRetryAfterMs(payload: unknown, fallbackMs: number):
 }
 
 export type TelegramPollErrorKind = "auth" | "rate" | "conflict" | "other"
-export type TelegramPollingDecision = "pause" | "backoff" | "retry" | "ok"
+export type TelegramPollingDecision = "pause" | "backoff" | "conflict" | "retry" | "ok"
 
 /** Control commands that must stay usable while a Grok Build turn is running. */
 export const TELEGRAM_CONTROL_COMMANDS = new Set(["cancel", "stop", "status", "health", "queue", "steer", "interrupt"])
@@ -102,15 +102,24 @@ export function isTelegramControlCommand(text: string): boolean {
 export const TELEGRAM_RECONNECT_SETTLE_MS = 800
 
 /**
- * Auth and getUpdates conflicts must stop the poller. Rate limits back off.
- * Other !ok payloads retry with the existing exponential delay.
+ * Auth pauses. A 409 means Hermes/OpenClaw/another poller still holds the
+ * token — wait and retry like Hermes, do not die. Rate limits back off.
  */
 export function telegramPollingDecision(kind: TelegramPollErrorKind | undefined, ok: boolean): TelegramPollingDecision {
-  if (kind === "auth" || kind === "conflict") return "pause"
+  if (kind === "auth") return "pause"
+  if (kind === "conflict") return "conflict"
   if (kind === "rate") return "backoff"
   if (!ok) return "retry"
   return "ok"
 }
+
+/** Hermes waits 15s, 25s, 35s… for the other getUpdates session to expire. */
+export function telegramConflictRetryDelayMs(attempt: number): number {
+  const n = Math.max(1, Math.min(8, Math.floor(attempt)))
+  return Math.min(60_000, (10 + n * 10) * 1_000)
+}
+
+export const TELEGRAM_ALLOWED_UPDATES = ["message", "edited_message", "callback_query"] as const
 
 /**
  * Bootstrap (deleteWebhook) pauses only on a revoked token.
@@ -150,7 +159,7 @@ export function classifyTelegramHttpError(status: number, description?: string):
   if (status === 409 || /terminated by other getUpdates|Conflict/i.test(desc)) {
     return {
       kind: "conflict",
-      message: "Another process is already polling this bot. Stop the other desktop app, OpenClaw, or webhook, then tap Reconnect.",
+      message: "Another process is already polling this bot (Hermes, OpenClaw, or a second desktop). Waiting for that getUpdates session to expire, then retrying.",
     }
   }
   if (status === 401 || status === 403) {

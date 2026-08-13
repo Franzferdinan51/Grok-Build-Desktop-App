@@ -18,6 +18,7 @@ import {
   shouldRecordConnectAuthFailure,
   stillWaitingMessage,
   telegramPollingDecision,
+  telegramConflictRetryDelayMs,
   telegramBootstrapDecision,
   telegramPollAbortShouldContinue,
   telegramPublicLiveness,
@@ -93,13 +94,19 @@ test("parseTelegramRetryAfterMs prefers Telegram parameters", () => {
   assert.equal(parseTelegramRetryAfterMs({}, 2500), 2500)
 })
 
-test("telegramPollingDecision pauses auth and getUpdates conflicts instead of hammering", () => {
+test("telegramPollingDecision pauses auth and recovers from getUpdates conflicts", () => {
   assert.equal(telegramPollingDecision("auth", false), "pause")
-  assert.equal(telegramPollingDecision("conflict", false), "pause")
+  assert.equal(telegramPollingDecision("conflict", false), "conflict")
   assert.equal(telegramPollingDecision("rate", false), "backoff")
   assert.equal(telegramPollingDecision("other", false), "retry")
   assert.equal(telegramPollingDecision(undefined, false), "retry")
   assert.equal(telegramPollingDecision(undefined, true), "ok")
+})
+
+test("Hermes-style conflict backoff grows then caps", () => {
+  assert.equal(telegramConflictRetryDelayMs(1), 20_000)
+  assert.equal(telegramConflictRetryDelayMs(2), 30_000)
+  assert.equal(telegramConflictRetryDelayMs(8), 60_000)
 })
 
 test("bootstrap uses the same HTTP classification as getUpdates", () => {

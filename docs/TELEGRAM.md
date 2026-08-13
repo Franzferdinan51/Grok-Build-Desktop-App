@@ -11,7 +11,7 @@ Grok Build Desktop can expose a dedicated BotFather bot as a persistent remote c
 5. The Agent sidebar opens the Telegram connection surface first. Pairing requests badge the Agent item and refresh without hammering `getMe`.
 5. The renderer receives connection metadata, polling diagnostics, and chat labels, but never the bot token after submit.
 
-Do not reuse a bot token that another OpenClaw, Hermes, or Telegram polling process is actively consuming.
+Do not reuse a bot token that another OpenClaw, Hermes, or Telegram polling process is actively consuming. If another process is already polling, the desktop waits (Hermes-style 15–60s backoff) and then calls `deleteWebhook` with `drop_pending_updates` so it can take over `getUpdates` instead of going silent.
 
 ## Agent behavior
 
