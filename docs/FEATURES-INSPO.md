@@ -52,6 +52,7 @@ This table distinguishes verified upstream evidence from inspiration. It prevent
 - **Session continuity:** history entries can now be forked into a fresh Grok session while preserving the visible transcript as context.
 - **Message branching:** user turns expose **Branch**, which preserves the turns before that instruction, starts a new Grok session, and pre-fills the selected instruction for editing before it runs.
 - **Structured activity:** the Task Inspector now groups bounded streamed output into expandable response, reasoning, and error rows, keeping the existing Grok phase indicator as the source of lifecycle truth.
+- **Renderer recovery:** a reloaded workbench can request the main process's bounded active-run snapshot, restore the associated conversation and session ID, and continue receiving future events without starting a second Grok process.
 
 ## Sources checked but not selected as a base
 

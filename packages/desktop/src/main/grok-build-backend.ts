@@ -55,6 +55,17 @@ export type GrokBuildEvent =
   | { type: "error"; message: string }
   | { type: string; [key: string]: unknown }
 
+export type GrokBuildActiveRunSnapshot = {
+  runId?: string
+  threadId?: string
+  cwd: string
+  prompt: string
+  startedAt: number
+  sessionId?: string
+  phase?: "starting" | "advising" | "executing" | "recovering" | "completed" | "failed" | "cancelled"
+  events: GrokBuildEvent[]
+}
+
 export type RunTaskInput = {
   prompt: string
   cwd: string
@@ -107,12 +118,16 @@ export type RunTaskInput = {
 
 export class GrokBuildBackend {
   private current: ChildProcess | null = null
+  private activeRun: GrokBuildActiveRunSnapshot | null = null
+  private pendingRunId: string | undefined
   private cancelRequested = false
   private moaAbort: AbortController | null = null
   private readonly codexBridge = new CodexOAuthBridge()
   private readonly longTermMemory = new DuckbotMemory()
 
   private static readonly MAX_VISIBLE_ASSISTANT_CHARS = 2 * 1024 * 1024
+  private static readonly MAX_ACTIVE_RUN_EVENTS = 120
+  private static readonly MAX_ACTIVE_RUN_EVENT_CHARS = 32_000
   private static readonly MOA_MAX_PARALLEL_REFERENCES = 2
   // Short in-memory TTL for `models()`. The catalog rarely changes within a
   // session and is persisted to disk on every successful fetch (see the
@@ -136,7 +151,36 @@ export class GrokBuildBackend {
     "trace", "update", "version", "worktree", "wrap",
   ])
 
-  isRunning(): boolean { return this.current !== null || this.moaAbort !== null }
+  isRunning(): boolean { return this.current !== null || this.moaAbort !== null || this.activeRun !== null }
+
+  setActiveRunId(runId: string): void {
+    if (this.activeRun) return
+    this.pendingRunId = runId
+  }
+
+  activeRunSnapshot(): GrokBuildActiveRunSnapshot | null {
+    if (!this.activeRun) return null
+    return { ...this.activeRun, events: this.activeRun.events.map((event) => ({ ...event })) }
+  }
+
+  clearActiveRun(runId?: string): void {
+    if (runId && this.activeRun?.runId && this.activeRun.runId !== runId) return
+    this.activeRun = null
+    this.pendingRunId = undefined
+  }
+
+  private recordActiveEvent(event: GrokBuildEvent): void {
+    if (!this.activeRun) return
+    const raw = event as Record<string, unknown>
+    if (event.type === "phase" && typeof raw.phase === "string") this.activeRun.phase = raw.phase as GrokBuildActiveRunSnapshot["phase"]
+    if (typeof raw.sessionId === "string") this.activeRun.sessionId = raw.sessionId
+    const copy = { type: event.type } as GrokBuildEvent & { data?: unknown; message?: unknown; phase?: unknown; sessionId?: unknown }
+    if (typeof raw.data === "string") copy.data = raw.data.slice(-GrokBuildBackend.MAX_ACTIVE_RUN_EVENT_CHARS)
+    if (typeof raw.message === "string") copy.message = raw.message.slice(-GrokBuildBackend.MAX_ACTIVE_RUN_EVENT_CHARS)
+    if (typeof raw.phase === "string") copy.phase = raw.phase
+    if (typeof raw.sessionId === "string") copy.sessionId = raw.sessionId
+    this.activeRun.events = [...this.activeRun.events, copy].slice(-GrokBuildBackend.MAX_ACTIVE_RUN_EVENTS)
+  }
 
   /**
    * Grok Build updates independently from this desktop shell. Discover its
@@ -394,6 +438,12 @@ export class GrokBuildBackend {
     if (!input.prompt.trim()) throw new Error("A task prompt is required")
     if (this.isRunning()) throw new Error("A Grok Build task is already running")
 
+    // Reserve the singleton before the first asynchronous CLI probe. This is
+    // also the source for renderer reattachment, so a second caller cannot
+    // pass admission while the first run is still discovering flags/models.
+    this.activeRun = { runId: this.pendingRunId, threadId: input.threadId, cwd: input.cwd, prompt: input.prompt.slice(0, GrokBuildBackend.MAX_ACTIVE_RUN_EVENT_CHARS), startedAt: Date.now(), events: [] }
+
+    try {
     const status = await this.status()
     if (!status.available) throw new Error(status.error)
     if (input.model?.startsWith("codex-")) await this.syncCodexOAuthModels()
@@ -419,6 +469,7 @@ export class GrokBuildBackend {
     let visibleAssistant = ""
     const deliver = onEvent
     onEvent = (event) => {
+      this.recordActiveEvent(event)
       if (event.type === "text" && typeof event.data === "string") {
         visibleAssistant = (visibleAssistant + event.data).slice(-GrokBuildBackend.MAX_VISIBLE_ASSISTANT_CHARS)
       }
@@ -706,13 +757,20 @@ ${referenceSection}
       onEvent({ type: "phase", phase: "failed", data: message })
       throw error
     }
+    } finally {
+      this.activeRun = null
+      this.pendingRunId = undefined
+    }
   }
 
   cancel(): void {
     if (this.moaAbort) this.cancelRequested = true
     this.moaAbort?.abort()
     this.moaAbort = null
-    if (!this.current) return
+    if (!this.current) {
+      if (this.activeRun) this.cancelRequested = true
+      return
+    }
     const child = this.current
     this.cancelRequested = true
     this.terminateProcessTree(child, "SIGTERM")

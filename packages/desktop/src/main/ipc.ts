@@ -102,6 +102,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("memory:recall", (_event, query: string) => memory.context(query))
   ipcMain.handle("backend:run", async (event, input: RunTaskInput) => {
     const run = startGrokRun({ ...input, advisorCount: input.moa?.referenceModels.filter(Boolean).slice(0, 8).length })
+    deps.backend().setActiveRunId(run.id)
     let grokSessionId: string | undefined
     let cancelled = false
     let usage: unknown
@@ -142,10 +143,12 @@ export function registerIpcHandlers(deps: Deps): void {
       finishGrokRun(run.id, { status: "failed", grokSessionId, error: message, latencyMs: Date.now() - run.startedAt, advisorFailures, ...usageMetrics(usage), errorClass: classifyRunError(message) })
       throw error
     } finally {
+      deps.backend().clearActiveRun(run.id)
       deps.onBackendIdle?.()
     }
     return { ok: true, runId: run.id, grokSessionId }
   })
+  ipcMain.handle("backend:active-run", () => deps.backend().activeRunSnapshot())
   ipcMain.handle("backend:auto-learn", async (_event, input: Pick<RunTaskInput, "prompt" | "cwd" | "model">) => {
     // A separate quiet Grok process keeps the foreground chat transcript clean.
     // This endpoint is only called after a completed turn and only when the

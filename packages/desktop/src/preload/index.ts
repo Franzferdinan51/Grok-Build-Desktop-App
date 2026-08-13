@@ -15,6 +15,7 @@ export type OAuthProviderStatus = {
 }
 export type OAuthStatusSnapshot = { providers: OAuthProviderStatus[] }
 export type BackendEvent = { type: string; data?: string; message?: string; phase?: "starting" | "advising" | "executing" | "recovering" | "completed" | "failed" | "cancelled"; sessionId?: string; usage?: unknown }
+export type ActiveRunSnapshot = { runId?: string; threadId?: string; cwd: string; prompt: string; startedAt: number; sessionId?: string; phase?: BackendEvent["phase"]; events: BackendEvent[] }
 export type TelegramStatus = {
   connected: boolean
   hasToken?: boolean
@@ -64,6 +65,7 @@ export type ElectronAPI = {
     status: () => Promise<BackendStatus>
     models: () => Promise<GrokBuildModelCatalog>
     run: (input: { prompt: string; cwd: string; threadId?: string; model?: string; thinking?: boolean; autoApprove?: boolean; resume?: string; resumeFallbackPrompt?: string; bestOfN?: number; selfVerify?: boolean; maxTurns?: number; disableWebSearch?: boolean; subagents?: boolean; agent?: string; agents?: string; permissionMode?: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow?: string[]; deny?: string[]; tools?: string; disallowedTools?: string; memory?: "default" | "experimental" | "disabled"; sandbox?: string; rules?: string; systemPrompt?: string; verbatim?: boolean; forkSession?: boolean; restoreCode?: boolean; worktree?: boolean; worktreeName?: string; worktreeRef?: string; jsonSchema?: string; promptFile?: string; promptJson?: string; sessionId?: string; fallbackModel?: string; noPlan?: boolean; longTermMemory?: boolean; hostControls?: boolean; moa?: { referenceModels: string[]; aggregatorModel?: string; referenceReasoningEffort?: "low" | "medium" | "high"; aggregatorReasoningEffort?: "low" | "medium" | "high"; referenceTokenBudget?: number; context?: string } }) => Promise<{ ok: boolean; runId?: string; grokSessionId?: string }>
+    activeRun: () => Promise<ActiveRunSnapshot | null>
     autoLearn: (input: { prompt: string; cwd: string; model?: string }) => Promise<{ ok: boolean }>
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
@@ -119,6 +121,7 @@ const api: ElectronAPI = {
     status: () => ipcRenderer.invoke("backend:status"),
     models: () => ipcRenderer.invoke("backend:models"),
     run: (input) => ipcRenderer.invoke("backend:run", input),
+    activeRun: () => ipcRenderer.invoke("backend:active-run"),
     autoLearn: (input) => ipcRenderer.invoke("backend:auto-learn", input),
     cancel: () => ipcRenderer.invoke("backend:cancel"),
     setPath: (path) => ipcRenderer.invoke("backend:set-path", path),

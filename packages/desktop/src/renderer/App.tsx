@@ -41,6 +41,7 @@ import { preservedReviewPath } from "./review-sync"
 import { addDockedSessionId, parseDockedSessionIds, removeDockedSessionId } from "./session-dock"
 import { branchConversation } from "./conversation-branch"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
+import { activeRunLogs } from "./active-run"
 import "./styles.css"
 import "./preview-layout.css"
 import "./project-files.css"
@@ -891,6 +892,18 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       if (event.type === "error" && event.message) queueBackendEvent({ kind: "error", content: event.message })
       if (event.type === "cancelled") queueBackendEvent({ kind: "text", content: event.data || "Task cancelled." })
     })
+    const activeRun = await window.api.backend.activeRun()
+    if (activeRun) {
+      const associatedThread = activeRun.threadId && activeRun.threadId !== activeThreadId()
+        ? await window.api.conversations.get(activeRun.threadId) as ChatThread | undefined
+        : undefined
+      if (associatedThread) await openConversation(associatedThread)
+      flushBackendEvents()
+      setEvents((current) => mergeLogs(activeRunLogs(activeRun.events), current))
+      if (activeRun.sessionId) await persistSessionId(activeRun.sessionId)
+      setRunning(true)
+      setSlashNotice("Reconnected to the active Grok Build task. New instructions will be queued.")
+    }
     const unsubscribeQuickEntry = window.api.onQuickEntrySubmit((payload) => {
       if (payload.target === "new") void newConversation().then(() => void run(payload.text))
       else void run(payload.text)
