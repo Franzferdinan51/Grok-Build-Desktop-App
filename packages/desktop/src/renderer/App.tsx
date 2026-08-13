@@ -1437,7 +1437,10 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         await saveConversation(nextMessages)
         const checkpoint = checkpointFor(nextMessages)
         const thread = chatThreads().find((entry) => entry.id === activeThreadId())
-        if (checkpoint && thread && nextMessages.length % 10 < 2) await updateThreadMeta(thread, { summary: checkpoint })
+        // Keep the bounded checkpoint current after the conversation becomes
+        // long. A fresh summary lets the next turn carry less visible history
+        // without making the user manually run /compress.
+        if (checkpoint && thread) await updateThreadMeta(thread, { summary: checkpoint })
       }
       setEvents([])
       if (!ephemeral && contextRailMode() === "review" && selectedProject()?.isGit && workspace()) await refreshDiff(workspace(), true)

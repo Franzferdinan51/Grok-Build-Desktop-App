@@ -42,6 +42,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - Git Review stays synchronized after a task settles, when the selected project changes, and when the app regains focus; the selected diff is retained when its file still exists.
 - Background task completion and failure also surface as native desktop notifications when the workbench is unfocused; clicking one restores the existing app window.
 - The Task Inspector includes a durable, per-workspace checklist for breaking work into explicit user-controlled steps alongside the active Grok Build goal.
+- The Task Inspector includes a compact performance readout for recent reported token totals and latency; long chats refresh bounded checkpoints automatically to reduce repeated context.
 - The Task Inspector also shows verified backend phases for startup, advisor consultation, execution, recovery, completion, cancellation, and failure; phase labels come from the Grok Build bridge rather than UI guesses.
 - Scheduled Grok Build work now reports live running phases and final failures back to the Scheduled page, with background completion/failure notifications and the last error retained for recovery.
 - The Artifacts page indexes links, files, and images mentioned in persisted conversations, with search, type filters, and direct links back to the originating chat.
