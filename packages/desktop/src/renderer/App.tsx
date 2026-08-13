@@ -45,6 +45,7 @@ import "./notifications.css"
 import "./chat-terminal.css"
 import "./branding.css"
 import "./context-rail.css"
+import "./session-review.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
 import * as eventBuffer from "./event-buffer"
 import "./artifacts.css"
@@ -53,7 +54,7 @@ type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; cr
 type ChatThread = StoredChatThread & { messages: ChatMessage[] }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type ArtifactContext = { selectedPath?: string; previewUrl?: string; updatedAt: number }
-type ContextRailMode = Exclude<SessionRailMode, "review">
+type ContextRailMode = SessionRailMode
 const MAX_LIVE_LOG_CHARS = eventBuffer.MAX_LIVE_LOG_CHARS
 const MAX_LIVE_LOG_ENTRIES = eventBuffer.MAX_LIVE_LOG_ENTRIES
 void MAX_LIVE_LOG_CHARS
@@ -1225,6 +1226,11 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus(error instanceof Error ? error.message : String(error)) }
     }
   }
+  const toggleReviewRail = async () => {
+    const next = nextSessionRail(contextRailMode(), "review", Boolean(selectedProject()?.isGit))
+    applyContextRail(next)
+    if (next === "review") await refreshDiff()
+  }
   const previewFile = async (path: string) => {
     try {
       if (!workspace()) return
@@ -1375,6 +1381,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       </div>
     </aside>
 
+    <Show when={contextRailMode() === "review"}><aside class="session-review-rail" aria-label="Session Git review"><ReviewPanel workspace={workspace()} projectName={selectedProject()?.name || "Scratch"} branch={selectedProject()?.branch} isGit={selectedProject()?.isGit} changes={gitChanges()} selectedPath={selectedDiff()} diff={diffContent()} onRefresh={() => void refreshDiff()} onSelect={async (path) => { setSelectedDiff(path); setDiffContent(await window.api.workspace.gitDiff(workspace(), path)) }} onAction={(path, action) => void applyReviewAction(path, action)} onAskReview={askReviewInChat} onOpenProject={chooseWorkspace} /></aside></Show>
     <main class={`main-content ${active() === "new-task" ? "main-content--chat" : ""} ${active() === "browser-agent" ? "main-content--browser-agent" : ""} ${["workspace", "terminal", "review"].includes(active()) ? "main-content--ide" : ""} ${["artifacts", "skills", "scheduled", "runtime", "runs", "settings", "telegram"].includes(active()) ? "main-content--page" : ""} ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
       <Show when={active() === "artifacts"} fallback={<Show when={active() === "review"} fallback={
       <Show when={active() === "workspace"} fallback={
@@ -1395,7 +1402,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             </Show>
           </div>
         </section>
-        <Show when={contextRailMode()}>{(mode) => <nav class="context-rail-tabs" aria-label="Session context rail"><span>Session tools</span><button class={mode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()}>Files</button><button class={mode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail}>Terminal</button><button class={mode() === "activity" ? "active" : ""} onClick={toggleActivityRail}>Activity</button><Show when={previewEnabled()}><button class={mode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>Preview</button></Show></nav>}</Show>
+        <Show when={workspace() || contextRailMode()}><nav class="context-rail-tabs" aria-label="Session context rail"><span>Session tools</span><button class={contextRailMode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()}>Files</button><button class={contextRailMode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail}>Terminal</button><button class={contextRailMode() === "activity" ? "active" : ""} onClick={toggleActivityRail}>Activity</button><Show when={previewEnabled()}><button class={contextRailMode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>Preview</button></Show><Show when={selectedProject()?.isGit}><button class={contextRailMode() === "review" ? "active" : ""} onClick={() => void toggleReviewRail()}>Review</button></Show></nav></Show>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For></section></Show>
         <Show when={splitOpen() && splitThread()}>{(thread) => <ConversationSplitPane thread={thread()} onClose={() => void closeSplitConversation()} onFocus={() => void focusSplitConversation()} />}</Show>
