@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show, onCleanup } from "solid-js"
 import type { WebviewTag } from "electron"
 import type { TaskLog } from "../chat-utils"
 import { parseBrowserDirective, type BrowserAction } from "../browser-agent-protocol"
+import { UI_ICONS } from "../assets/ui-icons"
 
 type Props = {
   model?: string
@@ -454,7 +455,7 @@ export function BrowserAgentTab(props: Props) {
   return <section class="browser-workbench" style={{ "--browser-agent-width": `${agentWidth()}px` }}>
     <aside class="grok-browser-chat">
       <header class="grok-browser-chat__header">
-        <div class="grok-browser-avatar">✦</div>
+        <div class="grok-browser-avatar"><img src={UI_ICONS["browser-agent"]} alt="" /></div>
         <div><strong>Grok Browser Agent</strong><span>Browser Use loop · {lastPage()?.tools.length || 0} WebMCP/page tools</span></div>
         <select class="grok-browser-model" aria-label="Browser Agent model" title="Model used for Browser Agent steps" value={agentModel()} disabled={working()} onChange={(event) => {
           const next = event.currentTarget.value
@@ -502,7 +503,7 @@ export function BrowserAgentTab(props: Props) {
       </div>
       <div class="embedded-browser__viewport">
         <webview ref={(element) => bindWebview(element as WebviewTag)} src="about:blank" partition="persist:grok-browser-agent" allowpopups useragent={BROWSER_USER_AGENT} />
-        <Show when={pageUrl() === "about:blank"}><div class="embedded-browser__welcome"><span>✦</span><h2>Grok Browser</h2><p>Enter a URL above. The live page opens here, and Grok controls this exact window from the chat on the left.</p></div></Show>
+        <Show when={pageUrl() === "about:blank"}><div class="embedded-browser__welcome"><img src={UI_ICONS["browser-agent"]} alt="" /><h2>Grok Browser</h2><p>Enter a URL above. The live page opens here, and Grok controls this exact window from the chat on the left.</p></div></Show>
       </div>
       <footer><span>{pageLoading() ? "Loading…" : pageUrl() === "about:blank" ? "Ready—ask Grok to open a site" : pageUrl()}</span><span>Browser Use agent · DOM + screenshot observation · WebMCP tools + universal fallback</span></footer>
     </main>
