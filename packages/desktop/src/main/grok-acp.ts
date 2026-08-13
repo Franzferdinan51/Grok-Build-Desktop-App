@@ -31,6 +31,7 @@ export function runGrokAcp(
 ): Promise<GrokAcpResult> {
   const mode = options.permissionMode || "default"
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) { reject(new Error("Grok ACP task aborted")); return }
     let child: ChildProcess
     try {
       const args = ["--permission-mode", mode]
@@ -81,10 +82,7 @@ export function runGrokAcp(
       send({ jsonrpc: "2.0", id, method, params })
     })
     const onAbort = () => fail(new Error("Grok ACP task aborted"))
-    if (options.signal) {
-      if (options.signal.aborted) { onAbort(); return }
-      options.signal.addEventListener("abort", onAbort, { once: true })
-    }
+    options.signal?.addEventListener("abort", onAbort, { once: true })
 
     child.stdout?.on("data", (chunk: Buffer) => {
       inputBuffer += chunk.toString()
