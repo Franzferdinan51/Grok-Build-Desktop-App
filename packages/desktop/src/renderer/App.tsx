@@ -35,6 +35,7 @@ import { TelegramConnectionPanel } from "./views/TelegramConnectionPanel"
 import { SettingsPanel } from "./views/SettingsPanel"
 import { ArtifactsPanel } from "./views/ArtifactsPanel"
 import { collectArtifacts, type ArtifactRecord } from "./artifact-utils"
+import { nextSessionRail, type SessionRailMode } from "./session-context-rail"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
@@ -43,6 +44,7 @@ import "./task-inspector.css"
 import "./notifications.css"
 import "./chat-terminal.css"
 import "./branding.css"
+import "./context-rail.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
 import * as eventBuffer from "./event-buffer"
 import "./artifacts.css"
@@ -51,6 +53,7 @@ type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; cr
 type ChatThread = StoredChatThread & { messages: ChatMessage[] }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type ArtifactContext = { selectedPath?: string; previewUrl?: string; updatedAt: number }
+type ContextRailMode = Exclude<SessionRailMode, "review">
 const MAX_LIVE_LOG_CHARS = eventBuffer.MAX_LIVE_LOG_CHARS
 const MAX_LIVE_LOG_ENTRIES = eventBuffer.MAX_LIVE_LOG_ENTRIES
 void MAX_LIVE_LOG_CHARS
@@ -179,6 +182,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [filesRailCollapsed, setFilesRailCollapsed] = createSignal(false)
   const [inspectorOpen, setInspectorOpen] = createSignal(false)
   const [terminalRailOpen, setTerminalRailOpen] = createSignal(false)
+  const [contextRailMode, setContextRailMode] = createSignal<ContextRailMode | null>(null)
   const [notifications, setNotifications] = createSignal<DesktopNotification[]>([])
   const [agentAppControls, setAgentAppControls] = createSignal(false)
   const [subagentsEnabled, setSubagentsEnabled] = createSignal(FRIENDLY_DEFAULTS.subagents)
@@ -1192,25 +1196,41 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   }
   const refreshFiles = async (root = workspace()) => { if (root) setFiles(await window.api.workspace.files(root)) }
   const selectFile = async (path: string) => { setOpenFile(path); setFileContent(await window.api.workspace.read(workspace(), path)); setFileNotice(""); await saveArtifactContext({ selectedPath: path }) }
+  const applyContextRail = (next: ContextRailMode | null) => {
+    setContextRailMode(next)
+    setFilesOpen(next === "files")
+    setPreviewOpen(next === "preview")
+    setInspectorOpen(next === "activity")
+    setTerminalRailOpen(next === "terminal")
+  }
   const toggleFilesRail = async () => {
-    const next = !filesOpen()
-    setFilesOpen(next)
-    if (next) {
-      setPreviewOpen(false); setInspectorOpen(false); setTerminalRailOpen(false)
+    const next = nextSessionRail(contextRailMode(), "files") as ContextRailMode | null
+    applyContextRail(next)
+    if (next === "files") {
       await refreshFiles()
     }
   }
   const toggleTerminalRail = () => {
-    const next = !terminalRailOpen()
-    setTerminalRailOpen(next)
-    if (next) { setFilesOpen(false); setInspectorOpen(false); setPreviewOpen(false) }
+    const next = nextSessionRail(contextRailMode(), "terminal") as ContextRailMode | null
+    applyContextRail(next)
+  }
+  const toggleActivityRail = () => {
+    const next = nextSessionRail(contextRailMode(), "activity") as ContextRailMode | null
+    applyContextRail(next)
+  }
+  const togglePreviewRail = async () => {
+    const next = nextSessionRail(contextRailMode(), "preview", previewEnabled()) as ContextRailMode | null
+    applyContextRail(next)
+    if (next === "preview" && workspace() && !previewURL()) {
+      try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview") } catch (error) { setPreviewStatus(error instanceof Error ? error.message : String(error)) }
+    }
   }
   const previewFile = async (path: string) => {
     try {
       if (!workspace()) return
       const result = await window.api.preview.start(workspace())
       const target = `${result.url}/${path.split(/[\\/]+/).filter(Boolean).map(encodeURIComponent).join("/")}`
-      setPreviewDraft(target); setPreviewURL(target); setPreviewEnabled(true); setPreviewOpen(true); setFilesOpen(false); setTerminalRailOpen(false); setInspectorOpen(false); setPreviewStatus("File preview"); await saveArtifactContext({ selectedPath: path, previewUrl: target })
+      setPreviewDraft(target); setPreviewURL(target); setPreviewEnabled(true); applyContextRail("preview"); setPreviewStatus("File preview"); await saveArtifactContext({ selectedPath: path, previewUrl: target })
     } catch (error) {
       announce("error", "Preview unavailable", error instanceof Error ? error.message : String(error))
     }
@@ -1365,8 +1385,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       <Show when={active() === "telegram"} fallback={
         <Show when={active() === "runtime"} fallback={
         <Show when={active() === "browser-agent"} fallback={<Show when={active() === "runs"} fallback={<>
-        <div class={`chat-workbench ${splitOpen() ? "chat-workbench--split" : ""} ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""} ${filesOpen() ? "chat-workbench--files" : ""} ${filesRailCollapsed() ? "chat-workbench--files-collapsed" : ""} ${inspectorOpen() ? "chat-workbench--inspector" : ""} ${terminalRailOpen() ? "chat-workbench--terminal" : ""}`}><div class="chat-column"><section class="chat-thread">
-          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={workspace()}><button class={filesOpen() ? "active" : ""} onClick={() => void toggleFilesRail()} title="Browse project files">▤ Files</button></Show><button class={terminalRailOpen() ? "active" : ""} onClick={toggleTerminalRail} title="Open workspace terminal">{">_ Terminal"}</button><button class={inspectorOpen() ? "active" : ""} onClick={() => { setInspectorOpen((value) => !value); setFilesOpen(false); setTerminalRailOpen(false); setPreviewOpen(false) }} title="Inspect current task">◌ Activity</button><Show when={previewEnabled()}><button class={previewOpen() ? "active" : ""} onClick={async () => { if (!previewOpen() && workspace()) { try { const result = await window.api.preview.start(workspace()); setPreviewURL(result.url); setPreviewDraft(result.url); setPreviewStatus("Built-in preview"); await saveArtifactContext({ previewUrl: result.url }) } catch (error) { setPreviewStatus((error as Error).message) } } setFilesOpen(false); setTerminalRailOpen(false); setPreviewOpen(!previewOpen()) }}>◫ Preview</button></Show><button class={splitOpen() ? "active" : ""} onClick={() => void (splitOpen() ? closeSplitConversation() : openLatestSplitConversation())} title="Keep another conversation visible">▥ Split</button><button class={historyOpen() ? "active" : ""} onClick={async () => { const next = !historyOpen(); setHistoryOpen(next); if (next) await refreshHistory() }}>History {chatThreads().filter((thread) => thread.messages.length).length || ""}</button><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
+        <div class={`chat-workbench ${contextRailMode() ? "chat-workbench--session-rail" : ""} ${splitOpen() ? "chat-workbench--split" : ""} ${previewEnabled() && previewOpen() ? "chat-workbench--preview" : ""} ${previewCollapsed() ? "chat-workbench--preview-collapsed" : ""} ${filesOpen() ? "chat-workbench--files" : ""} ${filesRailCollapsed() ? "chat-workbench--files-collapsed" : ""} ${inspectorOpen() ? "chat-workbench--inspector" : ""} ${terminalRailOpen() ? "chat-workbench--terminal" : ""}`}><div class="chat-column"><section class="chat-thread">
+          <header class="chat-header"><div><strong>{selectedProject()?.name || "Scratch"}</strong><span>{selectedProject()?.isGit ? `${selectedProject()?.branch} · ${selectedProject()?.changedFiles} changed` : "Grok Build workspace"}</span></div><div class="chat-header__actions"><Show when={workspace()}><button class={contextRailMode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()} title="Browse project files">▤ Files</button></Show><button class={contextRailMode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail} title="Open workspace terminal">{">_ Terminal"}</button><button class={contextRailMode() === "activity" ? "active" : ""} onClick={toggleActivityRail} title="Inspect current task">◌ Activity</button><Show when={previewEnabled()}><button class={contextRailMode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>◫ Preview</button></Show><button class={splitOpen() ? "active" : ""} onClick={() => void (splitOpen() ? closeSplitConversation() : openLatestSplitConversation())} title="Keep another conversation visible">▥ Split</button><button class={historyOpen() ? "active" : ""} onClick={async () => { const next = !historyOpen(); setHistoryOpen(next); if (next) await refreshHistory() }}>History {chatThreads().filter((thread) => thread.messages.length).length || ""}</button><button onClick={newConversation}>New chat</button><button onClick={useScratchWorkspace}>Agent scratch</button><button onClick={chooseWorkspace}>Open project</button></div></header>
           <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Chat history</strong><span>{historyAllWorkspaces() ? "All workspaces" : selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div class="chat-history__tools"><input value={historySearch()} onInput={async (event) => { setHistorySearch(event.currentTarget.value); await refreshHistory() }} placeholder="Search conversations…"/><label><input type="checkbox" checked={historyAllWorkspaces()} onChange={async (event) => { setHistoryAllWorkspaces(event.currentTarget.checked); await refreshHistory() }}/> All workspaces</label></div><div><For each={historyResults().filter((thread) => thread.messages.length && !thread.archived)} fallback={<p>No matching chats.</p>}>{(thread) => <article class={thread.id === activeThreadId() ? "active" : ""}><button disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.pinned ? "📌 " : ""}{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages · {thread.model || "default"} · {thread.sessionStatus || (thread.sessionId ? "resumable" : "new")}</span></button><div><button onClick={() => void openSplitConversation(thread)} disabled={thread.id === activeThreadId()}>Split</button><button onClick={() => { const title = window.prompt("Conversation name", thread.title); if (title?.trim()) void updateThreadMeta(thread, { title: title.trim() }) }}>Rename</button><button onClick={() => void updateThreadMeta(thread, { pinned: !thread.pinned })}>{thread.pinned ? "Unpin" : "Pin"}</button><button onClick={() => void window.api.conversations.export(thread.id)}>Export</button><button onClick={() => void _forkConversation(thread)}>Fork</button><button onClick={() => void updateThreadMeta(thread, { archived: true })}>Archive</button></div></article>}</For></div></section></Show>
           <div class="chat-messages" ref={messagesElement} onScroll={(event) => { const element = event.currentTarget; userNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 100 }}>
             <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
@@ -1375,6 +1395,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             </Show>
           </div>
         </section>
+        <Show when={contextRailMode()}>{(mode) => <nav class="context-rail-tabs" aria-label="Session context rail"><span>Session tools</span><button class={mode() === "files" ? "active" : ""} onClick={() => void toggleFilesRail()}>Files</button><button class={mode() === "terminal" ? "active" : ""} onClick={toggleTerminalRail}>Terminal</button><button class={mode() === "activity" ? "active" : ""} onClick={toggleActivityRail}>Activity</button><Show when={previewEnabled()}><button class={mode() === "preview" ? "active" : ""} onClick={() => void togglePreviewRail()}>Preview</button></Show></nav>}</Show>
         <Show when={goal()}>{(currentGoal) => <section class={`goal-banner goal-banner--${currentGoal().status}`}><div><span>GOAL · {currentGoal().status}</span><strong>{currentGoal().objective}</strong><small>{currentGoal().iterations} progress run{currentGoal().iterations === 1 ? "" : "s"}</small></div><div><Show when={currentGoal().status === "active"}><button onClick={() => void run("Continue making the highest-impact progress toward the active goal.")}>Continue</button><button onClick={() => void executeSlashCommand("/goal pause")}>Pause</button></Show><Show when={currentGoal().status === "paused"}><button onClick={() => void executeSlashCommand("/goal resume")}>Resume</button></Show><Show when={currentGoal().status !== "completed"}><button onClick={() => void executeSlashCommand("/goal done")}>Complete</button></Show><button onClick={() => void executeSlashCommand("/goal clear")}>Clear</button></div></section>}</Show>
         <Show when={queuedPrompts().length}><section class="prompt-queue"><span>Queued</span><For each={queuedPrompts()}>{(entry, index) => <div><b>{index() + 1}</b><p>{entry.text}</p><button onClick={() => void replaceQueue(removeQueuedPrompt(queuedPrompts(), entry.id))}>×</button></div>}</For></section></Show>
         <Show when={splitOpen() && splitThread()}>{(thread) => <ConversationSplitPane thread={thread()} onClose={() => void closeSplitConversation()} onFocus={() => void focusSplitConversation()} />}</Show>
@@ -1396,7 +1417,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <Show when={attachedFiles().length}><div class="composer-attachments" aria-label="Attached workspace files"><For each={attachedFiles()}>{(file) => <button onClick={() => setAttachedFiles((current) => toggleAttachedFile(current, file))} title="Remove attachment"><span>◇</span>{file.path}<b>×</b></button>}</For><small>{attachedFiles().length}/8 attached</small></div></Show>
           <textarea value={prompt()} onInput={(event) => { setPrompt(event.currentTarget.value); setHistoryIndex(-1); setSlashSelection(0); if (event.currentTarget.value) setSlashNotice("") }} onKeyDown={(event) => { const matches = slashMatches(); if (matches.length && event.key === "ArrowDown") { event.preventDefault(); setSlashSelection((value) => (value + 1) % matches.length) } else if (matches.length && event.key === "ArrowUp") { event.preventDefault(); setSlashSelection((value) => (value - 1 + matches.length) % matches.length) } else if (matches.length && (event.key === "Tab" || event.key === "Enter") && !event.shiftKey) { event.preventDefault(); const command = matches[slashSelection()]; if (command) { const requiresArgs = command.usage?.includes("<"); setPrompt(`/${command.name}${requiresArgs ? " " : ""}`); setSlashSelection(0); if (!requiresArgs && event.key === "Enter") void run(`/${command.name}`) } } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void run() } else if (event.key === "ArrowUp" && (event.currentTarget.selectionStart === 0 || !prompt())) { event.preventDefault(); browsePromptHistory(-1) } else if (event.key === "ArrowDown" && event.currentTarget.selectionStart === prompt().length) { event.preventDefault(); browsePromptHistory(1) } }} placeholder={running() ? "Send another instruction — it will be queued…" : "Ask Grok Build to code, debug, or type / for commands…"} rows={3} />
           <div class="chat-composer__footer">
-            <button class="composer-icon" onClick={() => { setFilesOpen(true); setFilesRailCollapsed(false); void refreshFiles() }} title="Attach workspace files">＋</button>
+            <button class="composer-icon" onClick={() => { applyContextRail("files"); setFilesRailCollapsed(false); void refreshFiles() }} title="Attach workspace files">＋</button>
             <label class={`composer-toggle ${thinking() ? "composer-toggle--active" : ""}`} title="Use high reasoning effort"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsThinking, event.currentTarget.checked) }} />◇ Think</label>
             <label class={`composer-toggle ${autoApprove() ? "composer-toggle--warning" : ""}`} title="Allow Grok Build to execute tools without asking"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, event.currentTarget.checked) }} />⚡ Auto</label>
             <label class={`composer-toggle ${moaEnabled() ? "composer-toggle--moa" : ""}`} title={`Run ${moaCandidates()} candidates in parallel and synthesize the best result`}><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} />⌘ MoA ×{moaCandidates()}</label>

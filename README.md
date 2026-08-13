@@ -37,6 +37,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - The Task Inspector also shows verified backend phases for startup, advisor consultation, execution, recovery, completion, cancellation, and failure; phase labels come from the Grok Build bridge rather than UI guesses.
 - Scheduled Grok Build work now reports live running phases and final failures back to the Scheduled page, with background completion/failure notifications and the last error retained for recovery.
 - The Artifacts page indexes links, files, and images mentioned in persisted conversations, with search, type filters, and direct links back to the originating chat.
+- The coding chat now coordinates Files, Terminal, Activity, and Preview through one session context rail, so switching tools keeps the conversation mounted and makes the active context obvious.
 - Quitting while Grok Build is actively working now requires an explicit confirmation, so an accidental app close cannot silently cancel an in-flight task.
 - Configurable reasoning, turn limits, self-verification, web search, subagents, and visible automatic-approval controls.
 
