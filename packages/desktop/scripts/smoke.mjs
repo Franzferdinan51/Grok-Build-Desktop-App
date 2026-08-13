@@ -78,7 +78,7 @@ assert.equal(await readWorkspaceFile(root, "src/components/Button.tsx"), "export
 // symlink resolves to a directory (symbolic link) or to a non-directory
 // target (ENOTDIR) — both correctly block the write.
 if (symlinkSmoke) await assert.rejects(writeWorkspaceFile(root, "escape/new.txt", "blocked"), /symbolic link|ENOTDIR|ENOENT/)
-const listedPaths = (await listWorkspaceFiles(root)).map((file) => file.path.replaceAll("\\\\", "/"))
+const listedPaths = (await listWorkspaceFiles(root)).map((file) => file.path.split("\\").join("/"))
 assert.equal(listedPaths.some((path) => path.startsWith("newdir/")), true)
 assert.equal(listedPaths.some((path) => path.startsWith("src/")), true)
 
