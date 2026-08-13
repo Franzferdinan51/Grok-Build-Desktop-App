@@ -26,6 +26,15 @@ import { boundedMoaContext, cleanMoaAdvisorOutput, moaReferenceLabel, normalizeM
 import { DuckbotMemory } from "./duckbot-memory"
 import { buildBaseArgs, compatibleCliArgs, promptArgsFor } from "./grok-args"
 import { StreamingJsonParser } from "./streaming-json"
+import {
+  describeOAuthProvider,
+  firstExistingHelper,
+  oauthLaunchSpec,
+  parseMmxAuthStatus,
+  readXaiAuthFile,
+  summarizeXaiAuth,
+  type OAuthStatusSnapshot,
+} from "./oauth-status"
 
 export type GrokBuildStatus =
   | { available: true; command: string; version?: string }
@@ -243,24 +252,90 @@ export class GrokBuildBackend {
   }
 
   async startOAuth(provider: "xai" | "openai" | "minimax"): Promise<{ ok: boolean; message: string }> {
+    const spec = oauthLaunchSpec(provider)
     const status = await this.status()
     if (provider === "xai" && !status.available) throw new Error(status.error)
-    const executable = provider === "xai" ? status.command : provider === "minimax" ? "mmx" : "hermes"
-    const oauthArgs = provider === "xai" ? ["--oauth"] : provider === "minimax" ? ["auth", "login", "--recommend", "--region=global"] : ["auth", "add", "openai-codex", "--type", "oauth"]
+    const executable = provider === "xai" ? status.command : firstExistingHelper(spec.helper)
+    if (!executable) throw new Error(spec.missingMessage)
     if (provider !== "xai") {
-      try { await execFileAsync(executable, ["auth", "--help"], { timeout: 10_000 }) }
-      catch { throw new Error(provider === "minimax" ? "MiniMax’s official mmx CLI is required for this OAuth flow." : "Hermes Agent is required for this OAuth flow. Install Hermes, then try again.") }
-    }
-    if (process.platform === "darwin") {
-      const command = [executable, ...oauthArgs].map((part) => JSON.stringify(part)).join(" ")
-      await execFileAsync("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(command)}`], { timeout: 10_000 })
-    } else if (process.platform === "win32") {
-      const child = spawn("cmd.exe", ["/c", "start", "", executable, ...oauthArgs], { detached: true, stdio: "ignore" }); child.unref()
+      try { await execFileAsync(executable, spec.probeArgs, { timeout: 10_000 }) }
+      catch { throw new Error(spec.missingMessage) }
     } else {
-      const child = spawn(executable, oauthArgs, { detached: true, stdio: "ignore" }); child.unref()
+      try { await execFileAsync(executable, spec.probeArgs, { timeout: 10_000 }) }
+      catch { throw new Error("This Grok Build CLI does not expose `grok login --oauth`. Update the CLI, then try again.") }
     }
-    const label = provider === "xai" ? "xAI" : provider === "openai" ? "OpenAI Codex" : "MiniMax"
-    return { ok: true, message: `${label} OAuth opened in Terminal. Finish browser sign-in, then return to the app.` }
+    await this.launchInTerminal(executable, spec.args)
+    this.invalidateModelsCache()
+    return { ok: true, message: spec.startedMessage }
+  }
+
+  async oauthStatus(): Promise<OAuthStatusSnapshot> {
+    const grok = await this.status()
+    const xaiAuth = summarizeXaiAuth(readXaiAuthFile())
+    const xai = describeOAuthProvider({
+      id: "xai",
+      signedIn: Boolean(grok.available && xaiAuth.signedIn),
+      helperAvailable: grok.available,
+      helperCommand: grok.command,
+      account: xaiAuth.account,
+      expiresAt: xaiAuth.expiresAt,
+      via: xaiAuth.via,
+      error: grok.available ? undefined : grok.error,
+    })
+
+    const mmxPath = firstExistingHelper("mmx")
+    let minimax
+    if (!mmxPath) {
+      minimax = describeOAuthProvider({ id: "minimax", signedIn: false, helperAvailable: false, error: oauthLaunchSpec("minimax").missingMessage })
+    } else {
+      try {
+        const { stdout } = await execFileAsync(mmxPath, ["auth", "status"], { timeout: 8_000 })
+        const parsed = parseMmxAuthStatus(stdout)
+        minimax = describeOAuthProvider({
+          id: "minimax",
+          signedIn: parsed.signedIn,
+          helperAvailable: true,
+          helperCommand: mmxPath,
+          account: parsed.account,
+          expiresAt: parsed.expiresAt,
+        })
+      } catch {
+        minimax = describeOAuthProvider({ id: "minimax", signedIn: false, helperAvailable: true, helperCommand: mmxPath, error: "mmx is installed, but `auth status` failed." })
+      }
+    }
+
+    const hermesPath = firstExistingHelper("hermes")
+    let openaiSignedIn = false
+    try {
+      openaiSignedIn = await Promise.race([
+        this.codexBridge.available(),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 8_000)),
+      ])
+    } catch { openaiSignedIn = false }
+    const openai = describeOAuthProvider({
+      id: "openai",
+      signedIn: openaiSignedIn,
+      helperAvailable: Boolean(hermesPath) || openaiSignedIn,
+      helperCommand: hermesPath,
+      error: hermesPath || openaiSignedIn ? undefined : oauthLaunchSpec("openai").missingMessage,
+    })
+
+    return { providers: [xai, openai, minimax] }
+  }
+
+  private async launchInTerminal(executable: string, args: string[]): Promise<void> {
+    if (process.platform === "darwin") {
+      const command = [executable, ...args].map((part) => JSON.stringify(part)).join(" ")
+      await execFileAsync("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(command)}`], { timeout: 10_000 })
+      return
+    }
+    if (process.platform === "win32") {
+      const child = spawn("cmd.exe", ["/c", "start", "", executable, ...args], { detached: true, stdio: "ignore" })
+      child.unref()
+      return
+    }
+    const child = spawn(executable, args, { detached: true, stdio: "ignore" })
+    child.unref()
   }
 
   async checkUpdate(): Promise<GrokBuildUpdateStatus> {

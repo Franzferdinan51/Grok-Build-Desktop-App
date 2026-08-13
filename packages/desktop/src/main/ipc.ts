@@ -70,6 +70,7 @@ export function registerIpcHandlers(deps: Deps): void {
     return deps.backend().status()
   })
   ipcMain.handle("backend:oauth-login", (_event, provider: "xai" | "openai" | "minimax") => deps.backend().startOAuth(provider))
+  ipcMain.handle("backend:oauth-status", () => deps.backend().oauthStatus())
   ipcMain.handle("backend:update-check", () => deps.backend().checkUpdate())
   ipcMain.handle("backend:update-install", async (_event, channel: "stable" | "alpha") => {
     const result = await deps.backend().installUpdate(channel)

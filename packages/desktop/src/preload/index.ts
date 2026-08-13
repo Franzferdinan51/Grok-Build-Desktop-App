@@ -3,6 +3,17 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
 export type BackendStatus = { available: boolean; command: string; version?: string; error?: string }
 export type GrokBuildModelCatalog = { defaultModel?: string; models: string[] }
 export type GrokBuildUpdateStatus = { currentVersion: string; latestVersion: string; updateAvailable: boolean; channel: "stable" | "alpha"; error?: string | null }
+export type OAuthProviderStatus = {
+  id: "xai" | "openai" | "minimax"
+  label: string
+  signedIn: boolean
+  helperAvailable: boolean
+  helperCommand?: string
+  account?: string
+  expiresAt?: string
+  detail: string
+}
+export type OAuthStatusSnapshot = { providers: OAuthProviderStatus[] }
 export type BackendEvent = { type: string; data?: string; message?: string; sessionId?: string; usage?: unknown }
 export type TelegramStatus = {
   connected: boolean
@@ -55,6 +66,7 @@ export type ElectronAPI = {
     cancel: () => Promise<void>
     setPath: (path: string) => Promise<BackendStatus>
     oauthLogin: (provider: "xai" | "openai" | "minimax") => Promise<{ ok: boolean; message: string }>
+    oauthStatus: () => Promise<OAuthStatusSnapshot>
     checkUpdate: () => Promise<GrokBuildUpdateStatus>
     installUpdate: (channel: "stable" | "alpha") => Promise<GrokBuildUpdateStatus>
     tool: (command: string, cwd?: string) => Promise<{ stdout: string; stderr: string }>
@@ -109,6 +121,7 @@ const api: ElectronAPI = {
     cancel: () => ipcRenderer.invoke("backend:cancel"),
     setPath: (path) => ipcRenderer.invoke("backend:set-path", path),
     oauthLogin: (provider) => ipcRenderer.invoke("backend:oauth-login", provider),
+    oauthStatus: () => ipcRenderer.invoke("backend:oauth-status"),
     checkUpdate: () => ipcRenderer.invoke("backend:update-check"), installUpdate: (channel) => ipcRenderer.invoke("backend:update-install", channel), tool: (command, cwd) => ipcRenderer.invoke("backend:tool", command, cwd),
     onEvent: (handler) => {
       const listener = (_event: IpcRendererEvent, update: BackendEvent) => handler(update)

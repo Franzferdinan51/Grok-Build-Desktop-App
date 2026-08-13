@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { catalogModelOptions, providerFamily } from "./provider-availability.ts"
+import { catalogModelOptions, groupedModelOptions, providerFamily, providerFamilyLabel } from "./provider-availability.ts"
 
 test("providerFamily classifies known Grok Build model ids", () => {
   assert.equal(providerFamily("grok-4.5"), "xai")
@@ -20,4 +20,21 @@ test("catalogModelOptions marks xAI and configured secrets available", () => {
   assert.equal(options.find((option) => option.id === "codex-gpt-5")?.available, true)
   assert.equal(options.find((option) => option.id === "nvidia/nemotron-3-ultra-550b")?.available, false)
   assert.match(options.find((option) => option.id === "nvidia/nemotron-3-ultra-550b")?.reason || "", /Configure nvidia/)
+})
+
+test("catalogModelOptions treats OAuth-signed families as available", () => {
+  const options = catalogModelOptions(["MiniMax-M2.7", "codex-gpt-5"], [], undefined, ["minimax"])
+  assert.equal(options.find((option) => option.id === "MiniMax-M2.7")?.available, true)
+  assert.equal(options.find((option) => option.id === "codex-gpt-5")?.available, false)
+})
+
+test("groupedModelOptions splits the picker by provider family", () => {
+  const groups = groupedModelOptions(catalogModelOptions(
+    ["grok-4.5", "codex-gpt-5", "MiniMax-M2.7", "nvidia/nemotron-3-ultra-550b"],
+    [],
+    "grok-4.5",
+  ))
+  assert.deepEqual(groups.map((group) => group.family), ["xai", "openai", "minimax", "nvidia"])
+  assert.equal(providerFamilyLabel("xai"), "xAI / Grok")
+  assert.equal(groups[0]?.options[0]?.id, "grok-4.5")
 })

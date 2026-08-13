@@ -206,7 +206,7 @@ app.whenReady().then(async () => {
   const autoUpdate = async () => {
     if (autoUpdateInFlight) return autoUpdateInFlight
     autoUpdateInFlight = (async () => {
-      if (!getStore().get("grok.autoUpdate") || backend.isRunning()) return
+      if (getStore().get("grok.autoUpdate") === false || backend.isRunning()) return
       try {
         const update = await backend.checkUpdate()
         if (update.updateAvailable) {

@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid
 import type { Accessor } from "solid-js"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
-import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus } from "../preload"
+import type { BackendEvent, BackendStatus, TelegramStatus, TelegramChat, ProjectSnapshot, GrokRunRecord, LocalStudioSnapshot, GrokBuildModelCatalog, GrokBuildUpdateStatus, GrokSkill, ScheduledGrokTask, ProviderSecret, WorkspaceFile, StoredChatThread, StoredChatSummary, DuckbotMemoryStatus, OAuthStatusSnapshot } from "../preload"
 import { ensurePublicCompletion, splitThinking, type TaskLog } from "./chat-utils"
 import { DESKTOP_SLASH_COMMANDS, matchingSlashCommands, parseSlashCommand } from "./slash-commands"
 import { buildAutoLearnPrompt, buildLearnPrompt } from "./learn-prompt"
@@ -13,7 +13,8 @@ import { artifactContextKey, STORE_KEYS, queueStoreKey } from "./store-keys"
 import { dequeuePrompt, describePromptQueue, enqueuePrompt, parsePromptQueue, removeQueuedPrompt, type QueuedPrompt } from "./prompt-queue"
 import { lastUserInstruction, rewindLastTurn } from "./conversation-lifecycle"
 import { buildPaletteItems, filterPaletteItems } from "./command-palette"
-import { catalogModelOptions } from "./provider-availability"
+import { catalogModelOptions, groupedModelOptions } from "./provider-availability"
+import { ADVANCED_DEFAULTS, FRIENDLY_DEFAULTS, resolveFriendlyDefaults, type AdvancedSettings, type SettingsTab } from "./settings-defaults"
 import { frameWorkflowPrompt, parseWorkflowName, WORKFLOWS } from "./workflow-presets"
 import { summarizeHarnessDoctor } from "./harness-doctor"
 import { RunsPanel } from "./views/RunsPanel"
@@ -30,6 +31,7 @@ import { SkillsPanel } from "./views/SkillsPanel"
 import { ScheduledPanel } from "./views/ScheduledPanel"
 import { RuntimePanel } from "./views/RuntimePanel"
 import { TelegramConnectionPanel } from "./views/TelegramConnectionPanel"
+import { SettingsPanel } from "./views/SettingsPanel"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
@@ -45,8 +47,6 @@ type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; cr
 type ChatThread = StoredChatThread & { messages: ChatMessage[] }
 type WorkspaceGoal = { objective: string; status: "active" | "paused" | "completed"; iterations: number; createdAt: number; updatedAt: number }
 type ArtifactContext = { selectedPath?: string; previewUrl?: string; updatedAt: number }
-type AdvancedSettings = { agent: string; agents: string; permissionMode: "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"; allow: string; deny: string; tools: string; disallowedTools: string; memory: "default" | "experimental" | "disabled"; sandbox: string; rules: string; systemPrompt: string; verbatim: boolean; forkSession: boolean; restoreCode: boolean; worktree: boolean; worktreeName: string; worktreeRef: string; jsonSchema: string; promptFile: string; promptJson: string; sessionId: string; noPlan: boolean }
-const ADVANCED_DEFAULTS: AdvancedSettings = { agent: "", agents: "", permissionMode: "auto", allow: "", deny: "", tools: "", disallowedTools: "", memory: "default", sandbox: "", rules: "", systemPrompt: "", verbatim: false, forkSession: false, restoreCode: false, worktree: false, worktreeName: "", worktreeRef: "", jsonSchema: "", promptFile: "", promptJson: "", sessionId: "", noPlan: true }
 const MAX_LIVE_LOG_CHARS = eventBuffer.MAX_LIVE_LOG_CHARS
 const MAX_LIVE_LOG_ENTRIES = eventBuffer.MAX_LIVE_LOG_ENTRIES
 void MAX_LIVE_LOG_CHARS
@@ -79,8 +79,8 @@ const NAV = [
 export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [prompt, setPrompt] = createSignal("")
   const [workspace, setWorkspace] = createSignal("")
-  const [thinking, setThinking] = createSignal(true)
-  const [autoApprove, setAutoApprove] = createSignal(false)
+  const [thinking, setThinking] = createSignal(FRIENDLY_DEFAULTS.thinking)
+  const [autoApprove, setAutoApprove] = createSignal(FRIENDLY_DEFAULTS.autoApprove)
   const [running, setRunning] = createSignal(false)
   const [active, setActive] = createSignal("new-task")
   const [events, setEvents] = createSignal<TaskLog[]>([])
@@ -143,8 +143,17 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [cliPath, setCliPath] = createSignal("")
   const [cliNotice, setCliNotice] = createSignal("")
   const [oauthNotice, setOauthNotice] = createSignal("")
+  const [oauthStatus, setOauthStatus] = createSignal<OAuthStatusSnapshot>({
+    providers: [
+      { id: "xai", label: "xAI / Grok", signedIn: false, helperAvailable: true, detail: "Checking sign-in…" },
+      { id: "openai", label: "OpenAI Codex", signedIn: false, helperAvailable: true, detail: "Checking sign-in…" },
+      { id: "minimax", label: "MiniMax", signedIn: false, helperAvailable: true, detail: "Checking sign-in…" },
+    ],
+  })
+  const [oauthBusy, setOauthBusy] = createSignal<"" | "xai" | "openai" | "minimax">("")
+  const [settingsSearch, setSettingsSearch] = createSignal("")
   const [grokUpdate, setGrokUpdate] = createSignal<GrokBuildUpdateStatus | null>(null)
-  const [grokAutoUpdate, setGrokAutoUpdate] = createSignal(false)
+  const [grokAutoUpdate, setGrokAutoUpdate] = createSignal(FRIENDLY_DEFAULTS.autoUpdate)
   const [grokUpdateChannel, setGrokUpdateChannel] = createSignal<"stable" | "alpha">("stable")
   const [grokUpdateNotice, setGrokUpdateNotice] = createSignal("")
   const [gitChanges, setGitChanges] = createSignal<{ status: string; path: string }[]>([])
@@ -165,7 +174,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [terminalRailOpen, setTerminalRailOpen] = createSignal(false)
   const [notifications, setNotifications] = createSignal<DesktopNotification[]>([])
   const [agentAppControls, setAgentAppControls] = createSignal(false)
-  const [subagentsEnabled, setSubagentsEnabled] = createSignal(true)
+  const [subagentsEnabled, setSubagentsEnabled] = createSignal(FRIENDLY_DEFAULTS.subagents)
   const [delegationMode, setDelegationMode] = createSignal<"balanced" | "aggressive">("balanced")
   const [slashSelection, setSlashSelection] = createSignal(0)
   const [slashNotice, setSlashNotice] = createSignal("")
@@ -176,7 +185,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [moaReferenceEffort, setMoaReferenceEffort] = createSignal<"low" | "medium" | "high">("medium")
   const [moaAggregatorEffort, setMoaAggregatorEffort] = createSignal<"low" | "medium" | "high">("high")
   const [moaReferenceTokenBudget, setMoaReferenceTokenBudget] = createSignal(600)
-  const [selfVerify, setSelfVerify] = createSignal(false)
+  const [selfVerify, setSelfVerify] = createSignal(FRIENDLY_DEFAULTS.selfVerify)
   const [maxTurns, setMaxTurns] = createSignal(0)
   const [sessionIdleHours, setSessionIdleHours] = createSignal(0)
   const [memoryStatus, setMemoryStatus] = createSignal<DuckbotMemoryStatus | null>(null)
@@ -191,7 +200,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [backendToolCommand, setBackendToolCommand] = createSignal("inspect --json")
   const [backendToolOutput, setBackendToolOutput] = createSignal("")
   const [backendToolRunning, setBackendToolRunning] = createSignal(false)
-  const [settingsTab, setSettingsTab] = createSignal<"backend" | "providers" | "models" | "advanced" | "preview">("backend")
+  const [settingsTab, setSettingsTab] = createSignal<SettingsTab>("essentials")
   const [agentTab, setAgentTab] = createSignal<"overview" | "runtime" | "sessions" | "memory" | "telegram" | "commands">("telegram")
   let messagesElement: HTMLDivElement | undefined
   let scrollFrame = 0
@@ -453,7 +462,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     ...catalog().models,
     ...providerSecrets().map((provider) => provider.modelId).filter(Boolean),
   ])]
-  const modelOptions = () => catalogModelOptions(selectableModels(), providerSecrets(), catalog().defaultModel)
+  const signedFamilies = () => oauthStatus().providers.filter((row) => row.signedIn).map((row) => row.id)
+  const modelOptions = () => catalogModelOptions(selectableModels(), providerSecrets(), catalog().defaultModel, signedFamilies())
   const paletteItems = () => filterPaletteItems(buildPaletteItems({
     commands: DESKTOP_SLASH_COMMANDS,
     views: NAV.map((item) => ({ id: item.id, label: item.label })),
@@ -516,20 +526,34 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (id.startsWith("model:")) await selectModelValue(id.slice(6))
   }
   const refreshModelCatalog = async () => setCatalog(await window.api.backend.models())
+  const refreshOauth = async () => {
+    try { setOauthStatus(await window.api.backend.oauthStatus()) }
+    catch (error) { setOauthNotice(error instanceof Error ? error.message : String(error)) }
+  }
   const signInProvider = async (provider: "xai" | "openai" | "minimax") => {
+    setOauthBusy(provider)
     try {
       const result = await window.api.backend.oauthLogin(provider)
       setOauthNotice(result.message)
-      if (provider !== "openai") return
+      await refreshOauth()
       for (let attempt = 0; attempt < 24; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 5_000))
-        const next = await window.api.backend.models()
-        setCatalog(next)
-        const count = next.models.filter((entry) => entry.startsWith("codex-")).length
-        if (count) { setOauthNotice(`OpenAI Codex connected · ${count} models added automatically`); return }
+        const snapshot = await window.api.backend.oauthStatus()
+        setOauthStatus(snapshot)
+        const row = snapshot.providers.find((entry) => entry.id === provider)
+        if (row?.signedIn) {
+          const next = await window.api.backend.models()
+          setCatalog(next)
+          const extra = provider === "openai"
+            ? ` · ${next.models.filter((entry) => entry.startsWith("codex-")).length} Codex models`
+            : ""
+          setOauthNotice(`${row.label} connected${row.account ? ` · ${row.account}` : ""}${extra}`)
+          return
+        }
       }
-      setOauthNotice("OpenAI sign-in is still waiting. Finish it in Terminal, then reopen Settings to sync models.")
+      setOauthNotice("Sign-in is still waiting. Finish it in Terminal, then tap Refresh sign-in.")
     } catch (error) { setOauthNotice(error instanceof Error ? error.message : String(error)) }
+    finally { setOauthBusy("") }
   }
   createEffect(() => {
     const available = props.backendStatus().available
@@ -689,8 +713,36 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setEndpointDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.baseUrl])))
     setModelDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.modelId])))
     setCliPath((await window.api.store.get<string>(STORE_KEYS.cliPath)) || props.backendStatus().command || "grok")
-    setGrokAutoUpdate((await window.api.store.get<boolean>(STORE_KEYS.autoUpdate)) ?? false)
-    setGrokUpdateChannel((await window.api.store.get<"stable" | "alpha">(STORE_KEYS.updateChannel)) ?? "stable")
+    const friendly = resolveFriendlyDefaults({
+      thinking: await window.api.store.get<boolean>(STORE_KEYS.defaultsThinking),
+      autoApprove: await window.api.store.get<boolean>(STORE_KEYS.defaultsAutoApprove),
+      selfVerify: await window.api.store.get<boolean>(STORE_KEYS.defaultsSelfVerify),
+      webSearch: await window.api.store.get<boolean>(STORE_KEYS.defaultsWebSearch),
+      subagents: await window.api.store.get<boolean>(STORE_KEYS.agentSubagents),
+      autoUpdate: await window.api.store.get<boolean>(STORE_KEYS.autoUpdate),
+      updateChannel: await window.api.store.get<"stable" | "alpha">(STORE_KEYS.updateChannel),
+      maxTurns: await window.api.store.get<number>(STORE_KEYS.defaultsMaxTurns),
+      autoLearn: await window.api.store.get<boolean>(STORE_KEYS.autoLearnEnabled),
+      delegationMode: await window.api.store.get<"balanced" | "aggressive">(STORE_KEYS.agentDelegationMode),
+    })
+    setGrokAutoUpdate(friendly.values.autoUpdate)
+    setGrokUpdateChannel(friendly.values.updateChannel)
+    for (const [key, value] of Object.entries(friendly.persist)) {
+      if (value === undefined) continue
+      const storeKey = key === "thinking" ? STORE_KEYS.defaultsThinking
+        : key === "autoApprove" ? STORE_KEYS.defaultsAutoApprove
+        : key === "selfVerify" ? STORE_KEYS.defaultsSelfVerify
+        : key === "webSearch" ? STORE_KEYS.defaultsWebSearch
+        : key === "subagents" ? STORE_KEYS.agentSubagents
+        : key === "autoUpdate" ? STORE_KEYS.autoUpdate
+        : key === "updateChannel" ? STORE_KEYS.updateChannel
+        : key === "maxTurns" ? STORE_KEYS.defaultsMaxTurns
+        : key === "autoLearn" ? STORE_KEYS.autoLearnEnabled
+        : key === "delegationMode" ? STORE_KEYS.agentDelegationMode
+        : undefined
+      if (storeKey) await window.api.store.set(storeKey, value)
+    }
+    void refreshOauth()
     const savedPreviewEnabled = (await window.api.store.get<boolean>(STORE_KEYS.previewEnabled)) ?? false
     const savedPreviewURL = (await window.api.store.get<string>(STORE_KEYS.previewUrl)) || "http://localhost:3000"
     // Remember that Preview is available, but never force the rail open on
@@ -706,21 +758,21 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     setMoaReferenceEffort((await window.api.store.get<"low" | "medium" | "high">(STORE_KEYS.moaReferenceEffort)) || "medium")
     setMoaAggregatorEffort((await window.api.store.get<"low" | "medium" | "high">(STORE_KEYS.moaAggregatorEffort)) || "high")
     setMoaReferenceTokenBudget(Math.min(2000, Math.max(200, (await window.api.store.get<number>(STORE_KEYS.moaReferenceTokenBudget)) || 600)))
-    setThinking((await window.api.store.get<boolean>(STORE_KEYS.defaultsThinking)) ?? true)
-    setAutoApprove((await window.api.store.get<boolean>(STORE_KEYS.defaultsAutoApprove)) ?? false)
-    setSelfVerify((await window.api.store.get<boolean>(STORE_KEYS.defaultsSelfVerify)) ?? false)
-    setMaxTurns(Math.min(100, Math.max(0, (await window.api.store.get<number>(STORE_KEYS.defaultsMaxTurns)) || 0)))
+    setThinking(friendly.values.thinking)
+    setAutoApprove(friendly.values.autoApprove)
+    setSelfVerify(friendly.values.selfVerify)
+    setMaxTurns(Math.min(100, Math.max(0, friendly.values.maxTurns || 0)))
     setSessionIdleHours(Math.min(168, Math.max(0, (await window.api.store.get<number>(STORE_KEYS.agentSessionIdleHours)) || 0)))
     setMemoryStatus(await window.api.memory.status())
     setTelegramMemoryEnabled((await window.api.store.get<boolean>(STORE_KEYS.memoryTelegramEnabled)) ?? false)
-    setAutoLearnEnabled((await window.api.store.get<boolean>(STORE_KEYS.autoLearnEnabled)) ?? false)
+    setAutoLearnEnabled(friendly.values.autoLearn)
     setAutoLearnInterval(Math.min(50, Math.max(1, (await window.api.store.get<number>(STORE_KEYS.autoLearnInterval)) || 10)))
     setAutoLearnModel((await window.api.store.get<string>(STORE_KEYS.autoLearnModel)) || "")
     setAutoLearnStatus((await window.api.store.get<string>(STORE_KEYS.autoLearnLastStatus)) || "No review has run yet")
-    setWebSearchEnabled((await window.api.store.get<boolean>(STORE_KEYS.defaultsWebSearch)) ?? true)
+    setWebSearchEnabled(friendly.values.webSearch)
     setAgentAppControls((await window.api.store.get<boolean>(STORE_KEYS.agentAppControls)) ?? false)
-    setSubagentsEnabled((await window.api.store.get<boolean>(STORE_KEYS.agentSubagents)) ?? true)
-    setDelegationMode((await window.api.store.get<"balanced" | "aggressive">(STORE_KEYS.agentDelegationMode)) ?? "balanced")
+    setSubagentsEnabled(friendly.values.subagents)
+    setDelegationMode(friendly.values.delegationMode)
     // Older builds enabled high reasoning, self-verification, and subagents at
     // the same time. That made an ordinary desktop prompt substantially slower
     // than the equivalent direct CLI command. Migrate once to CLI-like defaults;
@@ -1206,6 +1258,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setProviderSecrets(providers)
       setEndpointDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.baseUrl])))
       setModelDrafts(Object.fromEntries(providers.map((provider) => [provider.id, provider.modelId])))
+      await refreshOauth()
     }
   }
 
@@ -1308,10 +1361,14 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             <label class={`composer-toggle ${moaEnabled() ? "composer-toggle--moa" : ""}`} title={`Run ${moaCandidates()} candidates in parallel and synthesize the best result`}><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} />⌘ MoA ×{moaCandidates()}</label>
             <select class="composer-model" value={modelPickerValue()} onFocus={() => void refreshModelCatalog()} onChange={(event) => void selectModelValue(event.currentTarget.value)} aria-label="Model">
               <optgroup label="Mixture of Agents"><option value="__moa__:2">MoA · Fast ×2</option><option value="__moa__:3">MoA · Balanced ×3</option><option value="__moa__:5">MoA · Thorough ×5</option><option value="__moa__:8">MoA · Exhaustive ×8</option><Show when={![2,3,5,8].includes(moaCandidates())}><option value={`__moa__:${moaCandidates()}`}>MoA · Custom ×{moaCandidates()}</option></Show></optgroup>
-              <optgroup label="Single model">
-              <option value="">{catalog().defaultModel || "Default model"}</option>
-              <For each={modelOptions()}>{(entry) => <option value={entry.id} disabled={!entry.available}>{entry.available ? entry.label : `${entry.label} — ${entry.reason}`}</option>}</For>
+              <optgroup label="Grok Build">
+                <option value="">{catalog().defaultModel || "Default model"}</option>
               </optgroup>
+              <For each={groupedModelOptions(modelOptions())}>{(group) =>
+                <optgroup label={group.label}>
+                  <For each={group.options}>{(entry) => <option value={entry.id} disabled={!entry.available}>{entry.available ? entry.label : `${entry.label} — ${entry.reason}`}</option>}</For>
+                </optgroup>
+              }</For>
             </select>
             <button class="composer-send" disabled={!prompt().trim()} onClick={() => void run()} title={running() ? "Queue instruction (Enter)" : "Send (Enter)"}>{running() ? "+" : "↑"}</button>
             <Show when={running()}><button class="composer-stop" onClick={() => window.api.backend.cancel()} title="Stop current task"><span /></button></Show>
@@ -1411,24 +1468,104 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
         </section>
       </Show>
       }>
-        <section class="runs-panel"><div class="settings-brand"><img src={grokBuildLogo} alt="Grok Build Desktop logo" /><div><span class="eyebrow">GROK BUILD SETTINGS</span><h1>Backend, models, and providers.</h1><p>Grok Build Desktop · local-first agentic coding powered by the Grok Build CLI.</p></div></div><p>The backend is <button class="link-button" onClick={() => window.api.app.openExternal("https://github.com/xai-org/grok-build")}>xai-org/grok-build</button>, the upstream Grok Build CLI. Every provider remains a Grok Build model target.</p>
-          <div class="settings-card"><strong>Grok Build CLI backend</strong><span>{props.backendStatus().version || "Select a locally built fork binary or a PATH command."}</span><div class="token-row"><input value={cliPath()} onInput={(e) => setCliPath(e.currentTarget.value)} placeholder="/path/to/grok or grok"/><button class="primary" onClick={async () => { const status = await window.api.backend.setPath(cliPath()); setCliNotice(status.available ? `Connected: ${status.version || status.command}` : status.error || "Unavailable"); if (status.available) setCatalog(await window.api.backend.models()) }}>Save + Probe</button></div><Show when={cliNotice()}><p class="provider-notice">{cliNotice()}</p></Show></div>
-          <div class="settings-card"><div><strong>Grok Build CLI updates</strong><span>Uses the CLI’s official signed internal updater from xai-org/grok-build.</span></div><div class="agent-defaults-grid"><label class="settings-switch"><input type="checkbox" checked={grokAutoUpdate()} onChange={async (event) => { setGrokAutoUpdate(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.autoUpdate, event.currentTarget.checked) }} /><span />Install updates automatically</label><label>Release channel<select value={grokUpdateChannel()} onChange={async (event) => { const channel = event.currentTarget.value as "stable" | "alpha"; setGrokUpdateChannel(channel); await window.api.store.set(STORE_KEYS.updateChannel, channel) }}><option value="stable">Stable · weekly</option><option value="alpha">Alpha · faster, less tested</option></select></label></div><div class="token-row"><button onClick={async () => { try { const update = await window.api.backend.checkUpdate(); setGrokUpdate(update); setGrokUpdateNotice(update.updateAvailable ? `${update.latestVersion} is available` : `Up to date · ${update.currentVersion}`) } catch (error) { setGrokUpdateNotice(error instanceof Error ? error.message : String(error)) } }}>Check for updates</button><button class="primary" disabled={!grokUpdate()?.updateAvailable} onClick={async () => { try { setGrokUpdateNotice("Installing update…"); const update = await window.api.backend.installUpdate(grokUpdateChannel()); setGrokUpdate(update); setGrokUpdateNotice(`Updated successfully · ${update.currentVersion}`); setCatalog(await window.api.backend.models()) } catch (error) { setGrokUpdateNotice(error instanceof Error ? error.message : String(error)) } }}>Update now</button></div><Show when={grokUpdateNotice()}><p class="provider-notice">{grokUpdateNotice()}</p></Show><p class="provider-notice">Automatic checks run shortly after launch and every six hours. Updates wait while a coding task is running and preserve your models, credentials, projects, and settings.</p></div>
-          <div class="settings-card"><div><strong>Provider sign-in</strong><span>Official provider OAuth plus Hermes-managed OpenAI Codex OAuth.</span></div><div class="oauth-provider-list"><div class="oauth-provider-row"><div><strong>xAI / Grok</strong><span>Official OAuth through the installed Grok CLI</span></div><button class="primary" onClick={() => void signInProvider("xai")}>Sign in with xAI</button></div><div class="oauth-provider-row"><div><strong>OpenAI Codex</strong><span>Hermes OAuth using a ChatGPT/Codex subscription</span></div><button onClick={() => void signInProvider("openai")}>Sign in with OpenAI</button></div><div class="oauth-provider-row"><div><strong>MiniMax</strong><span>Official MiniMax CLI device OAuth with PKCE and automatic refresh</span></div><button onClick={() => void signInProvider("minimax")}>Sign in with MiniMax</button></div></div><Show when={oauthNotice()}><p class="provider-notice">{oauthNotice()}</p></Show><p class="provider-notice">xAI OAuth feeds Grok Build directly. MiniMax credentials are owned and refreshed by the official <code>mmx</code> CLI; OpenAI Codex credentials are managed by Hermes and routed through a token-isolated local bridge. Available Codex models are imported automatically after sign-in.</p></div>
-          <div class="settings-card"><div><strong>Mixture of Agents</strong><span>Hermes-style parallel advisors with one tool-enabled acting aggregator.</span></div><div class="moa-setting"><label class="settings-switch"><input type="checkbox" checked={moaEnabled()} onChange={async (event) => { setMoaEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.moaEnabled, event.currentTarget.checked) }} /><span />Enable MoA</label><label>Reference agents<select value={moaCandidates()} onChange={async (event) => { const count = Number(event.currentTarget.value); setMoaCandidates(count); await window.api.store.set(STORE_KEYS.moaCandidates, count) }}><For each={[2,3,4,5,6,8]}>{(count) => <option value={count}>{count}</option>}</For></select></label></div><p class="provider-notice">References advise in parallel without tools; one aggregator receives their private analyses and performs the real Grok Build implementation and verification. Fan-out runs once per user turn so Grok Build keeps ownership of its native tool loop.</p></div>
-          <div class="settings-card"><div><strong>Coding-agent defaults</strong><span>Hermes-style session defaults mapped directly to supported Grok Build flags.</span></div><div class="agent-defaults-grid"><label>Default model<select value={model()} onChange={async (event) => { setModel(event.currentTarget.value); await window.api.store.set(STORE_KEYS.defaultsModel, event.currentTarget.value) }}><option value="">{catalog().defaultModel || "Grok Build default"}</option><For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label><label>Maximum turns<input type="number" min="0" max="100" value={maxTurns()} onInput={async (event) => { const value = Math.min(100, Math.max(0, Number(event.currentTarget.value) || 0)); setMaxTurns(value); await window.api.store.set(STORE_KEYS.defaultsMaxTurns, value) }} /><small>0 uses the CLI default</small></label><label class="settings-switch"><input type="checkbox" checked={thinking()} onChange={async (event) => { setThinking(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsThinking, event.currentTarget.checked) }} /><span />High reasoning</label><label class="settings-switch"><input type="checkbox" checked={selfVerify()} onChange={async (event) => { setSelfVerify(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsSelfVerify, event.currentTarget.checked) }} /><span />Self-verify changes</label><label class="settings-switch"><input type="checkbox" checked={webSearchEnabled()} onChange={async (event) => { setWebSearchEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsWebSearch, event.currentTarget.checked) }} /><span />Web search</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={autoApprove()} onChange={async (event) => { setAutoApprove(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, event.currentTarget.checked) }} /><span />Automatic approvals</label></div><p class="provider-notice">Self-verify uses <code>--check</code>; turn limits use <code>--max-turns</code>; disabling web search uses <code>--disable-web-search</code>. Automatic approvals remain visibly marked because they reduce safety prompts.</p></div>
-          <div class="settings-card"><div><strong>Advanced Grok Build parity</strong><span>Native agents, permissions, memory, sandboxing, worktrees, structured output, and prompt controls.</span></div><div class="advanced-settings-grid"><label>Agent name or definition<input value={advanced().agent} onInput={(event) => void updateAdvanced("agent", event.currentTarget.value)} placeholder="agent name or file path" /></label><label>Inline subagent definitions (JSON)<textarea value={advanced().agents} onInput={(event) => void updateAdvanced("agents", event.currentTarget.value)} placeholder='{"reviewer":{"description":"Review changes"}}' /></label><label>Permission mode<select value={advanced().permissionMode} onChange={(event) => void updateAdvanced("permissionMode", event.currentTarget.value as AdvancedSettings["permissionMode"])}><For each={["default","acceptEdits","auto","dontAsk","bypassPermissions","plan"]}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label><label>Memory<select value={advanced().memory} onChange={(event) => void updateAdvanced("memory", event.currentTarget.value as AdvancedSettings["memory"])}><option value="default">Configured default</option><option value="experimental">Experimental cross-session memory</option><option value="disabled">Disable memory</option></select></label><label>Allow rules<input value={advanced().allow} onInput={(event) => void updateAdvanced("allow", event.currentTarget.value)} placeholder="comma-separated permission rules" /></label><label>Deny rules<input value={advanced().deny} onInput={(event) => void updateAdvanced("deny", event.currentTarget.value)} placeholder="comma-separated permission rules" /></label><label>Allowed built-in tools<input value={advanced().tools} onInput={(event) => void updateAdvanced("tools", event.currentTarget.value)} placeholder="comma-separated tools" /></label><label>Disabled built-in tools<input value={advanced().disallowedTools} onInput={(event) => void updateAdvanced("disallowedTools", event.currentTarget.value)} placeholder="comma-separated tools" /></label><label>Sandbox profile<input value={advanced().sandbox} onInput={(event) => void updateAdvanced("sandbox", event.currentTarget.value)} placeholder="Grok sandbox profile" /></label><label>Worktree name<input value={advanced().worktreeName} disabled={!advanced().worktree} onInput={(event) => void updateAdvanced("worktreeName", event.currentTarget.value)} placeholder="optional generated name" /></label><label>Worktree base ref<input value={advanced().worktreeRef} disabled={!advanced().worktree} onInput={(event) => void updateAdvanced("worktreeRef", event.currentTarget.value)} placeholder="branch, tag, or commit" /></label><label>Extra rules<textarea value={advanced().rules} onInput={(event) => void updateAdvanced("rules", event.currentTarget.value)} placeholder="Append rules to the system prompt" /></label><label>System prompt override<textarea value={advanced().systemPrompt} onInput={(event) => void updateAdvanced("systemPrompt", event.currentTarget.value)} placeholder="Optional complete system prompt" /></label><label>JSON Schema output<textarea value={advanced().jsonSchema} onInput={(event) => void updateAdvanced("jsonSchema", event.currentTarget.value)} placeholder='{"type":"object","properties":{}}' /></label></div><div class="advanced-switches"><label class="settings-switch"><input type="checkbox" checked={advanced().verbatim} onChange={(event) => void updateAdvanced("verbatim", event.currentTarget.checked)} /><span />Verbatim prompt</label><label class="settings-switch"><input type="checkbox" checked={advanced().worktree} onChange={(event) => void updateAdvanced("worktree", event.currentTarget.checked)} /><span />New Git worktree</label><label class="settings-switch"><input type="checkbox" checked={advanced().forkSession} onChange={(event) => void updateAdvanced("forkSession", event.currentTarget.checked)} /><span />Fork resumed session</label><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={advanced().restoreCode} onChange={(event) => void updateAdvanced("restoreCode", event.currentTarget.checked)} /><span />Restore original session code</label></div><p class="provider-notice">All controls map directly to verified Grok Build flags. Worktree options apply to new sessions; fork and restore options apply when resuming. Invalid JSON is rejected before Grok starts.</p></div>
-          <div class="settings-card"><div><strong>Advanced prompt and session input</strong><span>Native prompt files, JSON content blocks, explicit session UUIDs, and plan control.</span></div><div class="advanced-settings-grid"><label>Prompt file<input value={advanced().promptFile} onInput={(event) => void updateAdvanced("promptFile", event.currentTarget.value)} placeholder="workspace prompt file path" /></label><label>New or forked session UUID<input value={advanced().sessionId} onInput={(event) => void updateAdvanced("sessionId", event.currentTarget.value)} placeholder="optional UUID" /></label><label>Prompt JSON content blocks<textarea value={advanced().promptJson} onInput={(event) => void updateAdvanced("promptJson", event.currentTarget.value)} placeholder='[{"type":"text","text":"Task"}]' /></label><label class="settings-switch"><input type="checkbox" checked={advanced().noPlan} onChange={(event) => void updateAdvanced("noPlan", event.currentTarget.checked)} /><span />Disable plan mode</label></div><p class="provider-notice">Prompt JSON takes priority over a prompt file; a prompt file takes priority over the composer text. Session UUID applies only to a new conversation or a forked resume.</p></div>
-          <div class="settings-card"><div><strong>Grok backend toolbox</strong><span>Native management for MCP, plugins, marketplaces, memory, sessions, worktrees, exports, traces, setup, inspection, completions, authentication, and the Agent Dashboard.</span></div><div class="backend-tool-presets"><For each={["inspect --json","mcp list","mcp doctor","plugin list","plugin marketplace list","sessions list","worktree list","setup --json","dashboard"]}>{(command) => <button onClick={() => void runBackendTool(command)}>{command}</button>}</For></div><div class="token-row"><input value={backendToolCommand()} onInput={(event) => setBackendToolCommand(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") void runBackendTool() }} placeholder="mcp list, plugin install URL, sessions search term…" /><button class="primary" disabled={backendToolRunning() || !backendToolCommand().trim()} onClick={() => void runBackendTool()}>{backendToolRunning() ? "Running…" : "Run Grok tool"}</button></div><Show when={backendToolOutput()}><pre class="runtime-json backend-tool-output">{backendToolOutput()}</pre></Show><p class="provider-notice">Commands execute directly through the selected Grok Build binary without a shell. Supported command families: <code>mcp</code>, <code>plugin</code>, <code>memory</code>, <code>sessions</code>, <code>worktree</code>, <code>export</code>, <code>inspect</code>, <code>setup</code>, <code>trace</code>, <code>completions</code>, <code>login</code>, <code>logout</code>, and <code>dashboard</code>.</p></div>
-          <div class="settings-card"><div><strong>Native subagents</strong><span>Delegate independent work through Grok Build’s own subagent runtime.</span></div><div class="agent-defaults-grid"><label class="settings-switch"><input type="checkbox" checked={subagentsEnabled()} onChange={async (event) => { setSubagentsEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.agentSubagents, event.currentTarget.checked) }} /><span />Enable subagents</label><label>Delegation style<select value={delegationMode()} disabled={!subagentsEnabled()} onChange={async (event) => { const value = event.currentTarget.value as "balanced" | "aggressive"; setDelegationMode(value); await window.api.store.set(STORE_KEYS.agentDelegationMode, value) }}><option value="balanced">Balanced</option><option value="aggressive">Proactive parallel</option></select></label></div><p class="provider-notice">Balanced delegates only when work splits cleanly. Proactive parallel asks research, testing, inspection, and preview-review agents to run concurrently while one primary agent integrates results. Disabling this passes Grok’s verified <code>--no-subagents</code> flag.</p></div>
-          <div class="settings-card"><div><strong>Automatic learning</strong><span>Hermes-style background skill review after completed coding turns.</span></div><div class="agent-defaults-grid"><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={autoLearnEnabled()} onChange={async (event) => { setAutoLearnEnabled(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.autoLearnEnabled, event.currentTarget.checked); setAutoLearnStatus(event.currentTarget.checked ? "Waiting for completed turns" : "Disabled") }} /><span />Enable auto-learn</label><label>Review interval<input type="number" min="1" max="50" value={autoLearnInterval()} onInput={async (event) => { const value = Math.min(50, Math.max(1, Number(event.currentTarget.value) || 10)); setAutoLearnInterval(value); await window.api.store.set(STORE_KEYS.autoLearnInterval, value) }} /><small>Completed coding turns</small></label><label>Review model<select value={autoLearnModel()} onChange={async (event) => { setAutoLearnModel(event.currentTarget.value); await window.api.store.set(STORE_KEYS.autoLearnModel, event.currentTarget.value) }}><option value="">Current/default model</option><For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label></div><p class="provider-notice">{autoLearnStatus()}. When enabled, a quiet Grok Build review looks for corrections, reusable fixes, and incomplete skills. It may modify only <code>.grok/skills/**</code>; it skips weak lessons instead of creating junk. Disabled by default because reviews consume model usage and write project skills automatically.</p></div>
-          <div class="settings-card"><div><strong>Live coding preview</strong><span>Dyad-style sandboxed right rail available while chatting.</span></div><div class="preview-setting"><label class="settings-switch"><input type="checkbox" checked={previewEnabled()} onChange={async (event) => { const enabled = event.currentTarget.checked; setPreviewEnabled(enabled); setPreviewOpen(enabled); await window.api.store.set(STORE_KEYS.previewEnabled, enabled) }} /><span />Enable preview</label><input value={previewDraft()} onInput={(event) => setPreviewDraft(event.currentTarget.value)} placeholder="http://localhost:3000"/><button onClick={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); await window.api.store.set(STORE_KEYS.previewUrl, value) } }}>Save URL</button></div><p class="provider-notice">URLs printed by project terminal commands are detected automatically. The preview never starts or stops your dev server.</p></div>
-          <div class="settings-card"><div><strong>Agent app controls</strong><span>Hermes/WebMCP-style typed actions plus live preview vision.</span></div><label class="settings-switch settings-switch--warning"><input type="checkbox" checked={agentAppControls()} onChange={async (event) => { setAgentAppControls(event.currentTarget.checked); await window.api.store.set(STORE_KEYS.agentAppControls, event.currentTarget.checked) }} /><span />Allow safe app controls</label><p class="provider-notice">When Preview is open, the agent receives its rendered DOM, visible text, controls, links, viewport, and a fresh screenshot on every run. It may open preview or create schedules, but cannot click arbitrary UI, access credentials, or expand its permissions.</p></div>
-          <div class="settings-card"><strong>Add another OpenAI-compatible provider</strong><div class="provider-fields"><label>Name<input value={customName()} onInput={(e) => setCustomName(e.currentTarget.value)} placeholder="Together AI" /></label><label>Base URL<input value={customURL()} onInput={(e) => setCustomURL(e.currentTarget.value)} placeholder="https://api.example.com/v1" /></label><label>Model ID<input value={customModel()} onInput={(e) => setCustomModel(e.currentTarget.value)} placeholder="coding-model" /></label><button onClick={addProvider}>Add provider</button></div></div>
-          <For each={providerSecrets()}>{(provider) => <article class="settings-card"><div><strong>{provider.label}</strong><span>{provider.envKey}</span></div><div class="provider-fields"><label>Base URL<input value={endpointDrafts()[provider.id] || ""} onInput={(event) => setEndpointDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} /></label><label>Model ID<input value={modelDrafts()[provider.id] || ""} onInput={(event) => setModelDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder="e.g. my-coding-model" /></label><button onClick={() => saveProvider(provider.id)}>Save endpoint</button></div><div class="token-row"><input type="password" value={secretDrafts()[provider.id] || ""} onInput={(event) => setSecretDrafts((old) => ({ ...old, [provider.id]: event.currentTarget.value }))} placeholder={provider.configured ? "Credential configured" : "Paste API key (optional for local)"} /><button class="primary" onClick={() => saveSecret(provider.id)}>Save key</button><button onClick={async () => { const result = await window.api.providerSecrets.test(provider.id); setProviderNotices((old) => ({ ...old, [provider.id]: result.message })) }}>Test</button><Show when={provider.configured}><button onClick={async () => { await window.api.providerSecrets.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Remove key</button></Show><Show when={provider.id.startsWith("custom-")}><button onClick={async () => { await window.api.providers.remove(provider.id); setProviderSecrets(await window.api.providerSecrets.list()) }}>Delete provider</button></Show></div><Show when={providerNotices()[provider.id]}><p class="provider-notice">{providerNotices()[provider.id]}</p></Show></article>}</For>
-          <div class="settings-card moa-model-studio"><div><strong>MoA model routing</strong><span>Hermes-style reference slots with a separate acting aggregator.</span></div><div class="moa-reference-list"><For each={Array.from({ length: moaCandidates() })}>{(_, index) => <label><span>Reference {index() + 1}</span><select value={moaReferenceModels()[index()] || ""} onChange={async (event) => { const next = [...moaReferenceModels()]; next[index()] = event.currentTarget.value; setMoaReferenceModels(next); await window.api.store.set(STORE_KEYS.moaReferenceModels, next) }}><option value="">Grok Build default</option><For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label>}</For></div><label class="moa-aggregator"><span>Aggregator · acting model</span><select value={moaAggregatorModel()} onChange={async (event) => { setMoaAggregatorModel(event.currentTarget.value); await window.api.store.set(STORE_KEYS.moaAggregatorModel, event.currentTarget.value) }}><option value="">Grok Build default</option><For each={catalog().models}>{(entry) => <option value={entry}>{entry}</option>}</For></select></label><div class="moa-setting"><label>Reference effort<select value={moaReferenceEffort()} onChange={async (event) => { const value = event.currentTarget.value as "low" | "medium" | "high"; setMoaReferenceEffort(value); await window.api.store.set(STORE_KEYS.moaReferenceEffort, value) }}><For each={["low", "medium", "high"]}>{(effort) => <option value={effort}>{effort}</option>}</For></select></label><label>Aggregator effort<select value={moaAggregatorEffort()} onChange={async (event) => { const value = event.currentTarget.value as "low" | "medium" | "high"; setMoaAggregatorEffort(value); await window.api.store.set(STORE_KEYS.moaAggregatorEffort, value) }}><For each={["low", "medium", "high"]}>{(effort) => <option value={effort}>{effort}</option>}</For></select></label><label>Advisor budget<input type="number" min="200" max="2000" step="100" value={moaReferenceTokenBudget()} onInput={async (event) => { const value = Math.min(2000, Math.max(200, Number(event.currentTarget.value) || 600)); setMoaReferenceTokenBudget(value); await window.api.store.set(STORE_KEYS.moaReferenceTokenBudget, value) }} /><small>tokens · Hermes fluid default: 600</small></label></div><p class="provider-notice">References receive recent conversation context, analyze independently in plan-only mode, and cannot edit files. Hermes' recommended 600-token advisor budget keeps fan-out responsive; the acting aggregator remains uncapped and owns implementation. Failed references are isolated.</p></div>
-          <p class="telegram-note">Model names and endpoints are configured in Grok Build. This page secures credentials; the model picker is populated by <code>grok models</code>.</p>
-        </section>
+        <SettingsPanel
+          tab={settingsTab()}
+          onTab={setSettingsTab}
+          search={settingsSearch()}
+          onSearch={setSettingsSearch}
+          backend={props.backendStatus()}
+          catalog={catalog()}
+          modelOptions={modelOptions()}
+          oauth={oauthStatus()}
+          oauthNotice={oauthNotice()}
+          oauthBusy={oauthBusy()}
+          onSignIn={(provider) => void signInProvider(provider)}
+          onRefreshOauth={() => void refreshOauth()}
+          cliPath={cliPath()}
+          onCliPath={setCliPath}
+          onSaveCli={async () => { const status = await window.api.backend.setPath(cliPath()); setCliNotice(status.available ? `Connected: ${status.version || status.command}` : status.error || "Unavailable"); if (status.available) setCatalog(await window.api.backend.models()) }}
+          cliNotice={cliNotice()}
+          grokAutoUpdate={grokAutoUpdate()}
+          onAutoUpdate={async (value) => { setGrokAutoUpdate(value); await window.api.store.set(STORE_KEYS.autoUpdate, value) }}
+          grokUpdateChannel={grokUpdateChannel()}
+          onUpdateChannel={async (channel) => { setGrokUpdateChannel(channel); await window.api.store.set(STORE_KEYS.updateChannel, channel) }}
+          grokUpdate={grokUpdate()}
+          grokUpdateNotice={grokUpdateNotice()}
+          onCheckUpdate={async () => { try { const update = await window.api.backend.checkUpdate(); setGrokUpdate(update); setGrokUpdateNotice(update.updateAvailable ? `${update.latestVersion} is available` : `Up to date · ${update.currentVersion}`) } catch (error) { setGrokUpdateNotice(error instanceof Error ? error.message : String(error)) } }}
+          onInstallUpdate={async () => { try { setGrokUpdateNotice("Installing update…"); const update = await window.api.backend.installUpdate(grokUpdateChannel()); setGrokUpdate(update); setGrokUpdateNotice(`Updated successfully · ${update.currentVersion}`); setCatalog(await window.api.backend.models()) } catch (error) { setGrokUpdateNotice(error instanceof Error ? error.message : String(error)) } }}
+          model={model()}
+          onModel={async (value) => { setModel(value); await window.api.store.set(STORE_KEYS.defaultsModel, value) }}
+          thinking={thinking()}
+          onThinking={async (value) => { setThinking(value); await window.api.store.set(STORE_KEYS.defaultsThinking, value) }}
+          autoApprove={autoApprove()}
+          onAutoApprove={async (value) => { setAutoApprove(value); await window.api.store.set(STORE_KEYS.defaultsAutoApprove, value) }}
+          selfVerify={selfVerify()}
+          onSelfVerify={async (value) => { setSelfVerify(value); await window.api.store.set(STORE_KEYS.defaultsSelfVerify, value) }}
+          webSearch={webSearchEnabled()}
+          onWebSearch={async (value) => { setWebSearchEnabled(value); await window.api.store.set(STORE_KEYS.defaultsWebSearch, value) }}
+          maxTurns={maxTurns()}
+          onMaxTurns={async (value) => { setMaxTurns(value); await window.api.store.set(STORE_KEYS.defaultsMaxTurns, value) }}
+          moaEnabled={moaEnabled()}
+          onMoaEnabled={async (value) => { setMoaEnabled(value); await window.api.store.set(STORE_KEYS.moaEnabled, value) }}
+          moaCandidates={moaCandidates()}
+          onMoaCandidates={async (value) => { setMoaCandidates(value); await window.api.store.set(STORE_KEYS.moaCandidates, value) }}
+          moaReferenceModels={moaReferenceModels()}
+          onMoaReferenceModels={async (value) => { setMoaReferenceModels(value); await window.api.store.set(STORE_KEYS.moaReferenceModels, value) }}
+          moaAggregatorModel={moaAggregatorModel()}
+          onMoaAggregatorModel={async (value) => { setMoaAggregatorModel(value); await window.api.store.set(STORE_KEYS.moaAggregatorModel, value) }}
+          moaReferenceEffort={moaReferenceEffort()}
+          onMoaReferenceEffort={async (value) => { setMoaReferenceEffort(value); await window.api.store.set(STORE_KEYS.moaReferenceEffort, value) }}
+          moaAggregatorEffort={moaAggregatorEffort()}
+          onMoaAggregatorEffort={async (value) => { setMoaAggregatorEffort(value); await window.api.store.set(STORE_KEYS.moaAggregatorEffort, value) }}
+          moaReferenceTokenBudget={moaReferenceTokenBudget()}
+          onMoaReferenceTokenBudget={async (value) => { setMoaReferenceTokenBudget(value); await window.api.store.set(STORE_KEYS.moaReferenceTokenBudget, value) }}
+          advanced={advanced()}
+          onAdvanced={(key, value) => void updateAdvanced(key, value)}
+          subagentsEnabled={subagentsEnabled()}
+          onSubagents={async (value) => { setSubagentsEnabled(value); await window.api.store.set(STORE_KEYS.agentSubagents, value) }}
+          delegationMode={delegationMode()}
+          onDelegationMode={async (value) => { setDelegationMode(value); await window.api.store.set(STORE_KEYS.agentDelegationMode, value) }}
+          autoLearnEnabled={autoLearnEnabled()}
+          onAutoLearnEnabled={async (value) => { setAutoLearnEnabled(value); await window.api.store.set(STORE_KEYS.autoLearnEnabled, value); setAutoLearnStatus(value ? "Waiting for completed turns" : "Disabled") }}
+          autoLearnInterval={autoLearnInterval()}
+          onAutoLearnInterval={async (value) => { setAutoLearnInterval(value); await window.api.store.set(STORE_KEYS.autoLearnInterval, value) }}
+          autoLearnModel={autoLearnModel()}
+          onAutoLearnModel={async (value) => { setAutoLearnModel(value); await window.api.store.set(STORE_KEYS.autoLearnModel, value) }}
+          autoLearnStatus={autoLearnStatus()}
+          previewEnabled={previewEnabled()}
+          onPreviewEnabled={async (value) => { setPreviewEnabled(value); setPreviewOpen(value); await window.api.store.set(STORE_KEYS.previewEnabled, value) }}
+          previewDraft={previewDraft()}
+          onPreviewDraft={setPreviewDraft}
+          onSavePreview={async () => { const value = previewDraft().trim(); if (/^https?:\/\//i.test(value)) { setPreviewURL(value); await window.api.store.set(STORE_KEYS.previewUrl, value) } }}
+          agentAppControls={agentAppControls()}
+          onAgentAppControls={async (value) => { setAgentAppControls(value); await window.api.store.set(STORE_KEYS.agentAppControls, value) }}
+          backendToolCommand={backendToolCommand()}
+          onBackendToolCommand={setBackendToolCommand}
+          backendToolOutput={backendToolOutput()}
+          backendToolRunning={backendToolRunning()}
+          onRunBackendTool={(command) => void runBackendTool(command)}
+          providerSecrets={providerSecrets()}
+          endpointDrafts={endpointDrafts()}
+          modelDrafts={modelDrafts()}
+          secretDrafts={secretDrafts()}
+          providerNotices={providerNotices()}
+          onEndpointDraft={(id, value) => setEndpointDrafts((old) => ({ ...old, [id]: value }))}
+          onModelDraft={(id, value) => setModelDrafts((old) => ({ ...old, [id]: value }))}
+          onSecretDraft={(id, value) => setSecretDrafts((old) => ({ ...old, [id]: value }))}
+          onSaveProvider={(id) => void saveProvider(id)}
+          onSaveSecret={(id) => void saveSecret(id)}
+          onTestProvider={async (id) => { const result = await window.api.providerSecrets.test(id); setProviderNotices((old) => ({ ...old, [id]: result.message })) }}
+          onRemoveSecret={async (id) => { await window.api.providerSecrets.remove(id); setProviderSecrets(await window.api.providerSecrets.list()) }}
+          onRemoveProvider={async (id) => { await window.api.providers.remove(id); setProviderSecrets(await window.api.providerSecrets.list()) }}
+          customName={customName()}
+          customURL={customURL()}
+          customModel={customModel()}
+          onCustomName={setCustomName}
+          onCustomURL={setCustomURL}
+          onCustomModel={setCustomModel}
+          onAddProvider={() => void addProvider()}
+          onOpenExternal={(url) => void window.api.app.openExternal(url)}
+        />
       </Show>
       }>
         <ScheduledPanel
