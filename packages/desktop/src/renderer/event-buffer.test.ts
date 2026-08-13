@@ -15,6 +15,19 @@ test("consolidateThoughts keeps reasoning in one record without reordering publi
   ])
 })
 
+test("consolidateThoughts removes repeated provider status updates", () => {
+  const result = consolidateThoughts([
+    { kind: "thought", content: "Inspecting files" },
+    { kind: "text", content: "Working" },
+    { kind: "thought", content: "Inspecting files" },
+    { kind: "thought", content: "Running tests" },
+  ])
+  assert.deepEqual(result, [
+    { kind: "thought", content: "Inspecting files\n\nRunning tests" },
+    { kind: "text", content: "Working" },
+  ])
+})
+
 test("LiveEventBuffer remains bounded after reasoning consolidation", () => {
   const buffer = new LiveEventBuffer()
   buffer.append([

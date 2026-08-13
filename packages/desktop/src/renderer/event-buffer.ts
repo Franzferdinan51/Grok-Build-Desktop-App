@@ -13,6 +13,7 @@
 export const MAX_LIVE_LOG_CHARS = 2 * 1024 * 1024
 export const MAX_LIVE_LOG_ENTRIES = 500
 export const MAX_CONSOLIDATED_THOUGHT_CHARS = 12_000
+export const MAX_CONSOLIDATED_THOUGHT_UPDATES = 96
 
 export type EventLog = { kind: "text" | "thought" | "error"; content: string }
 
@@ -20,17 +21,24 @@ export type EventLog = { kind: "text" | "thought" | "error"; content: string }
  * Keep provider reasoning as one diagnostic record per run. Grok can emit
  * thought chunks before, between, and after response/tool updates; retaining
  * each phase as a separate row makes the live transcript look like multiple
- * assistant turns and needlessly increases renderer work. Public response and
- * error ordering remains unchanged.
+ * assistant turns and needlessly increases renderer work. Repeated identical
+ * status updates are dropped while distinct reasoning updates remain visible.
+ * Public response and error ordering remains unchanged.
  */
 export function consolidateThoughts(logs: EventLog[]): EventLog[] {
   const firstThought = logs.findIndex((log) => log.kind === "thought")
   if (firstThought < 0) return logs
-  const thought = logs
-    .filter((log) => log.kind === "thought")
-    .map((log) => log.content.trim())
-    .filter(Boolean)
-    .join("\n\n")
+  const thoughtParts: string[] = []
+  const seenThoughts = new Set<string>()
+  for (const log of logs) {
+    if (log.kind !== "thought") continue
+    const detail = log.content.trim()
+    if (!detail || seenThoughts.has(detail)) continue
+    seenThoughts.add(detail)
+    thoughtParts.push(detail)
+    if (thoughtParts.length >= MAX_CONSOLIDATED_THOUGHT_UPDATES) break
+  }
+  const thought = thoughtParts.join("\n\n")
   const marker = "\n\n[… reasoning condensed …]\n\n"
   const available = MAX_CONSOLIDATED_THOUGHT_CHARS - marker.length
   const headLength = Math.floor(available * 0.7)
