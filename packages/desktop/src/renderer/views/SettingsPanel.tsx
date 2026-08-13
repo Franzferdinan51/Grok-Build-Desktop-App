@@ -392,6 +392,16 @@ export function SettingsPanel(props: {
       <Show when={showCard("Grok backend toolbox", "mcp plugin sessions dashboard doctor du models version")}>
         <div class="settings-card">
           <div><strong>Grok backend toolbox</strong><span>Native Grok Build subcommands: MCP, plugins, sessions, worktrees, doctor, disk usage, models, and the Agent Dashboard.</span></div>
+          <Show when={props.backendCommands.length}>
+            <div class="backend-tool-catalog" aria-label="Installed Grok Build command catalog">
+              <div class="backend-tool-catalog__heading"><span>Installed CLI catalog</span><small>Discovered from <code>grok --help</code></small></div>
+              <div class="backend-tool-presets">
+                <For each={props.backendCommands}>{(entry) =>
+                  <button title={entry.description} onClick={() => props.onRunBackendTool(`${entry.name} --help`)}>{entry.name}</button>
+                }</For>
+              </div>
+            </div>
+          </Show>
           <div class="backend-tool-presets">
             <For each={["inspect --json", "doctor --json", "du --json", "models", "version", "mcp list", "mcp doctor", "plugin list", "plugin marketplace list", "sessions list", "worktree list", "setup --json", "dashboard"]}>{(command) =>
               <button onClick={() => props.onRunBackendTool(command)}>{command}</button>

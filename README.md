@@ -123,6 +123,7 @@ Grok Build remains the sole coding-agent runtime: the desktop app handles presen
 - JSON Schema-constrained structured output rendered directly in chat.
 - A shell-free backend toolbox for MCP servers, plugins and marketplaces, memory, session search/export, worktrees, traces, setup/inspection, completions, authentication, and the Agent Dashboard.
 - The backend toolbox discovers the installed Grok Build command catalog at runtime, keeps one-click presets read-only or help-oriented, and falls back safely when the CLI is unavailable.
+- The Advanced settings toolbox also renders the live `grok --help` catalog; each discovered command can open its own CLI help without hard-coding a stale upstream command list.
 
 ## Install
 
