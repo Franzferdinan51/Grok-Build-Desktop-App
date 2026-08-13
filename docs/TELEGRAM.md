@@ -7,7 +7,7 @@ Grok Build Desktop can expose a dedicated BotFather bot as a persistent remote c
 1. Open **Agent → Telegram**. Create a dedicated bot in BotFather, then paste the token.
 2. The main process validates it with `getMe`, encrypts it with Electron `safeStorage`, removes stale webhook configuration, registers a short command menu, and starts long polling.
 3. Pause polling keeps the encrypted token so **Reconnect** works without pasting again. **Remove token** is the hard forget. Reconnect stops the in-flight `getUpdates` first so a second poller does not 409 itself.
-4. Unknown chats become named pairing requests (username / title / chat id). They cannot run tasks until you Approve, Deny, or optionally auto-approve only the first incoming chat. `/start`, `/help`, and `/whoami` still return the chat id and pairing steps while waiting.
+4. Unknown chats become named pairing requests (username / title / chat id). They cannot run tasks until you Approve, Deny, or optionally auto-approve only the first incoming chat. `/start`, `/help`, and `/menu` still return the command menu, `/whoami` returns the chat id, and later unauthorized tasks get a short “still waiting” reminder. `/cancel` replies instead of disappearing.
 5. The Agent sidebar opens the Telegram connection surface first. Pairing requests badge the Agent item and refresh without hammering `getMe`.
 5. The renderer receives connection metadata, polling diagnostics, and chat labels, but never the bot token after submit.
 

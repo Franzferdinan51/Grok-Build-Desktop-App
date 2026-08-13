@@ -14,11 +14,12 @@ import { listGrokSkills } from "./grok-skills"
 import { BrowserManager } from "./browser-manager"
 import { addSchedule, listSchedules, removeSchedule, runScheduleNow, toggleSchedule, type NewSchedule } from "./scheduled-tasks"
 import { addCustomProvider, listProviderSecrets, removeCustomProvider, removeProviderSecret, saveProviderSecret, saveProviderSettings, testProvider } from "./model-secrets"
-import { applyGitFileAction, gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
+import { gitChangedFiles, gitFileDiff, listWorkspaceFiles, readWorkspaceFile, runWorkspaceCommand, writeWorkspaceFile } from "./workspace-tools"
 import { PreviewServer } from "./preview-server"
 import { exportConversation, getConversation, listConversationSummaries, listConversations, saveConversation, searchConversations, type StoredChatThread } from "./conversation-store"
 import { DuckbotMemory } from "./duckbot-memory"
 import { hostBrowserOpen, hostBrowserStatus, hostDesktopStatus } from "./host-controls"
+import { isRendererForbiddenStoreKey } from "./store-guard"
 
 type Deps = {
   backend: () => GrokBuildBackend
@@ -27,6 +28,7 @@ type Deps = {
   getMainWindow: () => BrowserWindow | null
   preview: () => PreviewServer
   getQuickEntryWindow?: () => BrowserWindow | null
+  onBackendIdle?: () => void
 }
 
 const browserManager = new BrowserManager()
@@ -137,6 +139,8 @@ export function registerIpcHandlers(deps: Deps): void {
       const message = error instanceof Error ? error.message : String(error)
       finishGrokRun(run.id, { status: "failed", grokSessionId, error: message, latencyMs: Date.now() - run.startedAt, advisorFailures, ...usageMetrics(usage), errorClass: classifyRunError(message) })
       throw error
+    } finally {
+      deps.onBackendIdle?.()
     }
     return { ok: true, runId: run.id, grokSessionId }
   })
@@ -212,7 +216,6 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle("workspace:command", (_event, root: string, command: string) => runWorkspaceCommand(root, command))
   ipcMain.handle("workspace:git-changes", (_event, root: string) => gitChangedFiles(root))
   ipcMain.handle("workspace:git-diff", (_event, root: string, path: string) => gitFileDiff(root, path))
-  ipcMain.handle("workspace:git-action", (_event, root: string, path: string, action: "stage" | "unstage" | "discard") => applyGitFileAction(root, path, action))
   ipcMain.handle("preview:start", (_event, root: string) => deps.preview().start(root))
   ipcMain.handle("preview:stop", () => deps.preview().stop())
   ipcMain.handle("preview:inspect", async () => {
@@ -237,9 +240,18 @@ export function registerIpcHandlers(deps: Deps): void {
     return { ...page, screenshotPath }
   })
 
-  ipcMain.handle("store:get", (_event, key: string) => getStore().get(key))
-  ipcMain.handle("store:set", (_event, key: string, value: unknown) => getStore().set(key, value))
-  ipcMain.handle("store:delete", (_event, key: string) => getStore().delete(key))
+  ipcMain.handle("store:get", (_event, key: string) => {
+    if (isRendererForbiddenStoreKey(key)) throw new Error("Telegram credentials are not readable from the renderer")
+    return getStore().get(key)
+  })
+  ipcMain.handle("store:set", (_event, key: string, value: unknown) => {
+    if (isRendererForbiddenStoreKey(key)) throw new Error("Telegram credentials cannot be written from the renderer")
+    getStore().set(key, value)
+  })
+  ipcMain.handle("store:delete", (_event, key: string) => {
+    if (isRendererForbiddenStoreKey(key)) throw new Error("Telegram credentials cannot be deleted from the renderer")
+    getStore().delete(key)
+  })
   ipcMain.handle("window:minimize", () => deps.getMainWindow()?.minimize())
   ipcMain.handle("window:maximize", () => {
     const win = deps.getMainWindow()

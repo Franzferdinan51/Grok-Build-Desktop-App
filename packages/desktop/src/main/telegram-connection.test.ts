@@ -11,8 +11,11 @@ import {
   pairingMessage,
   pairingPublicReply,
   parseChatIds,
+  parseTelegramRetryAfterMs,
   profileFromTelegramChat,
+  routeUnauthorizedMessage,
   shouldAutoApproveFirst,
+  stillWaitingMessage,
   upsertChatProfile,
 } from "./telegram-connection.ts"
 
@@ -67,6 +70,21 @@ test("auto-approve only the first authorized chat", () => {
   assert.equal(shouldAutoApproveFirst(0, true), true)
   assert.equal(shouldAutoApproveFirst(1, true), false)
   assert.equal(shouldAutoApproveFirst(0, false), false)
+})
+
+test("unauthorized pairing routes public commands and repeats waiting copy", () => {
+  assert.equal(routeUnauthorizedMessage("/whoami", false), "whoami")
+  assert.equal(routeUnauthorizedMessage("/start@MyBot", true), "public-handler")
+  assert.equal(routeUnauthorizedMessage("/cancel", false), "cancel")
+  assert.equal(routeUnauthorizedMessage("please fix this", false), "first-pairing")
+  assert.equal(routeUnauthorizedMessage("please fix this", true), "repeat-wait")
+  assert.match(stillWaitingMessage("99"), /99/)
+})
+
+test("parseTelegramRetryAfterMs prefers Telegram parameters", () => {
+  assert.equal(parseTelegramRetryAfterMs({ parameters: { retry_after: 12 } }, 1000), 12_000)
+  assert.equal(parseTelegramRetryAfterMs({ description: "Too Many Requests: retry after 8" }, 1000), 8_000)
+  assert.equal(parseTelegramRetryAfterMs({}, 2500), 2500)
 })
 
 test("upsertChatProfile merges identity without dropping last preview", () => {

@@ -15,10 +15,13 @@ import {
   hydrateChats,
   labelChat,
   pairingPublicReply,
+  parseTelegramRetryAfterMs,
   profileFromTelegramChat,
   publicPairingCommandName,
   revokedMessage,
+  routeUnauthorizedMessage,
   shouldAutoApproveFirst,
+  stillWaitingMessage,
   upsertChatProfile,
   type TelegramChatProfile,
   type TelegramChatView,
@@ -56,7 +59,7 @@ async function telegramRequest<T>(url: string, init?: RequestInit): Promise<Tele
 
 function telegramAuthError(status: number, description?: string): Error | undefined {
   const classified = classifyTelegramHttpError(status, description)
-  if (!classified || classified.kind === "other") return undefined
+  if (classified?.kind !== "auth") return undefined
   return new Error(classified.message)
 }
 
@@ -110,6 +113,7 @@ export class TelegramBridge {
   private coolOffMs = 0
   private coolOffUntil = 0
   private consecutiveAuthFailures = 0
+  private lastAuthFailureAt = 0
   private static readonly MAX_COOL_OFF_MS = 5 * 60_000
   private static readonly AUTH_FAILURE_WINDOW_MS = 10 * 60_000
   private lastPollAt = 0
@@ -197,8 +201,6 @@ export class TelegramBridge {
       return this.snapshot({ connected: false, error: `Telegram cooling off for ${Math.ceil(this.coolOffRemaining() / 1000)}s after repeated auth failures. Try again then.` })
     }
     if (!this.token()) return this.snapshot({ connected: false, hasToken: false, error: "No saved bot token. Paste a BotFather token to connect." })
-    const probed = await this.status({ probe: true })
-    if (!probed.connected && !this.token()) return probed
     this.stop()
     this.start()
     return this.status({ probe: false })
@@ -285,13 +287,13 @@ export class TelegramBridge {
         error: this.lastError || undefined,
       })
     }
-    if (!options.probe && this.lastProbeAt && Date.now() - this.lastProbeAt < 60_000 && this.lastUsername) {
+    if (!options.probe && this.lastProbeAt && Date.now() - this.lastProbeAt < 60_000) {
       return this.snapshot({
         connected: this.polling || Boolean(this.lastUsername),
         hasToken: true,
         polling: this.polling,
         botId: this.lastBotId || undefined,
-        username: this.lastUsername,
+        username: this.lastUsername || undefined,
         firstName: this.botFirstName || undefined,
         coolOffMs: coolOffRemaining,
         error: this.lastError || undefined,
@@ -299,10 +301,21 @@ export class TelegramBridge {
     }
     try {
       const response = await telegramRequest<{ ok: boolean; result?: { id: number; username?: string; first_name?: string }; description?: string }>(`https://api.telegram.org/bot${token}/getMe`)
+      this.lastProbeAt = Date.now()
       const classified = classifyTelegramHttpError(response.status, response.payload.description)
       if (classified?.kind === "auth") {
         this.lastError = classified.message
         return this.snapshot({ connected: false, error: classified.message, coolOffMs: coolOffRemaining })
+      }
+      if (classified?.kind === "rate" || classified?.kind === "conflict") {
+        this.lastError = classified.message
+        return this.snapshot({
+          connected: this.polling || Boolean(this.lastUsername),
+          error: classified.message,
+          username: this.lastUsername || undefined,
+          firstName: this.botFirstName || undefined,
+          coolOffMs: coolOffRemaining,
+        })
       }
       const payload = response.payload
       if (!payload.ok || !payload.result) {
@@ -333,10 +346,11 @@ export class TelegramBridge {
         error: undefined,
       })
     } catch (error) {
+      this.lastProbeAt = Date.now()
       const message = (error as Error).message
       if (!this.polling) this.lastError = message
       return this.snapshot({
-        connected: this.polling,
+        connected: this.polling || Boolean(this.lastUsername),
         error: this.polling ? this.lastError || message : message,
         username: this.lastUsername || undefined,
         firstName: this.botFirstName || undefined,
@@ -386,7 +400,6 @@ export class TelegramBridge {
       this.notifyChange()
       return this.snapshot({ connected: true, polling: this.polling, botId: payload.result.id, username: payload.result.username, firstName: payload.result.first_name, coolOffMs: 0 })
     } catch (error) {
-      this.recordAuthFailure()
       const message = error instanceof Error ? error.message : String(error)
       this.lastError = message
       return this.snapshot({ connected: false, error: message })
@@ -394,13 +407,14 @@ export class TelegramBridge {
   }
 
   private recordAuthFailure(): void {
-    this.consecutiveAuthFailures += 1
-    // Tripled exponential backoff capped at 5 minutes; resets to 0 the
-    // moment a successful probe / poll recovers.
+    const now = Date.now()
     const { MAX_COOL_OFF_MS, AUTH_FAILURE_WINDOW_MS } = TelegramBridge
+    if (now - this.lastAuthFailureAt > AUTH_FAILURE_WINDOW_MS) this.consecutiveAuthFailures = 0
+    this.lastAuthFailureAt = now
+    this.consecutiveAuthFailures += 1
     const factor = Math.min(this.consecutiveAuthFailures, 6)
     this.coolOffMs = Math.min(MAX_COOL_OFF_MS, 5_000 * 2 ** factor)
-    this.coolOffUntil = Date.now() + this.coolOffMs
+    this.coolOffUntil = now + this.coolOffMs
     if (this.consecutiveAuthFailures > 3) {
       writeLog("error", `Telegram bridge entered ${this.coolOffMs / 1000}s cool-off after ${this.consecutiveAuthFailures} consecutive auth failures (window ${AUTH_FAILURE_WINDOW_MS / 1000}s)`)
     }
@@ -470,7 +484,7 @@ export class TelegramBridge {
       writeLog("error", `Telegram bootstrap failed: ${this.lastError}`)
       this.retryDelayMs = Math.min(this.retryDelayMs * 2 + Math.floor(Math.random() * 1_000), TelegramBridge.MAX_RETRY_DELAY_MS)
       await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs))
-      if (this.polling && generation === this.pollGeneration) await this.poll(generation)
+      if (this.polling && generation === this.pollGeneration) await this.bootstrap(generation)
     }
   }
 
@@ -508,7 +522,14 @@ export class TelegramBridge {
           return
         }
         const payload = response.payload
-        if (!payload.ok || classified?.kind === "conflict" || classified?.kind === "rate") {
+        if (classified?.kind === "rate") {
+          this.lastError = classified.message
+          this.retryDelayMs = parseTelegramRetryAfterMs(payload, Math.min(this.retryDelayMs * 2, TelegramBridge.MAX_RETRY_DELAY_MS))
+          writeLog("error", `Telegram polling rate-limited; waiting ${this.retryDelayMs / 1000}s`)
+          await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs))
+          continue
+        }
+        if (!payload.ok || classified?.kind === "conflict") {
           this.lastError = classified?.message || payload.description || "Telegram polling failed"
           this.retryDelayMs = Math.min(this.retryDelayMs * 2 + Math.floor(Math.random() * 1_000), TelegramBridge.MAX_RETRY_DELAY_MS)
           throw new Error(this.lastError)
@@ -533,15 +554,31 @@ export class TelegramBridge {
               await this.approveChat(chatId)
             } else {
               await this.addPendingChat(chatId, profile)
-              const publicCommand = publicPairingCommandName(text)
-              if (!this.unauthorizedNotified.has(chatId) || publicCommand) {
+              const alreadyNotified = this.unauthorizedNotified.has(chatId)
+              const route = routeUnauthorizedMessage(text, alreadyNotified)
+              const pairing = pairingPublicReply({
+                chatId,
+                botUsername: this.lastUsername || undefined,
+                label: labelChat(profile),
+                command: publicPairingCommandName(text) || "start",
+              })
+              if (route === "whoami") {
                 this.unauthorizedNotified.add(chatId)
-                await this.send(chatId, pairingPublicReply({
-                  chatId,
-                  botUsername: this.lastUsername || undefined,
-                  label: labelChat(profile),
-                  command: publicCommand || "start",
-                }))
+                await this.sendLong(chatId, pairing)
+              } else if (route === "public-handler") {
+                if (!alreadyNotified) {
+                  this.unauthorizedNotified.add(chatId)
+                  await this.sendLong(chatId, pairing)
+                }
+                if (this.handler) void this.handleMessage(chatId, text)
+              } else if (route === "cancel") {
+                await this.sendLong(chatId, alreadyNotified
+                  ? "Nothing to cancel until this chat is approved."
+                  : `${pairing}\n\nNothing to cancel until this chat is approved.`)
+                this.unauthorizedNotified.add(chatId)
+              } else {
+                this.unauthorizedNotified.add(chatId)
+                await this.sendLong(chatId, route === "repeat-wait" ? stillWaitingMessage(chatId) : pairing)
               }
               continue
             }
@@ -570,7 +607,11 @@ export class TelegramBridge {
       if (typeof reply === "string") await this.sendLong(chatId, reply)
       else await this.sendRich(chatId, reply)
     } catch (error) {
-      await this.send(chatId, `Task failed: ${error instanceof Error ? error.message : String(error)}`)
+      try {
+        await this.sendLong(chatId, `Task failed: ${error instanceof Error ? error.message : String(error)}`)
+      } catch (sendError) {
+        writeLog("error", `Telegram failed to send a task error to ${chatId}: ${sendError instanceof Error ? sendError.message : String(sendError)}`)
+      }
     }
   }
 

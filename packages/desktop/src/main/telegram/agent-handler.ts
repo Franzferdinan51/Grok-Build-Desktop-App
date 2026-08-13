@@ -26,6 +26,7 @@ import type { TelegramBridge } from "../telegram"
 import type { GrokBuildBackend, RunTaskInput, GrokBuildEvent } from "../grok-build-backend"
 import { nemoConfig, nemoStatus, recordNemoAudit, taskApprovalReason } from "../nemoclaw-security"
 import { listGrokSkills } from "../grok-skills"
+import { dequeueChatTasks, describeCancelChat, enqueueTelegramTask, prioritizeTelegramTask } from "../telegram-queue"
 
 export type TelegramQueueEntry = { chatId: string; text: string; queuedAt: number }
 export type TelegramAgentSession = {
@@ -205,7 +206,7 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       const agent = deps.session(chatId)
       const context = (agent.transcript || []).slice(-6).map((entry) => `${entry.role === "user" ? "User" : "Agent"}: ${entry.text}`).join("\n\n")
       const request = argument || "Extract the reusable workflow, decisions, and verification steps from the recent Telegram work and draft a SKILL.md for it."
-      return runAgentTask(deps, chatId, `Create or improve a reusable Grok Build skill. ${request}\n\nRecent context:\n${context.slice(-12_000)}`, agent)
+      return startAgentTask(deps, chatId, `Create or improve a reusable Grok Build skill. ${request}\n\nRecent context:\n${context.slice(-12_000)}`, agent)
     }
     if (name === "skill") {
       const [skillName, ...skillArgs] = argument.split(/\s+/).filter(Boolean)
@@ -214,7 +215,7 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       const skill = listGrokSkills(workspace).find((entry) => entry.name.toLowerCase() === skillName.toLowerCase())
       if (!skill) return `Skill not found: ${skillName}\nUse /skills to list available skills.`
       const request = skillArgs.join(" ") || "Apply this skill to the current request."
-      return runAgentTask(deps, chatId, `Use the skill at ${skill.path}. ${request}`, deps.session(chatId))
+      return startAgentTask(deps, chatId, `Use the skill at ${skill.path}. ${request}`, deps.session(chatId))
     }
     if (name === "login") {
       const provider = (argument || "xai").trim().toLowerCase()
@@ -327,16 +328,28 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
     }
     if (name === "steer" || name === "interrupt") {
       if (!argument) return `Usage: /${name} <instruction>`
-      if (name === "interrupt" && deps.getRunningChat() === chatId) { deps.setCancelled(true); backend.cancel() }
-      queue.unshift({ chatId, text: argument.slice(0, 20_000), queuedAt: Date.now() })
+      if (name === "interrupt" && (deps.getRunningChat() === chatId || (!deps.getRunningChat() && (backend.isRunning() || deps.getReserved())))) {
+        deps.setCancelled(true)
+        backend.cancel()
+      }
+      prioritizeTelegramTask(queue, { chatId, text: argument, queuedAt: Date.now() })
       deps.scheduleNextTask()
       return name === "interrupt" ? "⏭ Interrupting current work; your instruction is next." : "↪️ Instruction prioritized for the next agent turn."
     }
     if (name === "cancel" || name === "stop") {
-      const wasRunning = deps.getRunningChat() === chatId
-      if (wasRunning) deps.setCancelled(true)
-      if (wasRunning) backend.cancel()
-      return wasRunning ? "Stopping this chat’s active Grok Build task…" : "This chat does not own the active task."
+      const dequeued = dequeueChatTasks(queue, chatId)
+      const result = describeCancelChat({
+        chatId,
+        runningChat: deps.getRunningChat(),
+        reserved: deps.getReserved(),
+        backendRunning: backend.isRunning(),
+        dequeued,
+      })
+      if (result.cancelBackend) {
+        deps.setCancelled(true)
+        backend.cancel()
+      }
+      return result.message
     }
     if (name === "restart") {
       if (deps.getRunningChat() && deps.getRunningChat() !== chatId) return "Another chat owns the active task. Stop it there before restarting the agent."
@@ -438,30 +451,43 @@ export function createAgentHandler(deps: AgentHandlerDeps) {
       recordNemoAudit({ chatId, action: "telegram.task", decision: "pending", detail: approvalReason })
       return `🛡️ Approval required: ${approvalReason}.\n\nTask held safely. Review it, then use /approve or /deny.`
     }
-    if (backend.isRunning() || deps.getReserved()) {
-      queue.push({ chatId, text: taskText.slice(0, 20_000), queuedAt: Date.now() })
-      return `📥 Task queued at position ${queue.length}. Use /queue to inspect it, /steer to prioritize work, or /interrupt to stop the active turn.`
-    }
     let agent = deps.session(chatId)
     const idleHours = Math.max(0, Number(getStore().get("agent.sessionIdleHours")) || 0)
     if (idleHours > 0 && Date.now() - agent.updatedAt > idleHours * 60 * 60_000) {
       deps.saveSession(chatId, { sessionId: "", transcript: [], compressedSummary: "" })
       agent = deps.session(chatId)
     }
-    return await runAgentTask(deps, chatId, taskText, agent)
+    return await startAgentTask(deps, chatId, taskText, agent)
   }
 
   return { handleMessage }
+}
+
+async function startAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: string, agent: TelegramAgentSession): Promise<string> {
+  const { backend, queue } = deps
+  if (backend.isRunning() || deps.getReserved()) {
+    const position = enqueueTelegramTask(queue, { chatId, text: taskText, queuedAt: Date.now() })
+    deps.scheduleNextTask()
+    return `📥 Task queued at position ${position}. Use /queue to inspect it, /steer to prioritize work, or /interrupt to stop the active turn.`
+  }
+  deps.setReserved(true)
+  deps.setRunningChat(chatId)
+  deps.setCancelled(false)
+  try {
+    return await runAgentTask(deps, chatId, taskText, agent)
+  } finally {
+    deps.setRunningChat("")
+    deps.setReserved(false)
+    deps.scheduleNextTask()
+  }
 }
 
 async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: string, agent: TelegramAgentSession): Promise<string> {
   const { backend, telegram } = deps
   const input = await deps.buildInput(chatId, taskText, agent)
   if (!input) return "Agent task could not be built — no project / model configured."
-  deps.setReserved(true)
+  if (deps.getCancelled()) return "Task cancelled."
   recordNemoAudit({ chatId, action: "telegram.task", decision: "allowed", detail: taskText.slice(0, 240) })
-  deps.setCancelled(false)
-  deps.setRunningChat(chatId)
   const run = startGrokRun(input)
   const startedAt = Date.now()
   const cwd = input.cwd || agent.workspace || join(app.getPath("userData"), "Scratch")
@@ -506,9 +532,6 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
     throw error
   } finally {
     clearInterval(activityTimer)
-    deps.setRunningChat("")
-    deps.setReserved(false)
-    deps.scheduleNextTask()
   }
   if (getStore().get("agent.appControls")) {
     const { actions } = validateAppActions(response)

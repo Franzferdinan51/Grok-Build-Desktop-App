@@ -537,7 +537,9 @@ ${referenceSection}
       writeLog("info", `Starting Grok Build task in ${input.cwd}`)
       const child = spawn(command, childArgs, { stdio: ["ignore", "pipe", "pipe"], env: this.environment(), detached: process.platform !== "win32" })
       this.current = child
-      this.cancelRequested = false
+      if (this.cancelRequested) {
+        this.terminateProcessTree(child, "SIGTERM")
+      }
       let stderr = ""
       let settled = false
       let inactivityTimeout = ""
@@ -605,6 +607,11 @@ ${referenceSection}
         else finish(() => reject(new Error(inactivityTimeout || normalizeBackendStderr(stderr) || `Grok Build exited ${code ?? `from ${signal || "an unknown signal"}`}`)))
       })
     })
+
+    if (this.cancelRequested) {
+      onEvent({ type: "cancelled", data: "Task cancelled." })
+      return
+    }
 
     try {
       await runChild(compatibleArgs)

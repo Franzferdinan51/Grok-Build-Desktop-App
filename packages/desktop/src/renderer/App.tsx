@@ -1223,16 +1223,6 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     } finally { setTerminalRunning(false) }
   }
   const refreshDiff = async (root = workspace()) => { if (root) { setGitChanges(await window.api.workspace.gitChanges(root)); setSelectedDiff(""); setDiffContent("") } }
-  const applyReviewAction = async (path: string, action: "stage" | "unstage" | "discard") => {
-    if (!workspace()) return
-    try {
-      await window.api.workspace.gitAction(workspace(), path, action)
-      await refreshDiff()
-      setSlashNotice(`${action === "discard" ? "Discarded" : action === "stage" ? "Staged" : "Unstaged"} ${path}`)
-    } catch (error) {
-      setSlashNotice(`Git action failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
   const useSkillInChat = (name: string) => { setPrompt(`/${name} `); setSlashNotice(""); void navigate("new-task") }
   const askReviewInChat = () => {
     const paths = gitChanges().slice(0, 24).map((change) => `${change.status} ${change.path}`).join("\n")
@@ -1477,7 +1467,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
             onAutoApproveFirst={async (enabled) => { await window.api.telegram.setAutoApproveFirst(enabled); await refreshTelegram() }}
             onOpenBot={() => { const name = telegram().username; if (name) void window.api.app.openExternal(`https://t.me/${name}`) }}
             onOpenBotFather={() => void window.api.app.openExternal("https://t.me/BotFather")}
-            onRefresh={() => void refreshTelegram(true)}
+            onRefresh={() => void refreshTelegram(!telegram().polling)}
             onCopy={(value) => void navigator.clipboard.writeText(value)}
           />
           </Show>
@@ -1658,7 +1648,6 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           diff={diffContent()}
           onRefresh={() => void refreshDiff()}
           onSelect={async (path) => { setSelectedDiff(path); setDiffContent(await window.api.workspace.gitDiff(workspace(), path)) }}
-          onAction={(path, action) => void applyReviewAction(path, action)}
           onAskReview={askReviewInChat}
           onOpenProject={chooseWorkspace}
         />

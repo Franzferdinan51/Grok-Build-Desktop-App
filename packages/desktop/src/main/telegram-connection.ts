@@ -58,6 +58,31 @@ export function isPublicPairingCommand(text: string): boolean {
   return Boolean(publicPairingCommandName(text))
 }
 
+export type UnauthorizedRoute = "whoami" | "public-handler" | "cancel" | "first-pairing" | "repeat-wait"
+
+export function routeUnauthorizedMessage(text: string, alreadyNotified: boolean): UnauthorizedRoute {
+  const publicCommand = publicPairingCommandName(text)
+  if (publicCommand === "whoami" || publicCommand === "id") return "whoami"
+  if (publicCommand) return "public-handler"
+  const name = text.trim().match(/^\/(\w+)/)?.[1]?.toLowerCase()
+  if (name === "cancel" || name === "stop") return "cancel"
+  return alreadyNotified ? "repeat-wait" : "first-pairing"
+}
+
+export function stillWaitingMessage(chatId: string): string {
+  return `Still waiting for Approve in Grok Build Desktop → Agent → Telegram.\nChat id: ${chatId}`
+}
+
+export function parseTelegramRetryAfterMs(payload: unknown, fallbackMs: number): number {
+  const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : {}
+  const parameters = record.parameters && typeof record.parameters === "object" ? record.parameters as Record<string, unknown> : {}
+  const seconds = Number(parameters.retry_after ?? record.retry_after)
+  if (Number.isFinite(seconds) && seconds > 0) return Math.min(5 * 60_000, Math.max(1_000, Math.floor(seconds * 1000)))
+  const match = String(record.description || "").match(/retry after (\d+)/i)
+  if (match) return Math.min(5 * 60_000, Math.max(1_000, Number(match[1]) * 1000))
+  return Math.max(1_000, fallbackMs)
+}
+
 export type TelegramPollErrorKind = "auth" | "rate" | "conflict" | "other"
 
 export function classifyTelegramHttpError(status: number, description?: string): { kind: TelegramPollErrorKind; message: string } | undefined {

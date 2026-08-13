@@ -40,6 +40,7 @@ let updateTimer: ReturnType<typeof setInterval> | undefined
 let telegramTaskCancelled = false
 let telegramRunningChat = ""
 let telegramTaskReserved = false
+let telegramDrainTimer: ReturnType<typeof setTimeout> | undefined
 const telegramQueue: { chatId: string; text: string; queuedAt: number }[] = []
 const BROWSER_AGENT_PARTITION = "persist:grok-browser-agent"
 const BROWSER_AGENT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -134,16 +135,6 @@ app.whenReady().then(async () => {
   if (process.platform === "darwin" && app.dock) app.dock.setIcon(appIconPath())
   configureBrowserAgentSession()
 
-  // Register all IPC handlers before window creation
-  registerIpcHandlers({
-    backend: () => backend,
-    telegram: () => telegram,
-    localStudio: () => localStudio,
-    getMainWindow: () => mainWindow,
-    getQuickEntryWindow: () => quickEntryWindow,
-    preview: () => preview,
-  })
-
   // Telegram agent dispatcher + queue runner. The dispatcher logic moved
   // to `telegram/agent-handler.ts` so the ~280 branches can be tested
   // in isolation; this block wires the queue + flags the factory expects.
@@ -164,7 +155,16 @@ app.whenReady().then(async () => {
   })
   writeLog("info", "Telegram agent handler ready")
   const processNextTelegramTask = async (): Promise<void> => {
-    if (backend.isRunning() || telegramTaskReserved) return
+    if (backend.isRunning() || telegramTaskReserved) {
+      if (telegramQueue.length && !telegramDrainTimer) {
+        telegramDrainTimer = setTimeout(() => {
+          telegramDrainTimer = undefined
+          void processNextTelegramTask()
+        }, 2_000)
+        telegramDrainTimer.unref()
+      }
+      return
+    }
     const next = telegramQueue.shift()
     if (!next) return
     try {
@@ -172,12 +172,27 @@ app.whenReady().then(async () => {
       if (typeof reply === "string") await telegram.sendLong(next.chatId, reply)
       else await telegram.sendReply(next.chatId, reply)
     } catch (error) {
-      await telegram.sendLong(next.chatId, `Queued task failed: ${error instanceof Error ? error.message : String(error)}`)
+      try {
+        await telegram.sendLong(next.chatId, `Queued task failed: ${error instanceof Error ? error.message : String(error)}`)
+      } catch (sendError) {
+        writeLog("error", `Telegram queue error for ${next.chatId}: ${error instanceof Error ? error.message : String(error)}; send failed: ${sendError instanceof Error ? sendError.message : String(sendError)}`)
+      }
     } finally {
       if (telegramQueue.length) queueMicrotask(() => void processNextTelegramTask())
     }
   }
   telegram.setMessageHandler(agentHandler.handleMessage)
+
+  // Register all IPC handlers before window creation
+  registerIpcHandlers({
+    backend: () => backend,
+    telegram: () => telegram,
+    localStudio: () => localStudio,
+    getMainWindow: () => mainWindow,
+    getQuickEntryWindow: () => quickEntryWindow,
+    preview: () => preview,
+    onBackendIdle: () => queueMicrotask(() => void processNextTelegramTask()),
+  })
   writeLog("info", "Creating main window")
 
   mainWindow = await createAndLoadMainWindow()
