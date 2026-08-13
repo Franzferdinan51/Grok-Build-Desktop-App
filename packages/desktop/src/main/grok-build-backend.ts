@@ -672,9 +672,11 @@ ${referenceSection}
     }
 
     const structuredOutput = Boolean(input.jsonSchema?.trim())
+    let nvidiaCompat = false
     try {
       const routed = await this.prepareNvidiaModel(effectiveModel)
       if (routed && routed !== effectiveModel) {
+        nvidiaCompat = true
         onEvent({ type: "thought", data: `NVIDIA NIM streams a payload Grok Build cannot parse directly. This turn uses a local compatibility proxy and still runs as Grok Build --model ${effectiveModel}.\n` })
         effectiveModel = routed
       }
@@ -682,9 +684,18 @@ ${referenceSection}
       writeLog("error", `NVIDIA NIM compatibility setup failed: ${String(error)}`)
       onEvent({ type: "thought", data: "Could not start the NVIDIA NIM compatibility proxy. The selected NVIDIA model may fail with a serialization error.\n" })
     }
-    const cliInput = input.memory === "experimental" || input.memory === "disabled"
+    let cliInput = input.memory === "experimental" || input.memory === "disabled"
       ? input
       : { ...input, memory: "disabled" as const }
+    // NVIDIA currently ignores reasoning effort and emits a warning for it.
+    // Avoid forwarding a setting that the selected model cannot honor.
+    if (nvidiaCompat) {
+      cliInput = {
+        ...cliInput,
+        thinking: false,
+        moa: cliInput.moa ? { ...cliInput.moa, aggregatorReasoningEffort: undefined } : undefined,
+      }
+    }
     const promptArgs = promptArgsFor({ ...cliInput, prompt: effectivePrompt }, effectivePrompt)
     const args = buildBaseArgs({ ...cliInput, prompt: effectivePrompt, model: effectiveModel }, promptArgs)
 

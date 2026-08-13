@@ -9,6 +9,8 @@
  */
 export type BackendErrorClass = "timeout" | "authentication" | "rate_limit" | "network" | "cancelled" | "serialization" | "runtime"
 
+const ANSI_ESCAPE = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g
+
 export function classifyBackendError(message: string): { class: BackendErrorClass; retryable: boolean; userMessage: string } {
   const text = message.trim()
   if (/cancel/i.test(text)) return { class: "cancelled", retryable: false, userMessage: text }
@@ -29,7 +31,7 @@ export function classifyBackendError(message: string): { class: BackendErrorClas
 }
 
 export function normalizeBackendStderr(stderr: string): string {
-  const trimmed = stderr.trim()
+  const trimmed = stderr.replace(ANSI_ESCAPE, "").trim()
   if (!trimmed) return ""
   // Common shape from Grok Build: "Internal error: { ... }" followed by a
   // newline and a JSON dump, or a bare JSON object spanning multiple lines.

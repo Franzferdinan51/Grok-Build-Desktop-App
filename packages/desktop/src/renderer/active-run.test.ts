@@ -10,6 +10,7 @@ test("activeRunLogs restores only visible task output", () => {
     { type: "error", message: "Retrying" },
     { type: "end", usage: { output_tokens: 3 } },
   ]), [
+    { kind: "activity", content: "Working" },
     { kind: "thought", content: "Inspecting files" },
     { kind: "text", content: "Found the issue" },
     { kind: "error", content: "Retrying" },

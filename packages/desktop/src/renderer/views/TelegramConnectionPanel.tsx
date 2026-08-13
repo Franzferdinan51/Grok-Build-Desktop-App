@@ -131,9 +131,14 @@ export function TelegramConnectionPanel(props: {
     </label>
     <p class="provider-notice">Use /sethome in Telegram to deliver scheduled results to that chat{props.status.homeChatId ? ` · home ${props.status.homeChatId}` : ""}.</p>
 
-    <Show when={props.pending.length}>
-      <section>
-        <h3 class="list-group__label">Pairing requests</h3>
+    <section class="telegram-connect__pairing">
+      <h3 class="list-group__label">Pairing requests</h3>
+      <Show when={props.pending.length} fallback={
+        <div class="telegram-connect__empty-pairing">
+          <p class="tree-pane__hint">No requests yet. Connect the bot, open its Telegram chat, and send <code>/start</code> or any message.</p>
+          <button onClick={() => props.onRefresh()}>Check for requests</button>
+        </div>
+      }>
         <For each={props.pending}>{(chat) =>
           <article class="list-row list-row--static">
             <div>
@@ -147,8 +152,8 @@ export function TelegramConnectionPanel(props: {
             </div>
           </article>
         }</For>
-      </section>
-    </Show>
+      </Show>
+    </section>
 
     <section>
       <h3 class="list-group__label">Authorized chats</h3>

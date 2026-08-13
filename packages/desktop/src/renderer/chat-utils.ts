@@ -1,6 +1,6 @@
 import { consolidateThoughts } from "./event-buffer.ts"
 
-export type TaskLog = { kind: "text" | "thought" | "error"; content: string }
+export type TaskLog = { kind: "text" | "thought" | "activity" | "error"; content: string }
 
 // Reasoning is useful as an optional diagnostic, not as a second transcript.
 // Keep the renderer and persisted chat responsive when a provider emits a very

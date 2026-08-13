@@ -24,6 +24,20 @@ export const ZERO_USAGE = {
   cached_write_tokens: 0,
 }
 
+function stripNullUsageFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripNullUsageFields)
+  if (!value || typeof value !== "object") return value
+  const cleaned: Record<string, unknown> = {}
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    // Grok Build models usage counters as integers. Some OpenAI-compatible
+    // NVIDIA responses include optional counters such as audio_tokens with a
+    // JSON null value, which serde rejects even though omitting them is valid.
+    if (nested === null) continue
+    cleaned[key] = stripNullUsageFields(nested)
+  }
+  return cleaned
+}
+
 export function rewriteNvidiaObject(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value
   const obj = value as Record<string, unknown>
@@ -31,6 +45,7 @@ export function rewriteNvidiaObject(value: unknown): unknown {
   if (obj.service_tier === null) delete obj.service_tier
   if (obj.system_fingerprint === null) delete obj.system_fingerprint
   if (obj.usage === null) obj.usage = { ...ZERO_USAGE }
+  else if (obj.usage && typeof obj.usage === "object") obj.usage = stripNullUsageFields(obj.usage)
   return obj
 }
 

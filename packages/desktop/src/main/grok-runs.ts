@@ -30,7 +30,7 @@ export function recoverInterruptedGrokRuns(): void {
 }
 
 export function listGrokRuns(): GrokRunRecord[] {
-  return getStore().get("runs")
+  return getStore().get("runs") || []
 }
 
 export function startGrokRun(input: { cwd: string; prompt: string; model?: string; threadId?: string; advisorCount?: number }, id: string = randomUUID()): GrokRunRecord {

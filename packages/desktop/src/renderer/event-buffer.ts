@@ -15,7 +15,7 @@ export const MAX_LIVE_LOG_ENTRIES = 500
 export const MAX_CONSOLIDATED_THOUGHT_CHARS = 12_000
 export const MAX_CONSOLIDATED_THOUGHT_UPDATES = 96
 
-export type EventLog = { kind: "text" | "thought" | "error"; content: string }
+export type EventLog = { kind: "text" | "thought" | "activity" | "error"; content: string }
 
 /**
  * Keep provider reasoning as one diagnostic record per run. Grok can emit

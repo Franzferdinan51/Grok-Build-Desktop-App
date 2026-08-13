@@ -1,4 +1,6 @@
-import { chromium, type Browser, type Page } from "playwright"
+import type { Browser, Page } from "playwright"
+
+type PlaywrightChromium = typeof import("playwright").chromium
 
 export type BrowserPageInfo = {
   url: string
@@ -15,6 +17,12 @@ export class BrowserManager {
   private browser: Browser | null = null
   private page: Page | null = null
   private usingBrowserOS = false
+  private chromium: PlaywrightChromium | null = null
+
+  private async playwrightChromium(): Promise<PlaywrightChromium> {
+    if (!this.chromium) this.chromium = (await import("playwright")).chromium
+    return this.chromium
+  }
 
   private async browserOsEndpoint(): Promise<string | undefined> {
     const configured = process.env.BROWSEROS_CDP_URL?.trim()
@@ -29,6 +37,7 @@ export class BrowserManager {
 
   async ensureBrowser(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser
+    const chromium = await this.playwrightChromium()
     // BrowserOS exposes Chromium CDP locally. Use its existing profile when
     // available; otherwise keep a private browser-use style session.
     const browserOsCdp = await this.browserOsEndpoint()

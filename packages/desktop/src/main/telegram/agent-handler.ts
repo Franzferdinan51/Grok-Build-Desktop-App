@@ -521,11 +521,11 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
   let turnPhase: "started" | "completed" | "failed" | "cancelled" = "started"
   if (inboundId) {
     if (options.reactions) void telegram.react(chatId, inboundId, telegramReactionEmoji("started"))
-    void telegram.pinMessage(chatId, inboundId)
   }
   await telegram.sendActivity(chatId)
   const progressId = await telegram.sendProgress(chatId, `🚀 Task started\nModel: ${modelName}\nWorkspace: ${workspaceName}`)
   let response = ""
+  let publicResponse = ""
   let stage = "🧠 Grok Build is reasoning"
   let lastProgress = ""
   let progressPending = false
@@ -562,6 +562,10 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
       await telegram.editProgress(chatId, progressId, `⏹ Task cancelled\nTime: ${elapsed()}\nModel: ${modelName}`)
       return "Task cancelled."
     }
+    publicResponse = publicTelegramResponse(response)
+    if (!publicResponse) {
+      throw new Error("Grok Build ended without a public response. The task was not reported as completed; retry it or inspect the failed tool in Runs.")
+    }
     turnPhase = "completed"
     finishGrokRun(run.id, { status: "completed" })
   } catch (error) {
@@ -572,7 +576,6 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
   } finally {
     clearInterval(activityTimer)
     if (inboundId) {
-      void telegram.unpinMessage(chatId, inboundId)
       if (options.reactions) void telegram.react(chatId, inboundId, telegramReactionEmoji(turnPhase))
     }
   }
@@ -584,7 +587,6 @@ async function runAgentTask(deps: AgentHandlerDeps, chatId: string, taskText: st
       }
     }
   }
-  const publicResponse = publicTelegramResponse(response) || "Task completed without a public text response."
   await telegram.deleteProgress(chatId, progressId)
   const transcript = agent.transcript || []
   const nextTranscript = [...transcript, { role: "user" as const, text: taskText.slice(0, 20_000) }, { role: "assistant" as const, text: publicResponse.slice(0, 20_000) }].slice(-12)

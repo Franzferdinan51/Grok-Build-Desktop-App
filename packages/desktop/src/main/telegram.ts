@@ -167,7 +167,7 @@ export class TelegramBridge {
   async setAgentOptions(patch: Partial<TelegramAgentOptions>): Promise<TelegramAgentOptions> {
     return enqueueTelegramMutation(async () => {
       const next = normalizeTelegramAgentOptions({ ...this.agentOptions(), ...patch })
-      getStore().set("telegram", { ...getStore().get("telegram"), ...next })
+      getStore().set("telegram", { ...telegramConfig(), ...next })
       this.notifyChange()
       return next
     })
@@ -200,7 +200,7 @@ export class TelegramBridge {
   async setAllowedChats(chatIds: string[]): Promise<string[]> {
     return enqueueTelegramMutation(async () => {
       const allowedChatIds = [...new Set(chatIds.map((id) => id.trim()).filter((id) => /^-?\d+$/.test(id)))]
-      getStore().set("telegram", { ...getStore().get("telegram"), allowedChatIds, pendingChatIds: this.pendingChats().filter((id) => !allowedChatIds.includes(id)) })
+      getStore().set("telegram", { ...telegramConfig(), allowedChatIds, pendingChatIds: this.pendingChats().filter((id) => !allowedChatIds.includes(id)) })
       for (const id of allowedChatIds) this.unauthorizedNotified.delete(id)
       this.notifyChange()
       return allowedChatIds
@@ -210,7 +210,7 @@ export class TelegramBridge {
   /** Persisted mutation: drop a chat into the pending allow-list. */
   async addPendingChat(chatId: string, profile?: TelegramChatProfile): Promise<void> {
     return enqueueTelegramMutation(async () => {
-      const current = getStore().get("telegram")
+      const current = telegramConfig()
       const pendingChatIds = this.pendingChats().includes(chatId) ? this.pendingChats() : [...this.pendingChats(), chatId]
       getStore().set("telegram", {
         ...current,
@@ -222,7 +222,7 @@ export class TelegramBridge {
   }
 
   chats(): { allowed: TelegramChatView[]; pending: TelegramChatView[] } {
-    const profiles = getStore().get("telegram").chatProfiles
+    const profiles = telegramConfig().chatProfiles
     return {
       allowed: hydrateChats(this.allowedChats(), profiles),
       pending: hydrateChats(this.pendingChats(), profiles),
@@ -230,12 +230,12 @@ export class TelegramBridge {
   }
 
   autoApproveFirst(): boolean {
-    return Boolean(getStore().get("telegram").autoApproveFirst)
+    return Boolean(telegramConfig().autoApproveFirst)
   }
 
   async setAutoApproveFirst(enabled: boolean): Promise<boolean> {
     return enqueueTelegramMutation(async () => {
-      getStore().set("telegram", { ...getStore().get("telegram"), autoApproveFirst: enabled })
+      getStore().set("telegram", { ...telegramConfig(), autoApproveFirst: enabled })
       return enabled
     })
   }
@@ -259,7 +259,7 @@ export class TelegramBridge {
 
   async denyChat(chatId: string): Promise<string[]> {
     await enqueueTelegramMutation(async () => {
-      getStore().set("telegram", { ...getStore().get("telegram"), pendingChatIds: denyChatState(this.pendingChats(), chatId) })
+      getStore().set("telegram", { ...telegramConfig(), pendingChatIds: denyChatState(this.pendingChats(), chatId) })
       this.notifyChange()
     })
     await this.send(chatId, deniedMessage())
@@ -274,7 +274,7 @@ export class TelegramBridge {
 
   private rememberChat(profile: TelegramChatProfile): void {
     void enqueueTelegramMutation(async () => {
-      const current = getStore().get("telegram")
+      const current = telegramConfig()
       getStore().set("telegram", { ...current, chatProfiles: upsertChatProfile(current.chatProfiles, profile) })
     })
   }
@@ -283,7 +283,7 @@ export class TelegramBridge {
   async persistOffset(): Promise<void> {
     const offset = this.offset
     return enqueueTelegramMutation(async () => {
-      getStore().set("telegram", { ...getStore().get("telegram"), updateOffset: offset })
+      getStore().set("telegram", { ...telegramConfig(), updateOffset: offset })
     })
   }
 
@@ -447,7 +447,7 @@ export class TelegramBridge {
       this.unauthorizedNotified = new Set()
       this.offset = 0
       await enqueueTelegramMutation(async () => {
-        getStore().set("telegram", { ...getStore().get("telegram"), token: safeStorage.encryptString(clean).toString("base64"), updateOffset: 0 })
+        getStore().set("telegram", { ...telegramConfig(), token: safeStorage.encryptString(clean).toString("base64"), updateOffset: 0 })
       })
       this.botFirstName = result.first_name || ""
       this.lastUsername = result.username || ""
@@ -480,7 +480,7 @@ export class TelegramBridge {
   async disconnect(): Promise<void> {
     this.stop()
     await enqueueTelegramMutation(async () => {
-      getStore().set("telegram", withDisconnectedState(getStore().get("telegram")))
+      getStore().set("telegram", withDisconnectedState(telegramConfig()))
       this.notifyChange()
     })
   }
@@ -500,7 +500,7 @@ export class TelegramBridge {
     this.lastBotId = 0
     this.lastProbeAt = 0
     await enqueueTelegramMutation(async () => {
-      getStore().set("telegram", withForgottenTokenState(getStore().get("telegram")))
+      getStore().set("telegram", withForgottenTokenState(telegramConfig()))
       this.notifyChange()
     })
   }
@@ -528,7 +528,7 @@ export class TelegramBridge {
   private async startUntilReady(): Promise<TelegramStatus> {
     if (!this.token()) return this.snapshot({ connected: false, hasToken: false, polling: false, error: "No saved bot token. Paste a BotFather token to connect." })
     if (this.polling && this.pollReady) return this.status({ probe: false })
-    this.offset = Number(getStore().get("telegram").updateOffset) || 0
+    this.offset = Number(telegramConfig().updateOffset) || 0
     this.pollReady = false
     this.polling = true
     const generation = ++this.pollGeneration

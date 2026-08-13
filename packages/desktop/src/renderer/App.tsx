@@ -93,6 +93,19 @@ function RichText(props: { content: string }) {
 
 const NAV = SIDEBAR_NAV
 
+function isVisibleToolEvent(event: BackendEvent): boolean {
+  return Boolean(/tool|function|command|file_change/i.test(event.type))
+}
+
+function describeVisibleToolEvent(event: BackendEvent): string {
+  const payload = event as Record<string, unknown>
+  const name = [payload.toolName, payload.tool_name, payload.name, payload.title, payload.command]
+    .find((value): value is string => typeof value === "string" && Boolean(value.trim()))
+  const detail = [payload.data, payload.message]
+    .find((value): value is string => typeof value === "string" && Boolean(value.trim()))
+  return `🔧 ${name || event.type}${detail && detail !== name ? `\n${detail}` : ""}`
+}
+
 export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [prompt, setPrompt] = createSignal("")
   const [workspace, setWorkspace] = createSignal("")
@@ -1144,6 +1157,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       }
       if (event.type === "text" && event.data) queueBackendEvent({ kind: "text", content: event.data })
       if (event.type === "thought" && event.data) queueBackendEvent({ kind: "thought", content: event.data })
+      if (event.type === "phase" && event.data) queueBackendEvent({ kind: "activity", content: `⏳ ${event.data}` })
+      if (isVisibleToolEvent(event)) queueBackendEvent({ kind: "activity", content: describeVisibleToolEvent(event) })
       if (event.type === "thought" && event.data?.includes("Recovered the conversation")) {
         const thread = chatThreads().find((entry) => entry.id === activeThreadId())
         if (thread) void updateThreadMeta(thread, { sessionStatus: "recovered" })

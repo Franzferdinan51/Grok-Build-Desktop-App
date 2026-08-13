@@ -21,6 +21,20 @@ test("rewriteNvidiaObject keeps a populated final usage object", () => {
   assert.deepEqual(rewritten.usage, usage)
 })
 
+test("rewriteNvidiaObject removes null counters nested inside final usage details", () => {
+  const rewritten = rewriteNvidiaObject({
+    id: "chatcmpl-final",
+    choices: [],
+    usage: {
+      prompt_tokens: 29_418,
+      completion_tokens: 193,
+      total_tokens: 29_611,
+      prompt_tokens_details: { audio_tokens: null, cached_tokens: 26_112 },
+    },
+  }) as { usage: { prompt_tokens_details: Record<string, unknown> } }
+  assert.deepEqual(rewritten.usage.prompt_tokens_details, { cached_tokens: 26_112 })
+})
+
 test("rewriteNvidiaSseEvent rewrites data lines and leaves [DONE] alone", () => {
   const event = rewriteNvidiaSseEvent("data: {\"usage\":null,\"nvext\":1}\n")
   assert.match(event, /"prompt_tokens":0/)
