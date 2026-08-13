@@ -48,6 +48,7 @@ import { addDockedSessionId, parseDockedSessionIds, removeDockedSessionId } from
 import { branchConversation } from "./conversation-branch"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import { activeRunLogs } from "./active-run"
+import { decideRunAdmission } from "./run-admission"
 import { runDiagnostics } from "./run-detail"
 import "./styles.css"
 import "./preview-layout.css"
@@ -245,6 +246,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   let notificationId = 0
   let draftPersistTimer = 0
   let draftPersistThreadId = ""
+  let runAdmissionInFlight = false
   let workspaceRefresh = createWorkspaceRefreshScheduler(() => {})
   const announce = (kind: DesktopNotification["kind"], title: string, message: string) => {
     const id = ++notificationId
@@ -1276,7 +1278,22 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       setAttachedFiles([])
       void persistComposerDraft(activeThreadId(), "", [])
     }
-    if (running()) {
+    let remoteActiveRun: Awaited<ReturnType<typeof window.api.backend.activeRun>> = null
+    if (!running() && !runAdmissionInFlight) {
+      runAdmissionInFlight = true
+      try {
+        remoteActiveRun = await window.api.backend.activeRun()
+      } finally {
+        runAdmissionInFlight = false
+      }
+    }
+    if (decideRunAdmission(running(), Boolean(remoteActiveRun), runAdmissionInFlight) === "queue") {
+      if (remoteActiveRun && !running()) {
+        setEvents((current) => mergeLogs(activeRunLogs(remoteActiveRun.events), current))
+        if (remoteActiveRun.sessionId) await persistSessionId(remoteActiveRun.sessionId)
+        setRunning(true)
+        setSlashNotice("An active Grok Build task is already running. This instruction was queued and will continue when it finishes.")
+      }
       if (ephemeral) return [{ kind: "error", content: "Grok is already running another task." }]
       await replaceQueue(enqueuePrompt(queuedPrompts(), submitted, crypto.randomUUID()))
       unparkActiveQueue()
@@ -1284,8 +1301,16 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       announce("info", "Task queued", "Grok Build will start this instruction when the active run finishes.")
       return []
     }
-    if (!fromQueue) setPrompt("")
-    setEvents([]); setRunning(true)
+    runAdmissionInFlight = true
+    try {
+      // Set the local busy state before the first async workspace/session step.
+      // A second send can therefore never race past admission while this run
+      // is still preparing its prompt or persisting the user turn.
+      if (!fromQueue) setPrompt("")
+      setEvents([]); setRunning(true)
+    } finally {
+      runAdmissionInFlight = false
+    }
     if (!ephemeral) announce("info", "Task started", "Grok Build is working in the selected workspace.")
     let completedLogs: TaskLog[] = []
     try {
