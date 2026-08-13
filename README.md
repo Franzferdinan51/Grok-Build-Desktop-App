@@ -162,7 +162,7 @@ BrowserOS/browser-control helper when they are installed.
 
 ## Chat workflow
 
-Each conversation is stored atomically outside the settings file and owns its workspace, selected model, transcript, checkpoint, and resumable Grok session. Press **Enter** to send, **Shift+Enter** for a new line, and use Up/Down at the input boundary for prompt history. Messages submitted during a run are queued and drained automatically. Stopping a run preserves partial output and continuity for the next instruction; **New chat** archives the current conversation in History and starts a clean backend session.
+Each conversation is stored atomically outside the settings file and owns its workspace, selected model, transcript, checkpoint, and resumable Grok session. The **Workbench** view is where you continue the selected conversation and run tasks; it is separate from the **New chat** action in the chat header, which archives the current conversation in History and starts a clean backend session. Press **Enter** to send, **Shift+Enter** for a new line, and use Up/Down at the input boundary for prompt history. Messages submitted during a run are queued and drained automatically. Stopping a run preserves partial output and continuity for the next instruction.
 
 Press **⌘K** (Ctrl+K on Windows) for the command palette: jump to views, chats, models, and slash commands. Type `/` in the composer for local commands. Important commands include:
 

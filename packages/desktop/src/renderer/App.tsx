@@ -49,7 +49,6 @@ import "./context-rail.css"
 import "./session-review.css"
 import "./scroll-latest.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
-import { UI_ICONS } from "./assets/ui-icons"
 import * as eventBuffer from "./event-buffer"
 import "./artifacts.css"
 
@@ -74,18 +73,18 @@ function RichText(props: { content: string }) {
 }
 
 const NAV = [
-  { id: "new-task", label: "New task", icon: UI_ICONS["new-task"] },
-  { id: "workspace", label: "Workspace", icon: UI_ICONS.workspace },
-  { id: "terminal", label: "Terminal", icon: UI_ICONS.terminal },
-  { id: "runs", label: "Grok runs", icon: UI_ICONS.runs },
-  { id: "artifacts", label: "Artifacts", icon: UI_ICONS.artifacts },
-  { id: "review", label: "Review", icon: UI_ICONS.review },
-  { id: "skills", label: "Skills", icon: UI_ICONS.skills },
-  { id: "scheduled", label: "Scheduled", icon: UI_ICONS.scheduled },
-  { id: "runtime", label: "Local runtimes", icon: UI_ICONS.runtime },
-  { id: "telegram", label: "Agent", icon: UI_ICONS.telegram },
-  { id: "browser-agent", label: "Browser Agent", icon: UI_ICONS["browser-agent"] },
-  { id: "settings", label: "Settings", icon: UI_ICONS.settings },
+  { id: "new-task", label: "Workbench", icon: "✦" },
+  { id: "workspace", label: "Workspace", icon: "▤" },
+  { id: "terminal", label: "Terminal", icon: ">_" },
+  { id: "runs", label: "Grok runs", icon: "◴" },
+  { id: "artifacts", label: "Artifacts", icon: "◇" },
+  { id: "review", label: "Review", icon: "⌘" },
+  { id: "skills", label: "Skills", icon: "◇" },
+  { id: "scheduled", label: "Scheduled", icon: "◷" },
+  { id: "runtime", label: "Local runtimes", icon: "▣" },
+  { id: "telegram", label: "Agent", icon: "◈" },
+  { id: "browser-agent", label: "Browser Agent", icon: "🌐" },
+  { id: "settings", label: "Settings", icon: "⚙" },
 ]
 
 export function App(props: { backendStatus: Accessor<BackendStatus> }) {
@@ -1378,7 +1377,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     </Show>
     <aside class={`sidebar ${sidebarCollapsed() ? "sidebar--collapsed" : ""}`}>
       <div class="brand"><img class="brand__logo" src={grokBuildLogo} alt="" /><span>Grok Build</span><button class="sidebar-collapse" onClick={async () => { const next = !sidebarCollapsed(); setSidebarCollapsed(next); await window.api.store.set(STORE_KEYS.layoutSidebarCollapsed, next) }} title={sidebarCollapsed() ? "Expand sidebar" : "Collapse sidebar"}>{sidebarCollapsed() ? "›" : "‹"}</button></div>
-      <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => void navigate(item.id)}><img class="sidebar__icon" src={item.icon} alt="" /><span class="sidebar__label">{item.label}</span><Show when={item.id === "telegram" && telegramInbox().pending.length}><span class="project-changes">{telegramInbox().pending.length}</span></Show></button>}</For></nav>
+      <nav class="sidebar__nav"><For each={NAV}>{(item) => <button class={`sidebar__item ${active() === item.id ? "sidebar__item--active" : ""}`} onClick={() => void navigate(item.id)}><span>{item.icon}</span>{item.label}<Show when={item.id === "telegram" && telegramInbox().pending.length}><span class="project-changes">{telegramInbox().pending.length}</span></Show></button>}</For></nav>
       <div class="sidebar__section">
         <div class="section-heading"><span class="sidebar__section-title">Projects</span><button class="project-add" onClick={chooseWorkspace} title="Add project">+</button></div>
         <Show when={projects().length > 0} fallback={<><button class="sidebar__project" onClick={useScratchWorkspace}>Start agent scratch</button><button class="sidebar__project" onClick={chooseWorkspace}>Add a codebase</button></>}>
@@ -1407,9 +1406,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           <Show when={historyOpen()}><section class="chat-history" aria-label="Previous chat sessions"><header><div><strong>Chat history</strong><span>{historyAllWorkspaces() ? "All workspaces" : selectedProject()?.name || "Scratch"}</span></div><button onClick={() => setHistoryOpen(false)}>Close</button></header><div class="chat-history__tools"><input value={historySearch()} onInput={async (event) => { setHistorySearch(event.currentTarget.value); await refreshHistory() }} placeholder="Search conversations…"/><label><input type="checkbox" checked={historyAllWorkspaces()} onChange={async (event) => { setHistoryAllWorkspaces(event.currentTarget.checked); await refreshHistory() }}/> All workspaces</label></div><div><For each={historyResults().filter((thread) => thread.messages.length && !thread.archived)} fallback={<p>No matching chats.</p>}>{(thread) => <article class={thread.id === activeThreadId() ? "active" : ""}><button disabled={running()} onClick={() => void openConversation(thread)}><strong>{thread.pinned ? "📌 " : ""}{thread.title}</strong><span>{new Date(thread.updatedAt).toLocaleString()} · {thread.messages.length} messages · {thread.model || "default"} · {thread.sessionStatus || (thread.sessionId ? "resumable" : "new")}</span></button><div><button onClick={() => void openSplitConversation(thread)} disabled={thread.id === activeThreadId()}>Split</button><button onClick={() => { const title = window.prompt("Conversation name", thread.title); if (title?.trim()) void updateThreadMeta(thread, { title: title.trim() }) }}>Rename</button><button onClick={() => void updateThreadMeta(thread, { pinned: !thread.pinned })}>{thread.pinned ? "Unpin" : "Pin"}</button><button onClick={() => void window.api.conversations.export(thread.id)}>Export</button><button onClick={() => void _forkConversation(thread)}>Fork</button><button onClick={() => void updateThreadMeta(thread, { archived: true })}>Archive</button></div></article>}</For></div></section></Show>
           <div class="chat-messages" ref={messagesElement} onScroll={(event) => { const element = event.currentTarget; userNearBottom = isNearBottom(element.scrollHeight, element.scrollTop, element.clientHeight); setShowJumpToLatest(!userNearBottom) }}>
             <Show when={showJumpToLatest()}><button class="chat-jump-latest" onClick={jumpToLatest}>↓ Jump to latest</button></Show>
-            <Show when={messages().length || running()} fallback={<div class="chat-empty"><img class="chat-empty__icon" src={UI_ICONS["new-task"]} alt="" /><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
-              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? <img src={UI_ICONS["new-task"]} alt="" /> : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(splitThinking(message.logs).filter((log) => log.kind !== "thought").map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) void run(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
-              <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar"><img src={UI_ICONS["new-task"]} alt="" /></div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={splitThinking(events())}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thinking…</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For></Show></div></article></Show>
+            <Show when={messages().length || running()} fallback={<div class="chat-empty"><span class="chat-empty__mark">✦</span><h1>What do you want to build?</h1><p>Ask Grok Build to create, debug, explain, or change code.</p><div><button onClick={() => setPrompt("Review this codebase and suggest the highest-impact improvements.")}>Review this project</button><button onClick={() => setPrompt("Find and fix the most important bug in this codebase.")}>Fix a bug</button><button onClick={() => setPrompt("Add tests for the most critical untested behavior.")}>Add tests</button></div></div>}>
+              <For each={messages()}>{(message) => <article class={`chat-message chat-message--${message.role}`}><div class="chat-avatar">{message.role === "assistant" ? "✦" : "You"}</div><div class="chat-message__body"><For each={splitThinking(message.logs)}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thought process</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For><div class="message-actions"><span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span><button onClick={() => navigator.clipboard.writeText(splitThinking(message.logs).filter((log) => log.kind !== "thought").map((log) => log.content).join("\n"))}>Copy</button><Show when={message.role === "assistant"}><button onClick={() => { const previous = messages().slice(0, messages().findIndex((entry) => entry.id === message.id)).reverse().find((entry) => entry.role === "user"); if (previous) void run(previous.logs.map((log) => log.content).join("\n")) }}>Retry</button></Show></div></div></article>}</For>
+              <Show when={running()}><article class="chat-message chat-message--assistant"><div class="chat-avatar">✦</div><div class="chat-message__body"><Show when={events().length} fallback={<div class="typing-indicator"><i/><i/><i/></div>}><For each={splitThinking(events())}>{(entry) => <Show when={entry.kind !== "thought"} fallback={<details class="reasoning"><summary>Thinking…</summary><pre>{entry.content}</pre></details>}><Show when={entry.kind === "text"} fallback={<pre class="chat-error">{entry.content}</pre>}><RichText content={entry.content} /></Show></Show>}</For></Show></div></article></Show>
             </Show>
           </div>
         </section>

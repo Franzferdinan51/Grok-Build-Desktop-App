@@ -43,7 +43,7 @@ export function createMenu(mainWindow: BrowserWindow): Menu {
       label: "File",
       submenu: [
         {
-          label: "New Task",
+          label: "New Chat",
           accelerator: "CmdOrCtrl+N",
           click: () => mainWindow.webContents.send("menu:command", "new-task"),
         },
