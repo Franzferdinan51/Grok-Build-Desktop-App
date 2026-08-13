@@ -33,6 +33,8 @@ import { ScheduledPanel } from "./views/ScheduledPanel"
 import { RuntimePanel } from "./views/RuntimePanel"
 import { TelegramConnectionPanel } from "./views/TelegramConnectionPanel"
 import { SettingsPanel } from "./views/SettingsPanel"
+import { ArtifactsPanel } from "./views/ArtifactsPanel"
+import { collectArtifacts, type ArtifactRecord } from "./artifact-utils"
 import { BROWSER_AGENT_DIRECTIVE_SCHEMA, BROWSER_AGENT_SYSTEM_PROMPT } from "./browser-agent-protocol"
 import "./styles.css"
 import "./preview-layout.css"
@@ -43,6 +45,7 @@ import "./chat-terminal.css"
 import "./branding.css"
 import grokBuildLogo from "./assets/grok-build-logo.png"
 import * as eventBuffer from "./event-buffer"
+import "./artifacts.css"
 
 type ChatMessage = { id: string; role: "user" | "assistant"; logs: TaskLog[]; createdAt: number }
 type ChatThread = StoredChatThread & { messages: ChatMessage[] }
@@ -68,6 +71,7 @@ const NAV = [
   { id: "workspace", label: "Workspace", icon: "▤" },
   { id: "terminal", label: "Terminal", icon: ">_" },
   { id: "runs", label: "Grok runs", icon: "◴" },
+  { id: "artifacts", label: "Artifacts", icon: "◇" },
   { id: "review", label: "Review", icon: "⌘" },
   { id: "skills", label: "Skills", icon: "◇" },
   { id: "scheduled", label: "Scheduled", icon: "◷" },
@@ -114,6 +118,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
   const [projects, setProjects] = createSignal<ProjectSnapshot[]>([])
   const [selectedProject, setSelectedProject] = createSignal<ProjectSnapshot | null>(null)
   const [runs, setRuns] = createSignal<GrokRunRecord[]>([])
+  const [artifacts, setArtifacts] = createSignal<ArtifactRecord[]>([])
   const [localStudioURL, setLocalStudioURL] = createSignal("")
   const [localStudio, setLocalStudio] = createSignal<LocalStudioSnapshot>({ configured: false, reachable: false, baseUrl: "" })
   const [catalog, setCatalog] = createSignal<GrokBuildModelCatalog>({ models: [] })
@@ -442,6 +447,13 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     else setSlashNotice("Create or keep another conversation before opening a split pane.")
   }
   const refreshHistory = async () => setHistoryResults(await window.api.conversations.search(historySearch(), historyAllWorkspaces() ? undefined : workspace()) as ChatThread[])
+  const refreshArtifacts = async () => setArtifacts(collectArtifacts(await window.api.conversations.list()))
+  const openArtifactThread = async (id: string) => {
+    const thread = await window.api.conversations.get(id) as ChatThread | undefined
+    if (!thread) return
+    setActive("new-task")
+    await openConversation(thread)
+  }
   const updateThreadMeta = async (thread: ChatThread, patch: Partial<ChatThread>) => {
     const updated = { ...thread, ...patch, updatedAt: Date.now() }
     await window.api.conversations.save(updated)
@@ -1270,6 +1282,7 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
     if (view === "review") await refreshDiff()
     if (view === "skills") setSkills(await window.api.skills.list(workspace() || undefined))
     if (view === "runs") setRuns(await window.api.grokRuns.list())
+    if (view === "artifacts") await refreshArtifacts()
     if (view === "scheduled") setSchedules(await window.api.schedules.list())
     if (view === "browser-agent") setCatalog(await window.api.backend.models())
     if (view === "telegram") {
@@ -1342,8 +1355,8 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
       </div>
     </aside>
 
-    <main class={`main-content ${active() === "new-task" ? "main-content--chat" : ""} ${active() === "browser-agent" ? "main-content--browser-agent" : ""} ${["workspace", "terminal", "review"].includes(active()) ? "main-content--ide" : ""} ${["skills", "scheduled", "runtime", "runs", "settings", "telegram"].includes(active()) ? "main-content--page" : ""} ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
-      <Show when={active() === "review"} fallback={
+    <main class={`main-content ${active() === "new-task" ? "main-content--chat" : ""} ${active() === "browser-agent" ? "main-content--browser-agent" : ""} ${["workspace", "terminal", "review"].includes(active()) ? "main-content--ide" : ""} ${["artifacts", "skills", "scheduled", "runtime", "runs", "settings", "telegram"].includes(active()) ? "main-content--page" : ""} ${active() === "new-task" && previewEnabled() && previewOpen() ? "main-content--preview" : ""}`}>
+      <Show when={active() === "artifacts"} fallback={<Show when={active() === "review"} fallback={
       <Show when={active() === "workspace"} fallback={
       <Show when={active() === "terminal"} fallback={
       <Show when={active() === "skills"} fallback={
@@ -1668,6 +1681,9 @@ export function App(props: { backendStatus: Accessor<BackendStatus> }) {
           onAskReview={askReviewInChat}
           onOpenProject={chooseWorkspace}
         />
+      </Show>
+      }>
+        <ArtifactsPanel artifacts={artifacts} onRefresh={() => void refreshArtifacts()} onOpenThread={(id) => void openArtifactThread(id)} />
       </Show>
     </main>
     <footer class="app-status">
