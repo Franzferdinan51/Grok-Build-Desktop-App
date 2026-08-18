@@ -3,12 +3,12 @@ import { existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import test from "node:test"
 
-type StateModule = typeof import("./desktop-update-state")
+type StateModule = typeof import("./desktop-update-state.ts")
 
 async function loadStateModule(): Promise<StateModule> {
   const moduleUrl = new URL("./desktop-update-state.ts", import.meta.url)
   assert.equal(existsSync(fileURLToPath(moduleUrl)), true, "desktop-update-state.ts must exist")
-  return import("./desktop-update-state")
+  return import("./desktop-update-state.ts")
 }
 
 test("desktop update state moves from checking through available, download, and ready", async () => {
