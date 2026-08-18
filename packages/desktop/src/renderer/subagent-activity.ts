@@ -114,6 +114,11 @@ export function reduceSubagentActivities(current: SubagentActivity[], patch: Sub
   return next.slice(0, MAX_VISIBLE_SUBAGENTS)
 }
 
+/** Keep the previous run visible while idle; reset only as a new run starts. */
+export function shouldResetSubagentsForRunTransition(previousRunning: boolean, running: boolean): boolean {
+  return !previousRunning && running
+}
+
 export function subagentStatusLabel(status: SubagentStatus): string {
   return status === "running" ? "working" : status
 }
