@@ -19,11 +19,9 @@ jobs:
           - platform: macOS
             os: macos-latest
             script: package:mac
-            artifact: packages/desktop/dist/*
           - platform: Windows
             os: windows-latest
             script: package:win
-            artifact: packages/desktop/dist/*
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -35,11 +33,41 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      # Hosted runners do not provide the locally installed Grok CLI or the
-      # same filesystem error semantics as the desktop development machine.
       - run: pnpm test:unit
       - run: pnpm --filter @grok-build/desktop build
-      - run: pnpm --filter @grok-build/desktop ${{ matrix.script }}
+
+      # macOS auto-update refuses unsigned applications. A tagged release must
+      # therefore fail rather than quietly publishing a build that cannot update.
+      - name: Require macOS release signing credentials
+        if: matrix.platform == 'macOS' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -z "$CSC_LINK" ] || [ -z "$CSC_KEY_PASSWORD" ]; then
+            echo "Missing MAC_CSC_LINK or MAC_CSC_KEY_PASSWORD; refusing to publish a non-updatable macOS release."
+            exit 1
+          fi
+
+      # On a real version tag, electron-builder creates/updates one GitHub draft
+      # and uploads the installer plus the exact latest*.yml/checksum metadata
+      # generated from that build. Both matrix jobs contribute to the same tag.
+      - name: Package and publish update assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: pnpm --filter @grok-build/desktop ${{ matrix.script }} -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ matrix.platform == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          WIN_CSC_LINK: ${{ matrix.platform == 'Windows' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+
+      # Manual workflow runs are package-only and never mutate GitHub Releases.
+      - name: Package without publishing
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: pnpm --filter @grok-build/desktop ${{ matrix.script }} -- --publish never
+
       - uses: actions/upload-artifact@v4
         with:
           name: grok-build-desktop-${{ matrix.platform }}
@@ -57,10 +85,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: release-assets
+      # The package jobs deliberately publish to a draft first so users never see
+      # a release while one platform or its update metadata is still missing.
       - uses: softprops/action-gh-release@v2
         with:
+          draft: false
           generate_release_notes: true
-          files: release-assets/**/*
