@@ -38,9 +38,10 @@ const config: Configuration = {
     category: "public.app-category.developer-tools",
     target: ["dmg", "zip"],
     artifactName: "${productName}-${version}-mac.${ext}",
-    // electron-updater requires a signed macOS application. In CI, fail the
-    // release instead of silently publishing an unsigned, non-updatable app.
-    forceCodeSigning: process.env.CI === "true",
+    // electron-updater requires a signed macOS application. Tagged publishing
+    // sets this flag so CI fails instead of shipping a non-updatable Mac build.
+    // Ordinary local/manual package builds may remain unsigned for development.
+    forceCodeSigning: process.env.GROK_DESKTOP_REQUIRE_SIGNING === "1",
   },
   win: {
     icon: "icon.png",
