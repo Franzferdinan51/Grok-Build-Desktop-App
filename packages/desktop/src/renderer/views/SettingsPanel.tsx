@@ -4,6 +4,7 @@ import type { ModelOption } from "../provider-availability"
 import { SETTINGS_TABS, type AdvancedSettings, type SettingsTab } from "../settings-defaults"
 import { PageShell } from "./PageShell"
 import { ModelPicker } from "../ModelPicker"
+import { DesktopUpdateCard } from "../DesktopUpdateCard"
 import grokBuildLogo from "../assets/grok-build-logo.png"
 
 function GroupedModelSelect(props: {
@@ -224,6 +225,10 @@ export function SettingsPanel(props: {
           <Show when={props.grokUpdateNotice}><p class="provider-notice">{props.grokUpdateNotice}</p></Show>
           <p class="provider-notice">Automatic checks run shortly after launch and every six hours. Updates wait while a coding task is running.</p>
         </div>
+      </Show>
+
+      <Show when={showCard("Grok Build Desktop updates", "desktop app github releases update download install restart")}>
+        <DesktopUpdateCard />
       </Show>
     </Show>
 
