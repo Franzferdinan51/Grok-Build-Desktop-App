@@ -37,7 +37,10 @@ const config: Configuration = {
     icon: "icon.icns",
     category: "public.app-category.developer-tools",
     target: ["dmg", "zip"],
-    artifactName: "${productName}-${version}-mac.${ext}",
+    // Keep artifact names stable and punctuation-identical to electron-updater metadata.
+    // GitHub artifact transport normalizes spaces, which otherwise makes latest-mac.yml
+    // point at a filename that does not exist in the release.
+    artifactName: "Grok.Build.Desktop-${version}-mac.${ext}",
     // electron-updater requires a signed macOS application. Tagged publishing
     // sets this flag so CI fails instead of shipping a non-updatable Mac build.
     // Ordinary local/manual package builds may remain unsigned for development.
@@ -46,7 +49,7 @@ const config: Configuration = {
   win: {
     icon: "icon.png",
     target: ["nsis"],
-    artifactName: "${productName}-${version}-win.${ext}",
+    artifactName: "Grok.Build.Desktop-${version}-win.${ext}",
   },
   linux: {
     icon: "icon.png",
