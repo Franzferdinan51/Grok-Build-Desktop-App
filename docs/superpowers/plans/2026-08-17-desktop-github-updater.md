@@ -18,6 +18,8 @@
 - macOS continues to emit both `dmg` and `zip`; Windows continues to use NSIS.
 - Automatic desktop checks are throttled; manual checks always run.
 - Renderer gets no direct Node/Electron update access; all update operations pass through preload IPC.
+- Downloaded desktop updates install only from the explicit Restart & install action (`autoInstallOnAppQuit=false`).
+- Tagged macOS releases must be Developer ID signed; CI fails rather than publishing an unsigned build that electron-updater cannot apply.
 
 ---
 
@@ -30,28 +32,28 @@
 **Interfaces:**
 - Produces: `DesktopUpdateState`, `initialDesktopUpdateState(currentVersion)`, `updateAvailableState(state, info)`, `downloadProgressState(state, progress)`, `updateReadyState(state, info)`, `updateErrorState(state, error)`.
 
-- [ ] Write a test that first asserts the state module exists, then verifies available/download/ready/error transitions.
-- [ ] Run the unit suite and confirm the test fails because the state module does not exist.
-- [ ] Implement the pure state helpers.
-- [ ] Run the unit suite and confirm it passes.
+- [x] Write a test that first asserts the state module exists, then verifies available/download/ready/error transitions.
+- [x] Run the unit suite and confirm the test fails because the state module does not exist.
+- [x] Implement the pure state helpers.
+- [x] Run the unit suite and confirm it passes.
 
 ### Task 2: Main-process updater and GitHub publish metadata
 
 **Files:**
 - Create: `packages/desktop/src/main/desktop-updater.ts`
+- Create: `packages/desktop/src/main/desktop-updater-ipc.ts`
 - Modify: `packages/desktop/electron-builder.config.ts`
-- Modify: `packages/desktop/src/main/ipc.ts`
 - Modify: `packages/desktop/src/main/index.ts`
 
 **Interfaces:**
 - Produces: `DesktopUpdater.start()`, `.state()`, `.check({ manual })`, `.download()`, `.install()`.
 - IPC: `desktop-update:state`, `desktop-update:check`, `desktop-update:download`, `desktop-update:install`.
 
-- [ ] Add a failing contract assertion requiring the GitHub publish provider and desktop-update IPC channels.
-- [ ] Configure `{ provider: "github", owner: "Franzferdinan51", repo: "Grok-Build-Desktop-App" }` in electron-builder.
-- [ ] Wrap `electron-updater` using its ESM-compatible default import/destructure pattern, with `autoDownload=false`, `autoInstallOnAppQuit=true`, progress/error event handling, and a startup/focus cooldown.
-- [ ] Reject install while the backend has active work; otherwise call `quitAndInstall(false, true)`.
-- [ ] Register updater IPC separately from the existing CLI updater.
+- [x] Configure `{ provider: "github", owner: "Franzferdinan51", repo: "Grok-Build-Desktop-App" }` in electron-builder.
+- [x] Wrap `electron-updater` using its ESM-compatible default import/destructure pattern, with `autoDownload=false`, `autoInstallOnAppQuit=false`, progress/error event handling, and a startup/focus cooldown.
+- [x] Reject install while the backend has active work; otherwise call `quitAndInstall(false, true)`.
+- [x] Register updater IPC separately from the existing CLI updater.
+- [x] Require signed macOS tagged releases so the updater cannot ship a Mac artifact that cannot self-update.
 
 ### Task 3: Typed preload API and Settings UI
 
@@ -67,22 +69,23 @@
 - `window.api.app.installDesktopUpdate()`
 - `window.api.app.onDesktopUpdateState(handler)`
 
-- [ ] Add typed preload methods and event subscription.
-- [ ] Build a Settings card beside the existing CLI update card, clearly labeled “Grok Build Desktop updates”.
-- [ ] Show current/available version, release notes, download progress, errors, and the appropriate action button for each state.
-- [ ] Keep application-update copy distinct from CLI-update copy.
+- [x] Add typed preload methods and event subscription.
+- [x] Build a Settings card beside the existing CLI update card, clearly labeled “Grok Build Desktop updates”.
+- [x] Show current/available version, release notes, download progress, errors, and the appropriate action button for each state.
+- [x] Keep application-update copy distinct from CLI-update copy.
 
 ### Task 4: CI and release-path verification
 
 **Files:**
 - Modify: `.github/workflows/smoke.yml`
-- Modify: `.github/workflows/release.yml` only if artifact validation needs tightening.
+- Modify: `.github/workflows/release.yml`
 
 **Interfaces:**
 - PR CI runs typecheck, unit tests, and smoke tests on macOS and Windows.
-- Tagged release keeps `.dmg`, `.zip`, `.exe`, `.blockmap`, and `latest*.yml` assets together.
+- Tagged release creates one draft, uploads each platform's installer and matching update metadata, then publishes only after both platform jobs succeed.
 
-- [ ] Add `pnpm test:unit` to PR smoke CI so updater state tests execute before merge.
-- [ ] Verify release workflow still publishes update metadata with platform installers.
+- [x] Add `pnpm test:unit` to PR smoke CI so updater state tests execute before merge.
+- [x] Make tagged package jobs publish installers and `latest*.yml` from the same electron-builder build into a draft release.
+- [x] Publish the draft only after both macOS and Windows package jobs succeed.
 - [ ] Run PR CI on macOS and Windows; fix every type/test/smoke failure.
 - [ ] Merge only after green verification, then confirm `main` CI remains green.
