@@ -26,3 +26,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:unit
       - run: pnpm test:smoke
+      - run: pnpm --filter @grok-build/desktop build
