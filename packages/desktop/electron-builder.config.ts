@@ -24,6 +24,12 @@ const config: Configuration = {
   extraMetadata: {
     main: "out/main/index.js",
   },
+  publish: {
+    provider: "github",
+    owner: "Franzferdinan51",
+    repo: "Grok-Build-Desktop-App",
+    releaseType: "draft",
+  },
   afterPack: async (context) => {
     if (context.electronPlatformName === "darwin") execFileSync("xattr", ["-cr", context.appOutDir])
   },
@@ -32,6 +38,9 @@ const config: Configuration = {
     category: "public.app-category.developer-tools",
     target: ["dmg", "zip"],
     artifactName: "${productName}-${version}-mac.${ext}",
+    // electron-updater requires a signed macOS application. In CI, fail the
+    // release instead of silently publishing an unsigned, non-updatable app.
+    forceCodeSigning: process.env.CI === "true",
   },
   win: {
     icon: "icon.png",
