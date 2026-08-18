@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { reduceSubagentActivities, subagentPatchFromBackendEvent } from "./subagent-activity.ts"
+import { reduceSubagentActivities, shouldResetSubagentsForRunTransition, subagentPatchFromBackendEvent } from "./subagent-activity.ts"
 
 test("normalizes official headless spawn and completion tool envelopes", () => {
   const started = subagentPatchFromBackendEvent({ type: "tool_call", toolCallId: "tool-1", toolName: "spawn_subagent", rawInput: { description: "Inspect tests" } })
@@ -19,4 +19,11 @@ test("merges lifecycle updates without duplicating a subagent", () => {
   assert.equal(done.length, 1)
   assert.equal(done[0]?.status, "completed")
   assert.equal(done[0]?.label, "Review")
+})
+
+test("keeps finished subagents visible until a new run begins", () => {
+  assert.equal(shouldResetSubagentsForRunTransition(true, false), false)
+  assert.equal(shouldResetSubagentsForRunTransition(false, false), false)
+  assert.equal(shouldResetSubagentsForRunTransition(false, true), true)
+  assert.equal(shouldResetSubagentsForRunTransition(true, true), false)
 })
