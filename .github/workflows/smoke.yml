@@ -27,3 +27,27 @@ jobs:
       - run: pnpm test:unit
       - run: pnpm test:smoke
       - run: pnpm --filter @grok-build/desktop build
+
+      - name: Package macOS updater artifacts
+        if: runner.os == 'macOS'
+        run: pnpm --filter @grok-build/desktop package:mac -- --publish never
+
+      - name: Verify macOS updater metadata
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          test -f packages/desktop/dist/latest-mac.yml
+          find packages/desktop/dist -maxdepth 1 -name '*.zip' -print -quit | grep -q .
+          find packages/desktop/dist -maxdepth 1 -name '*.dmg' -print -quit | grep -q .
+
+      - name: Package Windows updater artifacts
+        if: runner.os == 'Windows'
+        run: pnpm --filter @grok-build/desktop package:win -- --publish never
+
+      - name: Verify Windows updater metadata
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'packages/desktop/dist/latest.yml')) { throw 'latest.yml was not generated' }
+          if (-not (Get-ChildItem 'packages/desktop/dist/*.exe' -ErrorAction SilentlyContinue)) { throw 'Windows installer was not generated' }
+          if (-not (Get-ChildItem 'packages/desktop/dist/*.blockmap' -ErrorAction SilentlyContinue)) { throw 'Windows blockmap was not generated' }
