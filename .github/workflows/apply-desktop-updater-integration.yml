@@ -1,0 +1,63 @@
+name: Apply desktop updater integration patch
+
+on:
+  push:
+    branches: [feat/desktop-github-updater]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/desktop-github-updater
+      - name: Patch main-process integration
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("packages/desktop/src/main/index.ts")
+          text = path.read_text()
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match, found {count}: {old[:100]!r}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'import { classifyWindow } from "./window-reopen"\n',
+              'import { classifyWindow } from "./window-reopen"\nimport { DesktopUpdater } from "./desktop-updater"\nimport { registerDesktopUpdaterIpc } from "./desktop-updater-ipc"\n',
+          )
+          replace_once(
+              'const preview = new PreviewServer()\nlet _logger: ReturnType<typeof initLogging>\n',
+              '''const preview = new PreviewServer()\nconst desktopUpdater = new DesktopUpdater({\n  hasActiveWork: () => backend.isRunning(),\n  emit: (state) => {\n    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop-update:changed", state)\n  },\n  log: (level, message) => writeLog(level, message),\n})\nlet _logger: ReturnType<typeof initLogging>\n''',
+          )
+          replace_once(
+              '  // Register all IPC handlers before window creation\n  registerIpcHandlers({\n',
+              '  // Register all IPC handlers before window creation\n  registerDesktopUpdaterIpc(desktopUpdater)\n  registerIpcHandlers({\n',
+          )
+          replace_once(
+              '  mainWindow = await createAndLoadMainWindow()\n  writeLog("info", "Main window renderer loaded")\n',
+              '''  mainWindow = await createAndLoadMainWindow()\n  writeLog("info", "Main window renderer loaded")\n  desktopUpdater.start()\n  mainWindow.on("focus", () => { void desktopUpdater.check({ manual: false }) })\n''',
+          )
+          replace_once(
+              '  scheduler.stop()\n  if (updateTimer) clearInterval(updateTimer)\n',
+              '  scheduler.stop()\n  desktopUpdater.stop()\n  if (updateTimer) clearInterval(updateTimer)\n',
+          )
+
+          path.write_text(text)
+      - name: Remove one-shot workflow and commit patch
+        shell: bash
+        run: |
+          rm .github/workflows/apply-desktop-updater-integration.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/desktop/src/main/index.ts .github/workflows/apply-desktop-updater-integration.yml
+          git commit -m "feat: wire desktop updater into app lifecycle"
+          git push origin HEAD:feat/desktop-github-updater
