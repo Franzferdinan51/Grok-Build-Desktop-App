@@ -3,11 +3,27 @@ import test from "node:test"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { permissionResponse, runGrokAcp, subagentEventFromMessage } from "./grok-acp.ts"
+import { acpRequestTimeout, permissionResponse, promptParamsForMode, runGrokAcp, subagentEventFromMessage } from "./grok-acp.ts"
 
 test("ACP permissions fail closed outside bypass mode", () => {
   assert.deepEqual(permissionResponse("default", [{ optionId: "allow", kind: "allow_once" }]), { outcome: { outcome: "cancelled" } })
   assert.deepEqual(permissionResponse("bypassPermissions", [{ optionId: "allow", kind: "allow_once" }]), { outcome: { outcome: "selected", optionId: "allow" } })
+})
+
+test("ACP prompt metadata carries Grok plan mode", () => {
+  assert.deepEqual(promptParamsForMode("session-1", "plan this", "plan"), {
+    sessionId: "session-1",
+    prompt: [{ type: "text", text: "plan this" }],
+    _meta: { mode: "plan" },
+  })
+  assert.equal(promptParamsForMode("session-1", "do it", "default")._meta.mode, "agent")
+})
+
+test("ACP keeps setup requests bounded but does not wall-clock timeout a coding prompt", () => {
+  assert.equal(acpRequestTimeout("initialize"), 20_000)
+  assert.equal(acpRequestTimeout("authenticate"), 20_000)
+  assert.equal(acpRequestTimeout("session/new"), 30_000)
+  assert.equal(acpRequestTimeout("session/prompt"), undefined)
 })
 
 test("ACP maps Grok subagent lifecycle notifications", () => {

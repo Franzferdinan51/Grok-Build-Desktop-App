@@ -18,7 +18,7 @@ export type GrokAcpCallbacks = {
 
 export type GrokAcpResult = { text: string; sessionId: string; stopReason: string | null }
 
-type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer?: ReturnType<typeof setTimeout> }
 
 const object = (value: unknown): Record<string, any> => value && typeof value === "object" ? value as Record<string, any> : {}
 const stringValue = (...values: unknown[]) => values.find((value): value is string => typeof value === "string" && Boolean(value.trim()))?.trim()
@@ -50,7 +50,24 @@ export function subagentEventFromMessage(message: Record<string, any>): GrokAcpS
   }
 }
 
-const TIMEOUTS = { initialize: 20_000, authenticate: 20_000, session: 30_000, prompt: 120_000 }
+const TIMEOUTS = { initialize: 20_000, authenticate: 20_000, session: 30_000 }
+
+/** Setup handshakes stay bounded; an active coding prompt runs until Grok finishes or the user cancels it. */
+export function acpRequestTimeout(method: string): number | undefined {
+  if (method === "initialize") return TIMEOUTS.initialize
+  if (method === "authenticate") return TIMEOUTS.authenticate
+  if (method === "session/new") return TIMEOUTS.session
+  return undefined
+}
+
+/** Grok reconciles Plan Mode from prompt-level `_meta.mode`, not permission mode alone. */
+export function promptParamsForMode(sessionId: string, prompt: string, mode: GrokAcpPermissionMode) {
+  return {
+    sessionId,
+    prompt: [{ type: "text", text: prompt }],
+    _meta: { mode: mode === "plan" ? "plan" : "agent" },
+  }
+}
 
 /** ACP permission responses are fail-closed unless the user selected bypass mode. */
 export function permissionResponse(mode: GrokAcpPermissionMode, options: Array<{ optionId?: string; kind?: string }>): GrokAcpPermissionResponse {
@@ -95,10 +112,11 @@ export function runGrokAcp(
     const pending = new Map<number, PendingRequest>()
 
     const terminate = () => { try { child.kill("SIGTERM") } catch { /* process already closed */ } }
+    const clearRequestTimer = (request: PendingRequest) => { if (request.timer) clearTimeout(request.timer) }
     const fail = (error: Error) => {
       if (settled) return
       settled = true
-      for (const request of pending.values()) { clearTimeout(request.timer); request.reject(error) }
+      for (const request of pending.values()) { clearRequestTimer(request); request.reject(error) }
       pending.clear()
       terminate()
       reject(error)
@@ -106,17 +124,21 @@ export function runGrokAcp(
     const finish = (stopReason: string | null) => {
       if (settled) return
       settled = true
-      for (const request of pending.values()) clearTimeout(request.timer)
+      for (const request of pending.values()) clearRequestTimer(request)
       pending.clear()
       terminate()
       resolve({ text: output, sessionId, stopReason })
     }
     const send = (message: unknown) => { if (!settled) child.stdin?.write(`${JSON.stringify(message)}\n`) }
-    const request = (method: string, params: unknown, timeout: number): Promise<unknown> => new Promise((resolveRequest, rejectRequest) => {
+    const request = (method: string, params: unknown): Promise<unknown> => new Promise((resolveRequest, rejectRequest) => {
       const id = nextId++
-      const timer = setTimeout(() => { pending.delete(id); rejectRequest(new Error(`${method} timed out`)) }, timeout)
-      timer.unref?.()
-      pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
+      const timeout = acpRequestTimeout(method)
+      const requestState: PendingRequest = { resolve: resolveRequest, reject: rejectRequest }
+      if (timeout !== undefined) {
+        requestState.timer = setTimeout(() => { pending.delete(id); rejectRequest(new Error(`${method} timed out`)) }, timeout)
+        requestState.timer.unref?.()
+      }
+      pending.set(id, requestState)
       send({ jsonrpc: "2.0", id, method, params })
     })
     const onAbort = () => fail(new Error("Grok ACP task aborted"))
@@ -134,7 +156,7 @@ export function runGrokAcp(
         if (message.id !== undefined && (message.result !== undefined || message.error !== undefined)) {
           const requestState = pending.get(Number(message.id))
           if (!requestState) continue
-          pending.delete(Number(message.id)); clearTimeout(requestState.timer)
+          pending.delete(Number(message.id)); clearRequestTimer(requestState)
           if (message.error) requestState.reject(new Error(String(message.error.message || JSON.stringify(message.error))))
           else requestState.resolve(message.result || {})
           continue
@@ -166,16 +188,16 @@ export function runGrokAcp(
 
     void (async () => {
       try {
-        const initialized = await request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } } }, TIMEOUTS.initialize) as Record<string, any>
+        const initialized = await request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } } }) as Record<string, any>
         const authMethods = Array.isArray(initialized.authMethods) ? initialized.authMethods : []
         if (!authMethods.some((method: any) => method?.id === "cached_token")) throw new Error("Grok is not signed in. Run `grok login` or use the default headless transport.")
-        await request("authenticate", { methodId: "cached_token" }, TIMEOUTS.authenticate)
-        const started = await request("session/new", { cwd: options.cwd, mcpServers: [] }, TIMEOUTS.session) as Record<string, any>
+        await request("authenticate", { methodId: "cached_token" })
+        const started = await request("session/new", { cwd: options.cwd, mcpServers: [] }) as Record<string, any>
         sessionId = typeof started.sessionId === "string" ? started.sessionId : ""
         if (!sessionId) throw new Error("Grok ACP did not return a session ID")
         callbacks.onSession?.(sessionId)
         promptSent = true
-        const completed = await request("session/prompt", { sessionId, prompt: [{ type: "text", text: prompt }] }, TIMEOUTS.prompt) as Record<string, any>
+        const completed = await request("session/prompt", promptParamsForMode(sessionId, prompt, mode)) as Record<string, any>
         finish(typeof completed.stopReason === "string" ? completed.stopReason : null)
       } catch (error) { fail(error instanceof Error ? error : new Error(String(error))) }
     })()
