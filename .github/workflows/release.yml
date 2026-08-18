@@ -19,11 +19,9 @@ jobs:
           - platform: macOS
             os: macos-latest
             script: package:mac
-            artifact: packages/desktop/dist/*
           - platform: Windows
             os: windows-latest
             script: package:win
-            artifact: packages/desktop/dist/*
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,12 +32,40 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches desktop version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node -e "const p=require('./packages/desktop/package.json'); const expected='v'+p.version; if(process.env.GITHUB_REF_NAME!==expected){ console.error('Release tag '+process.env.GITHUB_REF_NAME+' does not match desktop version '+expected); process.exit(1) }"
+
       - run: pnpm typecheck
-      # Hosted runners do not provide the locally installed Grok CLI or the
-      # same filesystem error semantics as the desktop development machine.
       - run: pnpm test:unit
       - run: pnpm --filter @grok-build/desktop build
-      - run: pnpm --filter @grok-build/desktop ${{ matrix.script }}
+
+      # macOS auto-update refuses unsigned applications. A tagged release must
+      # therefore fail rather than quietly publishing a build that cannot update.
+      - name: Require macOS release signing credentials
+        if: matrix.platform == 'macOS' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -z "$CSC_LINK" ] || [ -z "$CSC_KEY_PASSWORD" ]; then
+            echo "Missing MAC_CSC_LINK or MAC_CSC_KEY_PASSWORD; refusing to publish a non-updatable macOS release."
+            exit 1
+          fi
+
+      # Build the installer and its update metadata together, but do not let the
+      # matrix jobs race each other while creating/updating a GitHub Release.
+      - name: Package desktop update assets
+        run: pnpm --filter @grok-build/desktop ${{ matrix.script }} -- --publish never
+        env:
+          GROK_DESKTOP_REQUIRE_SIGNING: ${{ matrix.platform == 'macOS' && startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+          CSC_LINK: ${{ matrix.platform == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          WIN_CSC_LINK: ${{ matrix.platform == 'Windows' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: grok-build-desktop-${{ matrix.platform }}
@@ -57,6 +83,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      # Publish only after both platform jobs succeeded, so the public release
+      # always contains the installers and the exact metadata generated with them.
       - uses: actions/download-artifact@v4
         with:
           path: release-assets

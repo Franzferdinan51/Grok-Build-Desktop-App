@@ -30,6 +30,8 @@ import { installBundledSkills } from "./bundled-skills"
 import { DEFAULT_QUICK_ENTRY_ACCELERATOR, validateQuickEntryAccelerator } from "./quick-entry"
 import { quitPromptFor } from "./quit-guard"
 import { classifyWindow } from "./window-reopen"
+import { DesktopUpdater } from "./desktop-updater"
+import { registerDesktopUpdaterIpc } from "./desktop-updater-ipc"
 
 let mainWindow: BrowserWindow | null = null
 let quickEntryWindow: BrowserWindow | null = null
@@ -38,6 +40,13 @@ const telegram = new TelegramBridge()
 const localStudio = new LocalStudioController()
 const scheduler = new GrokTaskScheduler(backend)
 const preview = new PreviewServer()
+const desktopUpdater = new DesktopUpdater({
+  hasActiveWork: () => backend.isRunning(),
+  emit: (state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("desktop-update:changed", state)
+  },
+  log: (level, message) => writeLog(level, message),
+})
 let _logger: ReturnType<typeof initLogging>
 let updateTimer: ReturnType<typeof setInterval> | undefined
 let telegramTaskCancelled = false
@@ -209,6 +218,7 @@ app.whenReady().then(async () => {
   setInterval(() => telegram.ensurePolling(), 15_000).unref()
 
   // Register all IPC handlers before window creation
+  registerDesktopUpdaterIpc(desktopUpdater)
   registerIpcHandlers({
     backend: () => backend,
     telegram: () => telegram,
@@ -222,6 +232,8 @@ app.whenReady().then(async () => {
 
   mainWindow = await createAndLoadMainWindow()
   writeLog("info", "Main window renderer loaded")
+  desktopUpdater.start()
+  mainWindow.on("focus", () => { void desktopUpdater.check({ manual: false }) })
 
   // Set up app menu
   const menu = createMenu(mainWindow)
@@ -333,6 +345,7 @@ app.on("before-quit", async (event) => {
   writeLog("info", "App quitting — stopping Grok Build task")
   await backend.shutdown()
   scheduler.stop()
+  desktopUpdater.stop()
   if (updateTimer) clearInterval(updateTimer)
   globalShortcut.unregisterAll()
   quickEntryWindow?.destroy(); quickEntryWindow = null

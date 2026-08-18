@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "ele
 export type BackendStatus = { available: boolean; command: string; version?: string; error?: string }
 export type GrokBuildModelCatalog = { defaultModel?: string; models: string[] }
 export type GrokBuildUpdateStatus = { currentVersion: string; latestVersion: string; updateAvailable: boolean; channel: "stable" | "alpha"; error?: string | null }
+export type DesktopUpdatePhase = "idle" | "checking" | "available" | "downloading" | "ready" | "up-to-date" | "unsupported" | "error"
+export type DesktopUpdateState = { phase: DesktopUpdatePhase; currentVersion: string; availableVersion?: string; releaseName?: string; releaseNotes?: string; percent?: number; transferred?: number; total?: number; bytesPerSecond?: number; checkedAt?: number; error?: string }
 export type GrokSubcommand = { name: string; description: string }
 export type OAuthProviderStatus = {
   id: "xai" | "openai" | "minimax"
@@ -126,7 +128,18 @@ export type ElectronAPI = {
   browserAgent: { status: () => Promise<BrowserAgentStatus>; nav: (url: string) => Promise<{ ok: boolean; url: string; title: string }>; snapshot: () => Promise<BrowserAgentSnapshot>; click: (selector: string) => Promise<{ ok: boolean; error?: string }>; type: (selector: string, text: string) => Promise<{ ok: boolean; error?: string }>; screenshot: () => Promise<{ ok: boolean; path: string; error?: string }>; saveScreenshot: (dataUrl: string) => Promise<string>; stop: () => Promise<void> }
   store: { get: <T = unknown>(key: string) => Promise<T>; set: <T = unknown>(key: string, value: T) => Promise<void>; delete: (key: string) => Promise<void> }
   window: { minimize: () => void; maximize: () => void; close: () => void }
-  app: { openExternal: (url: string) => Promise<void>; getVersion: () => Promise<string>; backendRepository: () => Promise<string>; restart: () => Promise<{ ok: boolean }>; notify: (input: { kind: "success" | "error"; title: string; body: string }) => Promise<{ shown: boolean }> }
+  app: {
+    openExternal: (url: string) => Promise<void>
+    getVersion: () => Promise<string>
+    backendRepository: () => Promise<string>
+    restart: () => Promise<{ ok: boolean }>
+    notify: (input: { kind: "success" | "error"; title: string; body: string }) => Promise<{ shown: boolean }>
+    desktopUpdateState: () => Promise<DesktopUpdateState>
+    checkDesktopUpdate: () => Promise<DesktopUpdateState>
+    downloadDesktopUpdate: () => Promise<DesktopUpdateState>
+    installDesktopUpdate: () => Promise<{ ok: true }>
+    onDesktopUpdateState: (handler: (state: DesktopUpdateState) => void) => () => void
+  }
   quickEntry: { submit: (text: string, target: "current" | "new") => Promise<{ ok: boolean }>; close: () => Promise<void> }
   dialog: { openFile: (options?: { filters?: { name: string; extensions: string[] }[] }) => Promise<{ canceled: boolean; filePaths: string[] }>; openDirectory: () => Promise<{ canceled: boolean; filePaths: string[] }> }
   onMenuCommand: (handler: (command: string) => void) => () => void
@@ -200,7 +213,22 @@ const api: ElectronAPI = {
   browserAgent: { status: () => ipcRenderer.invoke("browser:status"), nav: (url) => ipcRenderer.invoke("browser:nav", url), snapshot: () => ipcRenderer.invoke("browser:snapshot"), click: (selector) => ipcRenderer.invoke("browser:click", selector), type: (selector, text) => ipcRenderer.invoke("browser:type", selector, text), screenshot: () => ipcRenderer.invoke("browser:screenshot"), saveScreenshot: (dataUrl) => ipcRenderer.invoke("browser:save-screenshot", dataUrl), stop: () => ipcRenderer.invoke("browser:stop") },
   store: { get: <T = unknown>(key: string) => ipcRenderer.invoke("store:get", key) as Promise<T>, set: <T = unknown>(key: string, value: T) => ipcRenderer.invoke("store:set", key, value), delete: (key) => ipcRenderer.invoke("store:delete", key) },
   window: { minimize: () => ipcRenderer.invoke("window:minimize"), maximize: () => ipcRenderer.invoke("window:maximize"), close: () => ipcRenderer.invoke("window:close") },
-  app: { openExternal: (url) => ipcRenderer.invoke("app:open-external", url), getVersion: () => ipcRenderer.invoke("app:get-version"), backendRepository: () => ipcRenderer.invoke("app:backend-repository"), restart: () => ipcRenderer.invoke("app:restart"), notify: (input) => ipcRenderer.invoke("app:notify", input) },
+  app: {
+    openExternal: (url) => ipcRenderer.invoke("app:open-external", url),
+    getVersion: () => ipcRenderer.invoke("app:get-version"),
+    backendRepository: () => ipcRenderer.invoke("app:backend-repository"),
+    restart: () => ipcRenderer.invoke("app:restart"),
+    notify: (input) => ipcRenderer.invoke("app:notify", input),
+    desktopUpdateState: () => ipcRenderer.invoke("desktop-update:state"),
+    checkDesktopUpdate: () => ipcRenderer.invoke("desktop-update:check"),
+    downloadDesktopUpdate: () => ipcRenderer.invoke("desktop-update:download"),
+    installDesktopUpdate: () => ipcRenderer.invoke("desktop-update:install"),
+    onDesktopUpdateState: (handler) => {
+      const listener = (_event: IpcRendererEvent, state: DesktopUpdateState) => handler(state)
+      ipcRenderer.on("desktop-update:changed", listener)
+      return () => ipcRenderer.removeListener("desktop-update:changed", listener)
+    },
+  },
   quickEntry: { submit: (text, target) => ipcRenderer.invoke("quick-entry:submit", text, target), close: () => ipcRenderer.invoke("quick-entry:close") },
   dialog: { openFile: (options) => ipcRenderer.invoke("dialog:open-file", options), openDirectory: () => ipcRenderer.invoke("dialog:open-directory") },
   onMenuCommand: (handler) => { const listener = (_event: IpcRendererEvent, command: string) => handler(command); ipcRenderer.on("menu:command", listener); return () => ipcRenderer.removeListener("menu:command", listener) },
