@@ -82,9 +82,9 @@ export class BrowserManager {
     const links = await page.evaluate(() =>
       Array.from(document.querySelectorAll("a[href]"))
         .map((a) => ({ text: a.textContent?.trim().slice(0, 80) ?? "", href: (a as HTMLAnchorElement).href }))
-        .filter((l) => l.href && !l.href.startsWith("javascript:"))
+        .filter((l: { href: string }) => l.href && !l.href.startsWith("javascript:"))
         .slice(0, 50)
-    )
+    ) as Array<{ text: string; href: string }>
 
     const controls = await page.evaluate(() =>
       Array.from(document.querySelectorAll("button, input, select, textarea, a[href], [onclick], [role=button]"))
@@ -99,7 +99,7 @@ export class BrowserManager {
           else label = `${tag}${type ? `(${type})` : ""}`
           return { index, tag, type, label, disabled: (el as HTMLButtonElement).disabled }
         })
-    )
+    ) as Array<{ index: number; tag: string; type: string | null; label: string; disabled: boolean }>
 
     const screenshotPath = `/tmp/browser-screenshot-${Date.now()}.png`
     await page.screenshot({ path: screenshotPath, fullPage: false })
